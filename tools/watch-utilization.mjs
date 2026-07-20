@@ -30,10 +30,10 @@ const seen = new Map(); // path -> last size, to debounce partial copies
 
 function handle(path) {
   if (!isReport(path)) return;
-  queue = queue.then(() => process(path)).catch((e) => log("ERROR:", e.message));
+  queue = queue.then(() => processFile(path)).catch((e) => log("ERROR:", e.message));
 }
 
-async function process(path) {
+async function processFile(path) {
   log(`Detected ${basename(path)} — aggregating…`);
   let res;
   try {
