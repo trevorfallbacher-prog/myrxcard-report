@@ -875,7 +875,15 @@ async function sync() {
 /* ---------------- boot ---------------- */
 async function unlock(password) {
   const blob = window.__ENC_CONFIG;
-  cfg = await decryptConfig(blob, password); // throws on wrong password
+  // forgive the common phone-keyboard mangles: stray whitespace and
+  // autocapitalization. Tries as-typed first, throws only if all fail.
+  const tries = [...new Set([password, password.trim(), password.trim().toLowerCase()])];
+  let lastErr;
+  for (const pw of tries) {
+    try { cfg = await decryptConfig(blob, pw); lastErr = null; break; }
+    catch (e) { lastErr = e; }
+  }
+  if (lastErr) throw lastErr;
   sessionStorage.setItem("mrx-cfg", JSON.stringify(cfg));
   enterApp("live");
   await sync();
