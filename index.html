@@ -353,8 +353,9 @@
   .geo-list .bar-row.on .name { color: var(--secondary); font-weight: 700; }
   .geo-list .bar-row.on .track i { background: var(--accent); }
   .geo-map { flex: 1; min-width: 320px; }
-  .geo-map svg { width: 100%; height: auto; display: block; }
-  .geo-map .st { fill: #E7EEF5; stroke: #fff; stroke-width: 1; }
+  .geo-map svg { width: 100%; height: auto; display: block; border-radius: 10px; }
+  .geo-map .ocean { fill: #DDEBF5; }
+  .geo-map .st { fill: #C6D8E6; stroke: #FDFEFF; stroke-width: 1.1; }
   .geo-map .pin { fill: var(--primary); fill-opacity: 0.78; stroke: #fff; stroke-width: 1; cursor: pointer; transition: fill 120ms ease-out; }
   .geo-map .pin:hover { fill: var(--secondary); fill-opacity: 0.95; }
   .geo-map .pin.sel { fill: var(--accent); fill-opacity: 0.95; }
@@ -1487,7 +1488,8 @@ function renderUtilGeo(p, agg) {
       : `${c.members.length} locations · ${money0(c.v)} · incl. ${topName}`;
     return `<circle class="pin${isSel ? " sel" : ""}" data-pis="${c.members.join(",")}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}"><title>${esc(title)}</title></circle>`;
   }).join("");
-  $("util-map").innerHTML = `<svg viewBox="0 0 959 593" role="img" aria-label="Pharmacy locations">${base}${pins}</svg>`;
+  $("util-map").innerHTML = `<svg viewBox="0 0 959 593" role="img" aria-label="Pharmacy locations">` +
+    `<rect class="ocean" x="0" y="0" width="959" height="593"/>${base}${pins}</svg>`;
 }
 
 function hbars(el, entries, fmtVal, revStyle) {
