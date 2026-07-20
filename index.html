@@ -84,15 +84,33 @@
   .brand .kicker { color: var(--tertiary); margin-bottom: 4px; }
   .brand h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.015em; }
   .controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-  .range { display: flex; border: 1px solid var(--hair); border-radius: 8px; overflow: hidden; }
-  .range button {
-    background: transparent; border: none; color: var(--ink-soft);
-    font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.08em;
-    padding: 7px 14px; cursor: pointer; transition: background 150ms ease-out, color 150ms ease-out;
+  .periodsel {
+    background: var(--card); border: 1px solid var(--hair); border-radius: 8px;
+    color: var(--ink); font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em;
+    padding: 7px 28px 7px 10px; cursor: pointer; outline: none; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%237A8FA0' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center;
   }
-  .range button + button { border-left: 1px solid var(--hair); }
-  .range button:hover { color: var(--ink); }
-  .range button.on { background: var(--secondary); color: #fff; }
+  .periodsel:focus, .periodsel:hover { border-color: var(--hair-bright); }
+  .daterange { display: inline-flex; align-items: center; gap: 6px; }
+  .daterange[hidden] { display: none; }
+  .daterange input[type="date"] {
+    background: var(--card); border: 1px solid var(--hair); border-radius: 8px;
+    padding: 5px 8px; font-family: var(--mono); font-size: 12px; color: var(--ink); outline: none;
+  }
+  .daterange input[type="date"]:focus { border-color: var(--secondary); }
+  .slicer { position: relative; }
+  .pop {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
+    background: var(--card); border: 1px solid var(--hair); border-radius: 10px;
+    box-shadow: 0 8px 28px rgba(10,76,112,0.16); padding: 8px 10px; min-width: 230px;
+  }
+  .pop[hidden] { display: none; }
+  .pop label { display: flex; align-items: center; gap: 9px; padding: 6px 4px; font-size: 13px; color: var(--ink-soft); cursor: pointer; border-radius: 6px; }
+  .pop label:hover { background: var(--card-solid); color: var(--ink); }
+  .pop label .cnt { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--ink-mute); }
+  .pop input[type="checkbox"] { accent-color: var(--secondary); width: 15px; height: 15px; }
+  .pop .allrow { border-bottom: 1px solid var(--hair); margin-bottom: 4px; padding-bottom: 8px; }
   .sync { display: flex; align-items: center; gap: 10px; }
   .sync .stamp { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); letter-spacing: 0.04em; }
   .sync .dot { width: 7px; height: 7px; border-radius: 50%; background: #2F9C5C; box-shadow: 0 0 6px rgba(47,156,92,0.45); }
@@ -324,7 +342,25 @@
     <div class="controls">
       <span class="badge-sample" id="sample-badge" hidden>SAMPLE DATA</span>
       <span id="filter-chips" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span>
-      <div class="range" id="range"></div>
+      <div class="slicer" id="group-slicer">
+        <button class="iconbtn" id="group-btn" type="button">GROUPS &#9662;</button>
+        <div class="pop" id="group-pop" hidden></div>
+      </div>
+      <select class="periodsel" id="period-select" aria-label="Date range">
+        <option value="MTD">Month to date</option>
+        <option value="QTD" selected>Quarter to date</option>
+        <option value="YTD">Year to date</option>
+        <option value="LM">Last month</option>
+        <option value="LQ">Last quarter</option>
+        <option value="LY">Last year</option>
+        <option value="ALL">All time</option>
+        <option value="CUSTOM">Custom range&#8230;</option>
+      </select>
+      <span class="daterange" id="custom-range" hidden>
+        <input type="date" id="date-from" aria-label="From date">
+        <span style="color:var(--ink-mute)">&#8211;</span>
+        <input type="date" id="date-to" aria-label="To date">
+      </span>
       <div class="sync">
         <span class="dot" id="sync-dot"></span>
         <span class="stamp" id="sync-stamp">—</span>
@@ -506,13 +542,42 @@ function normalize(raw) {
 // drug list still shows all drugs for pivoting).
 const DIMS = ["state", "drug", "group", "device"];
 
-function aggregate(all, rangeDays, filters) {
-  const anchor = all.length ? Math.max(...all.map((e) => e.t)) : Date.now();
-  const cutoff = rangeDays ? anchor - rangeDays * DAY : null;
-  const evRange = cutoff ? all.filter((e) => e.t >= cutoff) : all.slice();
-  evRange.sort((a, b) => a.t - b.t);
+// calendar-anchored period bounds (Power-BI-style slicer presets)
+function periodBounds(p) {
+  const now = new Date();
+  const som = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const qm = Math.floor(now.getMonth() / 3) * 3;
+  const soq = new Date(now.getFullYear(), qm, 1).getTime();
+  const soy = new Date(now.getFullYear(), 0, 1).getTime();
+  switch (p.type) {
+    case "MTD": return [som, Infinity];
+    case "QTD": return [soq, Infinity];
+    case "YTD": return [soy, Infinity];
+    case "LM": return [new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime(), som];
+    case "LQ": return [new Date(now.getFullYear(), qm - 3, 1).getTime(), soq];
+    case "LY": return [new Date(now.getFullYear() - 1, 0, 1).getTime(), soy];
+    case "CUSTOM": {
+      const from = p.from ? new Date(p.from + "T00:00:00").getTime() : -Infinity;
+      const to = p.to ? new Date(p.to + "T00:00:00").getTime() + DAY : Infinity; // inclusive end day
+      return [from, to];
+    }
+    default: return [-Infinity, Infinity]; // ALL
+  }
+}
 
-  const match = (e, except) => DIMS.every((d) => d === except || !filters[d] || e[d] === filters[d]);
+// group filter is multi-select (array of names); the rest are single-value
+const dimMatch = (filters, e, d) =>
+  d === "group"
+    ? (!filters.group || !filters.group.length || filters.group.includes(e.group))
+    : (!filters[d] || e[d] === filters[d]);
+
+function aggregate(all, period, filters) {
+  const [fromTs, toTs] = periodBounds(period);
+  const evRange = all.filter((e) => e.t >= fromTs && e.t < toTs);
+  evRange.sort((a, b) => a.t - b.t);
+  const anchor = evRange.length ? evRange[evRange.length - 1].t : Date.now();
+
+  const match = (e, except) => DIMS.every((d) => d === except || dimMatch(filters, e, d));
   const ev = evRange.filter((e) => match(e, null));
   const evForState = evRange.filter((e) => match(e, "state"));
   const evForDrug = evRange.filter((e) => match(e, "drug"));
@@ -596,9 +661,10 @@ function aggregate(all, rangeDays, filters) {
 }
 
 /* ---------------- rendering ---------------- */
-const RANGES = [["7D", 7], ["30D", 30], ["90D", 90], ["ALL", null]];
-let state = { events: [], range: 30, mode: "live", lastSync: null,
-  filters: { state: null, drug: null, group: null, device: null } };
+const PERIOD_LABELS = { MTD: "Month to date", QTD: "Quarter to date", YTD: "Year to date",
+  LM: "Last month", LQ: "Last quarter", LY: "Last year", ALL: "All time", CUSTOM: "Custom range" };
+let state = { events: [], period: { type: "QTD", from: null, to: null }, mode: "live", lastSync: null,
+  filters: { state: null, drug: null, group: null, device: null } }; // group: null | array of names
 
 function renderStats(a) {
   const items = [
@@ -757,7 +823,7 @@ function renderGroups(a) {
   $("groups").innerHTML = entries.map(([name, g], i) => {
     const pct = (g.count / total) * 100;
     const real = name !== "__other__";
-    const on = real && state.filters.group === name;
+    const on = real && (state.filters.group || []).includes(name);
     return `<div class="funnel-row${on ? " on" : ""}"${real ? ` data-dim="group" data-val="${esc(name)}"` : ""}>
       <div class="lbl"><span class="name">${esc(g.label || name)}</span>
         <span><span class="val num">${fmt(g.count)}</span><span class="pct num">${pct.toFixed(1)}% · ${fmt(g.printed)} printed</span></span></div>
@@ -816,11 +882,14 @@ const FILTER_LABELS = { state: (v) => STATE_NAMES[v] || v, drug: (v) => v, group
 
 function renderAll() {
   const f = state.filters;
-  const a = aggregate(state.events, state.range, f);
-  const active = DIMS.filter((d) => f[d]);
-  $("filter-chips").innerHTML = active.map((d) =>
-    `<button class="badge-filter" type="button" data-dim="${d}" data-val="${esc(f[d])}">${esc(FILTER_LABELS[d](f[d])).toUpperCase()} <span class="x">&#215;</span></button>`).join("") +
-    (active.length ? `<button class="badge-filter reset" type="button" id="reset-filters">RESET FILTERS</button>` : "");
+  const a = aggregate(state.events, state.period, f);
+  const chips = [];
+  for (const d of ["state", "drug", "device"]) if (f[d]) chips.push([d, f[d]]);
+  for (const g of (f.group || [])) chips.push(["group", g]);
+  $("filter-chips").innerHTML = chips.map(([d, v]) =>
+    `<button class="badge-filter" type="button" data-dim="${d}" data-val="${esc(v)}">${esc(FILTER_LABELS[d](v)).toUpperCase()} <span class="x">&#215;</span></button>`).join("") +
+    (chips.length ? `<button class="badge-filter reset" type="button" id="reset-filters">RESET FILTERS</button>` : "");
+  renderGroupSlicer(a);
   renderStats(a);
   renderTrend(a);
   renderFunnel(a);
@@ -837,13 +906,28 @@ function renderAll() {
   $("print-meta").textContent =
     `LIVE SEARCH REPORT · GENERATED ${gen.toUpperCase()}` +
     (a.total ? ` · WINDOW ${fd(a.first).toUpperCase()} – ${fd(a.anchor).toUpperCase()}` : "") +
-    DIMS.filter((d) => f[d]).map((d) => ` · ${d.toUpperCase()}: ${FILTER_LABELS[d](f[d]).toUpperCase()}`).join("") +
+    ` · PERIOD: ${PERIOD_LABELS[state.period.type].toUpperCase()}` +
+    ["state", "drug", "device"].filter((d) => f[d]).map((d) => ` · ${d.toUpperCase()}: ${FILTER_LABELS[d](f[d]).toUpperCase()}`).join("") +
+    ((f.group || []).length ? ` · GROUPS: ${f.group.map((g) => g.toUpperCase()).join(", ")}` : "") +
     (state.mode === "sample" ? " · SAMPLE DATA" : "");
 }
 
-function renderRangeButtons() {
-  $("range").innerHTML = RANGES.map(([lbl, days]) =>
-    `<button type="button" data-days="${days ?? ""}" class="${days === state.range ? "on" : ""}">${lbl}</button>`).join("");
+function toggleGroup(name) {
+  const cur = state.filters.group || [];
+  const next = cur.includes(name) ? cur.filter((g) => g !== name) : cur.concat([name]);
+  state.filters.group = next.length ? next : null;
+  renderAll();
+}
+
+function renderGroupSlicer(a) {
+  const sel = state.filters.group || [];
+  $("group-btn").innerHTML = `GROUPS${sel.length ? ` (${sel.length})` : ""} &#9662;`;
+  const rows = a.groups.map(([name, g]) =>
+    `<label><input type="checkbox" data-group="${esc(name)}"${sel.includes(name) ? " checked" : ""}>
+     <span>${esc(name)}</span><span class="cnt num">${fmt(g.count)}</span></label>`).join("");
+  $("group-pop").innerHTML =
+    `<label class="allrow"><input type="checkbox" data-group=""${sel.length ? "" : " checked"}>
+     <span>All groups</span></label>` + rows;
 }
 
 function stamp(ok, msg) {
@@ -900,16 +984,40 @@ function enterApp(mode) {
     $("foot-src").textContent = "Source: bundled sample export (not live)";
     stamp(true, "STATIC SAMPLE");
   }
-  renderRangeButtons();
 }
 
 async function boot() {
-  $("range").addEventListener("click", (e) => {
-    const btn = e.target.closest("button");
-    if (!btn) return;
-    state.range = btn.dataset.days === "" ? null : Number(btn.dataset.days);
-    renderRangeButtons();
+  $("period-select").addEventListener("change", () => {
+    state.period.type = $("period-select").value;
+    const custom = state.period.type === "CUSTOM";
+    $("custom-range").hidden = !custom;
+    if (custom && !state.period.from && state.events.length) {
+      // prefill with the data's own span so Custom starts meaningful
+      const iso = (t) => new Date(t).toLocaleDateString("sv-SE");
+      state.period.from = iso(Math.min(...state.events.map((e) => e.t)));
+      state.period.to = iso(Math.max(...state.events.map((e) => e.t)));
+      $("date-from").value = state.period.from;
+      $("date-to").value = state.period.to;
+    }
     renderAll();
+  });
+  for (const id of ["date-from", "date-to"]) $(id).addEventListener("change", () => {
+    state.period.from = $("date-from").value || null;
+    state.period.to = $("date-to").value || null;
+    renderAll();
+  });
+  $("group-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    $("group-pop").hidden = !$("group-pop").hidden;
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#group-slicer")) $("group-pop").hidden = true;
+  });
+  $("group-pop").addEventListener("change", (e) => {
+    const cb = e.target.closest("input[data-group]");
+    if (!cb) return;
+    if (cb.dataset.group === "") { state.filters.group = null; renderAll(); }
+    else toggleGroup(cb.dataset.group);
   });
   $("refresh-btn").addEventListener("click", () => state.mode === "live" ? sync() : renderAll());
   $("pdf-btn").addEventListener("click", () => window.print());
@@ -926,12 +1034,15 @@ async function boot() {
     const t = e.target.closest("[data-dim]");
     if (!t) return;
     const dim = t.dataset.dim, val = t.dataset.val || null;
+    if (dim === "group") { if (val) toggleGroup(val); return; }
     state.filters[dim] = val === state.filters[dim] ? null : val;
     if (dim === "state") history.replaceState(null, "", state.filters.state ? "#" + state.filters.state : location.pathname);
     renderAll();
   });
   const hashState = (location.hash || "").replace("#", "").toUpperCase();
   if (STATE_NAMES[hashState]) state.filters.state = hashState;
+  const qp = (new URLSearchParams(location.search).get("period") || "").toUpperCase();
+  if (PERIOD_LABELS[qp]) { state.period.type = qp; $("period-select").value = qp; $("custom-range").hidden = qp !== "CUSTOM"; }
   $("lock-btn").addEventListener("click", () => { sessionStorage.removeItem("mrx-cfg"); location.reload(); });
 
   // 1) live mode if config.enc.json is deployed
