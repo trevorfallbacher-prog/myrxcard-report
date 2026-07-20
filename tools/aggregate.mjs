@@ -13,6 +13,18 @@
 
 import XLSX from "xlsx";
 import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+// ZIP -> [lat, lon] centroids (GeoNames postal data, CC-BY 4.0) for the map view
+let ZIPS = null;
+function zipLatLon(zip) {
+  if (!ZIPS) {
+    try { ZIPS = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), "data", "us-zips.json"), "utf8")); }
+    catch { ZIPS = {}; }
+  }
+  return ZIPS[String(zip).replace(/[^0-9]/g, "").slice(0, 5)] || null;
+}
 
 const norm = (s) => String(s ?? "").trim();
 const num = (v) => {
@@ -72,6 +84,7 @@ export function aggregateRows(rows, sourceLabel = "") {
   // facts store indexes, keeping the JSON small (~9k rows per quarter).
   const dims = { months: [], groups: [], states: [], pharmacies: [], brands: [], classes: [], drugs: [] };
   const dimIdx = { months: new Map(), groups: new Map(), states: new Map(), pharmacies: new Map(), brands: new Map(), classes: new Map(), drugs: new Map() };
+  const pharmMeta = []; // parallel to dims.pharmacies: {city, st, npi4, ll:[lat,lon]|null}
   // key defaults to the label; pharmacies pass name+NPI as key so distinct
   // locations sharing a name stay separate bars (matching the Power BI axis)
   const intern = (dim, label, key = label) => {
@@ -107,6 +120,15 @@ export function aggregateRows(rows, sourceLabel = "") {
     const gi = intern("groups", titleize(norm(r.GroupName)) || "—");
     const si = intern("states", norm(r.PharmacyState).toUpperCase() || "—");
     const pi = intern("pharmacies", titleize(pharm), pharmKey);
+    if (pi === pharmMeta.length) {
+      const npi = norm(r.NPI);
+      pharmMeta.push({
+        city: titleize(norm(r.PharmacyCity)),
+        st: norm(r.PharmacyState).toUpperCase(),
+        npi4: npi.slice(-4),
+        ll: zipLatLon(r.PharmacyZip),
+      });
+    }
     const bi = intern("brands", norm(r.BrandCode).toUpperCase() || "—");
     const ci = intern("classes", titleize(norm(r.TherapeuticClass).replace(/\*/g, "").trim()) || "—");
     const di = intern("drugs", norm(r.DrugName) || "—");
@@ -166,6 +188,7 @@ export function aggregateRows(rows, sourceLabel = "") {
     },
     pharmacies,
     dims,
+    pharmMeta,
     // [monthIdx, groupIdx, stateIdx, pharmacyIdx, brandIdx, classIdx, drugIdx,
     //  paidAtUC flag, paid$, reversed$ (negative), paidClaims, reversedClaims]
     facts: [...factMap.values()].map((f) => [f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], r2(f[8]), r2(f[9]), f[10], f[11]]),

@@ -338,6 +338,27 @@
   .uc-tile .k { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 8px; color: #BFD6E4; }
   .uc-table { flex: 1; min-width: 260px; max-height: 340px; overflow-y: auto; }
   @media (max-width: 700px) { .bars-wide .bar-row { grid-template-columns: 130px 1fr 64px; } }
+  /* utilization slicers: scrollable pops with sticky search */
+  #util-slicers .pop { max-height: 350px; overflow-y: auto; min-width: 260px; }
+  .popsearch {
+    position: sticky; top: 0; z-index: 1; width: 100%; box-sizing: border-box;
+    background: var(--card); border: 1px solid var(--hair); border-radius: 7px;
+    padding: 6px 9px; margin-bottom: 6px; font: inherit; font-size: 13px; color: var(--ink); outline: none;
+  }
+  .popsearch:focus { border-color: var(--secondary); }
+  /* pharmacy locations: list + map */
+  .geo-wrap { display: flex; gap: 22px; align-items: stretch; }
+  .geo-list { flex: 0 0 400px; max-height: 430px; overflow-y: auto; padding-right: 6px; }
+  .geo-list .bar-row { cursor: pointer; }
+  .geo-list .bar-row.on .name { color: var(--secondary); font-weight: 700; }
+  .geo-list .bar-row.on .track i { background: var(--accent); }
+  .geo-map { flex: 1; min-width: 320px; }
+  .geo-map svg { width: 100%; height: auto; display: block; }
+  .geo-map .st { fill: #E7EEF5; stroke: #fff; stroke-width: 1; }
+  .geo-map .pin { fill: var(--primary); fill-opacity: 0.78; stroke: #fff; stroke-width: 1; cursor: pointer; transition: fill 120ms ease-out; }
+  .geo-map .pin:hover { fill: var(--secondary); fill-opacity: 0.95; }
+  .geo-map .pin.sel { fill: var(--accent); fill-opacity: 0.95; }
+  @media (max-width: 900px) { .geo-wrap { flex-direction: column; } .geo-list { flex-basis: auto; max-height: 300px; } }
   .util-period select {
     font-family: var(--mono); font-size: 12px; color: var(--ink-soft); background: var(--card-solid);
     border: 1px solid var(--hair); border-radius: 8px; padding: 7px 10px; cursor: pointer; outline: none;
@@ -521,6 +542,10 @@
           <button class="iconbtn" type="button">CLIENTS &#9662;</button>
           <div class="pop" hidden></div>
         </div>
+        <div class="slicer" data-uslicer="pharmacies">
+          <button class="iconbtn" type="button">PHARMACIES &#9662;</button>
+          <div class="pop" hidden></div>
+        </div>
         <div class="slicer" data-uslicer="months">
           <button class="iconbtn" type="button">MONTHS &#9662;</button>
           <div class="pop" hidden></div>
@@ -567,6 +592,14 @@
       <div class="panel span12">
         <div class="kicker">Collected $ by pharmacy <span class="hint">· tap a bar to filter</span></div>
         <div id="pharm-chart"></div>
+      </div>
+
+      <div class="panel span12" id="util-geo-panel">
+        <div class="kicker">Pharmacy locations <span class="hint">· tap a pin or row to filter</span></div>
+        <div class="geo-wrap">
+          <div class="bars bars-wide geo-list" id="util-locations"></div>
+          <div class="geo-map" id="util-map"></div>
+        </div>
       </div>
 
       <div class="panel span6">
@@ -1210,7 +1243,7 @@ function legendHTML(items) {
     `<span><b>${it.label}</b> ${it.val} <span class="p">${it.pct}</span></span></div>`).join("");
 }
 
-function pharmChartSVG(data, selIdx) {
+function pharmChartSVG(data, selSet) {
   if (!data.length) return `<div style="color:var(--ink-mute);padding:16px 0">Nothing collected under the current filters.</div>`;
   const bw = 24, gap = 9, padL = 46, padR = 12, padTop = 22, padBot = 104, h = 300;
   const n = data.length;
@@ -1227,7 +1260,7 @@ function pharmChartSVG(data, selIdx) {
   data.forEach((p, i) => {
     const bh = Math.max(2, chartH * (p.collected / max));
     const x = padL + i * (bw + gap), y = baseY - bh;
-    s += `<rect class="bar${p.pi === selIdx ? " sel" : ""}" data-pi="${p.pi}" x="${x}" y="${y.toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="1.5">` +
+    s += `<rect class="bar${selSet && selSet.has(p.pi) ? " sel" : ""}" data-pi="${p.pi}" x="${x}" y="${y.toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="1.5">` +
          `<title>${esc(p.name)} · ${money0(p.collected)}</title></rect>`;
     if (p.collected / max > 0.045)
       s += `<text class="val" x="${x + bw / 2}" y="${(y - 5).toFixed(1)}" text-anchor="middle" font-size="9.5">${shortMoney(p.collected)}</text>`;
@@ -1239,8 +1272,76 @@ function pharmChartSVG(data, selIdx) {
 
 /* --- slicer filtering over the fact cube --- */
 // fact: [mi, gi, si, pi, bi, ci, di, uc, paid$, rev$ (neg), paidN, revN]
-const USLICER_DIMS = { groups: 1, months: 0, states: 2, brands: 4 };
-const USLICER_LABELS = { groups: "Clients", months: "Months", states: "States", brands: "Brand" };
+const USLICER_DIMS = { groups: 1, pharmacies: 3, months: 0, states: 2, brands: 4 };
+const USLICER_LABELS = { groups: "Clients", pharmacies: "Pharmacies", months: "Months", states: "States", brands: "Brand" };
+
+/* --- map: project lat/lon onto the bundled 959x593 US map --- */
+// Albers equal-area conic (lower 48: parallels 29.5/45.5, central meridian -96),
+// then an affine fit maps projection space onto the SVG's coordinate space,
+// calibrated once against the state shapes already bundled in US_PATHS.
+const STATE_LL = { AL:[32.8,-86.8], AZ:[34.2,-111.6], AR:[34.9,-92.4], CA:[37.2,-119.3], CO:[39.0,-105.5], CT:[41.6,-72.7], DE:[38.99,-75.5], FL:[28.6,-82.4], GA:[32.6,-83.4], ID:[44.4,-114.6], IL:[40.0,-89.2], IN:[39.9,-86.3], IA:[42.0,-93.5], KS:[38.5,-98.4], KY:[37.5,-85.3], LA:[31.1,-92.0], ME:[45.4,-69.2], MD:[39.0,-76.8], MA:[42.3,-71.8], MI:[43.3,-84.5], MN:[46.3,-94.3], MS:[32.7,-89.7], MO:[38.35,-92.5], MT:[47.0,-109.6], NE:[41.5,-99.8], NV:[39.3,-116.6], NH:[43.7,-71.6], NJ:[40.2,-74.7], NM:[34.4,-106.1], NY:[42.9,-75.6], NC:[35.5,-79.4], ND:[47.4,-100.5], OH:[40.3,-82.8], OK:[35.6,-97.5], OR:[43.9,-120.6], PA:[40.9,-77.8], RI:[41.7,-71.6], SC:[33.9,-80.9], SD:[44.4,-100.2], TN:[35.9,-86.4], TX:[31.5,-99.4], UT:[39.3,-111.7], VT:[44.1,-72.7], VA:[37.5,-78.9], WA:[47.4,-120.4], WV:[38.6,-80.6], WI:[44.6,-89.7], WY:[43.0,-107.6], DC:[38.9,-77.0] };
+
+function albersXY(lat, lon) {
+  const d = Math.PI / 180, p0 = 29.5 * d, p1 = 45.5 * d;
+  const n = (Math.sin(p0) + Math.sin(p1)) / 2;
+  const C = Math.cos(p0) ** 2 + 2 * n * Math.sin(p0);
+  const rho = Math.sqrt(C - 2 * n * Math.sin(lat * d)) / n;
+  const th = n * (lon + 96) * d;
+  return [rho * Math.sin(th), -rho * Math.cos(th)];
+}
+
+let MAP_FIT = null; // { ax,bx,cx, ay,by,cy, bboxes }
+function calibrateMap() {
+  if (MAP_FIT || !window.US_PATHS) return MAP_FIT;
+  // measure each state's bbox center in SVG space
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 959 593");
+  svg.style.cssText = "position:absolute;left:-9999px;width:959px;height:593px";
+  const els = {};
+  for (const [code, ds] of Object.entries(window.US_PATHS)) {
+    const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+    for (const dstr of ds) {
+      const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      p.setAttribute("d", dstr);
+      g.appendChild(p);
+    }
+    svg.appendChild(g);
+    els[code] = g;
+  }
+  document.body.appendChild(svg);
+  const bboxes = {};
+  for (const code in els) { const b = els[code].getBBox(); bboxes[code] = [b.x + b.width / 2, b.y + b.height / 2, b]; }
+  svg.remove();
+  // least-squares affine: projected centroid -> bbox center, lower 48 + DC
+  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, n = 0;
+  let sux = 0, suy = 0, su = 0, svx = 0, svy = 0, sv = 0;
+  for (const code in STATE_LL) {
+    if (!bboxes[code]) continue;
+    const [x, y] = albersXY(STATE_LL[code][0], STATE_LL[code][1]);
+    const [u, v] = bboxes[code];
+    sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; n++;
+    sux += u * x; suy += u * y; su += u;
+    svx += v * x; svy += v * y; sv += v;
+  }
+  const solve = (m, r) => { // 3x3 Cramer
+    const det = (a) => a[0] * (a[4] * a[8] - a[5] * a[7]) - a[1] * (a[3] * a[8] - a[5] * a[6]) + a[2] * (a[3] * a[7] - a[4] * a[6]);
+    const D = det(m);
+    const col = (i) => det(m.map((v2, j) => (j % 3 === i ? r[Math.floor(j / 3)] : v2)));
+    return [col(0) / D, col(1) / D, col(2) / D];
+  };
+  const M = [sxx, sxy, sx, sxy, syy, sy, sx, sy, n];
+  const [ax, bx, cx] = solve(M, [sux, suy, su]);
+  const [ay, by, cy] = solve(M, [svx, svy, sv]);
+  MAP_FIT = { ax, bx, cx, ay, by, cy, bboxes };
+  return MAP_FIT;
+}
+function llToSVG(lat, lon, st) {
+  const f = calibrateMap();
+  if (!f) return null;
+  if (st === "AK" || st === "HI") { const b = f.bboxes[st]; return b ? [b[0], b[1]] : null; } // inset states: pin the inset
+  const [x, y] = albersXY(lat, lon);
+  return [f.ax * x + f.bx * y + f.cx, f.ay * x + f.by * y + f.cy];
+}
 const BRAND_NAMES = { G: "Generic", B: "Brand", T: "Branded generic", "—": "Other" };
 const monthLabel = (m) => {
   const [y, mo] = String(m).split("-");
@@ -1253,7 +1354,8 @@ function udimLabel(dim, v) {
 }
 
 function utilFilterReset() {
-  util.f = { groups: null, months: null, states: null, brands: null, pharm: null };
+  util.f = { groups: null, pharmacies: null, months: null, states: null, brands: null };
+  util.psearch = {};
 }
 
 // pass check, optionally ignoring one dimension (for slicer counts)
@@ -1263,8 +1365,14 @@ function factPass(f, skipDim) {
     if (dim === skipDim) continue;
     if (F[dim] && !F[dim].has(f[USLICER_DIMS[dim]])) return false;
   }
-  if (skipDim !== "pharm" && F.pharm != null && F.pharm !== f[3]) return false;
   return true;
+}
+
+function togglePharm(pi) {
+  if (!util.f.pharmacies) util.f.pharmacies = new Set();
+  util.f.pharmacies.has(pi) ? util.f.pharmacies.delete(pi) : util.f.pharmacies.add(pi);
+  if (!util.f.pharmacies.size) util.f.pharmacies = null;
+  renderUtil();
 }
 
 function utilAgg(p) {
@@ -1295,6 +1403,11 @@ function utilAgg(p) {
   };
 }
 
+function pharmFullLabel(p, i) {
+  const m = p.pharmMeta && p.pharmMeta[i];
+  return m ? `${p.dims.pharmacies[i]} — ${m.city}, ${m.st}` : p.dims.pharmacies[i];
+}
+
 function renderUtilSlicers(p) {
   const wrap = $("util-slicers");
   for (const el of wrap.querySelectorAll("[data-uslicer]")) {
@@ -1305,25 +1418,76 @@ function renderUtilSlicers(p) {
     // counts per value under all *other* active filters
     const counts = new Map();
     for (const f of p.facts) if (factPass(f, dim)) counts.set(f[col], (counts.get(f[col]) || 0) + f[10] + f[11]);
-    const order = p.dims[dim === "months" ? "months" : dim].map((v, i) => i)
+    const order = p.dims[dim].map((v, i) => i)
       .sort((a, b) => dim === "months"
         ? String(p.dims.months[a]).localeCompare(String(p.dims.months[b]))
         : (counts.get(b) || 0) - (counts.get(a) || 0));
+    const label = (i) => dim === "pharmacies" ? pharmFullLabel(p, i) : udimLabel(dim, p.dims[dim][i]);
+    const search = (util.psearch && util.psearch[dim] || "").toLowerCase();
     el.querySelector(".pop").innerHTML =
+      (p.dims[dim].length > 15 ? `<input class="popsearch" type="text" data-usearch="${dim}" placeholder="Search ${USLICER_LABELS[dim].toLowerCase()}…" value="${esc(util.psearch[dim] || "")}">` : "") +
       `<label class="allrow"><input type="checkbox" data-udim="${dim}" data-idx=""${active ? "" : " checked"}> All ${USLICER_LABELS[dim].toLowerCase()}</label>` +
-      order.map((i) =>
-        `<label><input type="checkbox" data-udim="${dim}" data-idx="${i}"${active && active.has(i) ? " checked" : ""}> ${esc(udimLabel(dim, p.dims[dim][i]))}<span class="cnt num">${fmt(counts.get(i) || 0)}</span></label>`).join("");
+      order.map((i) => {
+        const l = label(i);
+        const hide = search && !l.toLowerCase().includes(search) ? ' style="display:none"' : "";
+        return `<label${hide}><input type="checkbox" data-udim="${dim}" data-idx="${i}"${active && active.has(i) ? " checked" : ""}> ${esc(clip(l, 44))}<span class="cnt num">${fmt(counts.get(i) || 0)}</span></label>`;
+      }).join("");
   }
   // active-filter chips
   const chips = [];
   for (const dim in USLICER_DIMS) {
-    if (util.f[dim]) for (const i of util.f[dim])
-      chips.push(`<button class="badge-filter" type="button" data-uchip="${dim}" data-idx="${i}">${esc(udimLabel(dim, p.dims[dim][i])).toUpperCase()} <span class="x">&#215;</span></button>`);
+    if (util.f[dim]) for (const i of util.f[dim]) {
+      const l = dim === "pharmacies" ? p.dims.pharmacies[i] : udimLabel(dim, p.dims[dim][i]);
+      chips.push(`<button class="badge-filter" type="button" data-uchip="${dim}" data-idx="${i}">${esc(clip(l, 26)).toUpperCase()} <span class="x">&#215;</span></button>`);
+    }
   }
-  if (util.f.pharm != null)
-    chips.push(`<button class="badge-filter" type="button" data-uchip="pharm">${esc(clip(p.dims.pharmacies[util.f.pharm], 24)).toUpperCase()} <span class="x">&#215;</span></button>`);
   $("util-chips").innerHTML = chips.join("") +
     (chips.length ? `<button class="badge-filter reset" type="button" data-uchip="__reset">RESET</button>` : "");
+}
+
+/* --- pharmacy locations: bar list + map pins --- */
+function renderUtilGeo(p, agg) {
+  const panel = $("util-geo-panel");
+  if (!p.pharmMeta || !window.US_PATHS) { panel.style.display = "none"; return; }
+  panel.style.display = "";
+  const sel = util.f.pharmacies;
+  // location bar list: "City, ST (…npi4)" like the Power BI view
+  const locs = agg.pharmacies.slice(0, 40);
+  const max = Math.max(...locs.map((x) => x.collected), 1);
+  $("util-locations").innerHTML = locs.map((x) => {
+    const m = p.pharmMeta[x.pi] || {};
+    const lbl = `${m.city || "—"}, ${m.st || "—"} (…${m.npi4 || "?"})`;
+    return `<div class="bar-row${sel && sel.has(x.pi) ? " on" : ""}" data-pi="${x.pi}" title="${esc(x.name)} · ${money0(x.collected)}">` +
+      `<span class="name">${esc(lbl)}</span>` +
+      `<span class="track"><i style="width:${(100 * x.collected / max).toFixed(1)}%"></i></span>` +
+      `<span class="n num">${shortMoney(x.collected)}</span></div>`;
+  }).join("") || `<div style="color:var(--ink-mute)">Nothing under the current filters.</div>`;
+
+  // map: cluster pins on the bundled US map
+  const clusters = new Map(); // "gx,gy" -> {x,y,v,members:[pi]}
+  for (const x of agg.pharmacies) {
+    const m = p.pharmMeta[x.pi];
+    if (!m || !m.ll) continue;
+    const pt = llToSVG(m.ll[0], m.ll[1], m.st);
+    if (!pt) continue;
+    const key = `${Math.round(pt[0] / 16)},${Math.round(pt[1] / 16)}`;
+    let c = clusters.get(key);
+    if (!c) { c = { x: 0, y: 0, v: 0, members: [] }; clusters.set(key, c); }
+    c.x += pt[0]; c.y += pt[1]; c.v += x.collected; c.members.push(x.pi);
+  }
+  const base = Object.values(window.US_PATHS).flat().map((d) => `<path class="st" d="${d}"/>`).join("");
+  const maxV = Math.max(...[...clusters.values()].map((c) => c.v), 1);
+  const pins = [...clusters.values()].sort((a, b) => b.v - a.v).map((c) => {
+    const cx = c.x / c.members.length, cy = c.y / c.members.length;
+    const r = 4 + 11 * Math.sqrt(c.v / maxV);
+    const isSel = sel && c.members.some((pi) => sel.has(pi));
+    const topName = p.dims.pharmacies[c.members[0]];
+    const title = c.members.length === 1
+      ? `${topName} · ${money0(c.v)}`
+      : `${c.members.length} locations · ${money0(c.v)} · incl. ${topName}`;
+    return `<circle class="pin${isSel ? " sel" : ""}" data-pis="${c.members.join(",")}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}"><title>${esc(title)}</title></circle>`;
+  }).join("");
+  $("util-map").innerHTML = `<svg viewBox="0 0 959 593" role="img" aria-label="Pharmacy locations">${base}${pins}</svg>`;
 }
 
 function hbars(el, entries, fmtVal, revStyle) {
@@ -1395,7 +1559,8 @@ function renderUtil() {
     { label: "Reversed Claims", val: int0(c.reversed), pct: pct2(cRev), color: COL_REVERSED },
   ]);
 
-  $("pharm-chart").innerHTML = pharmChartSVG(a.pharmacies, util.f ? util.f.pharm : null);
+  $("pharm-chart").innerHTML = pharmChartSVG(a.pharmacies, util.f ? util.f.pharmacies : null);
+  renderUtilGeo(p, a);
 
   // drug-level visuals (need the cube)
   hbars($("util-classes"), a.classes.map((x) => ({ name: x.name, v: x.v })), shortMoney, false);
@@ -1509,7 +1674,6 @@ async function boot() {
     if (chip) {
       const dim = chip.dataset.uchip;
       if (dim === "__reset") utilFilterReset();
-      else if (dim === "pharm") util.f.pharm = null;
       else {
         util.f[dim].delete(Number(chip.dataset.idx));
         if (!util.f[dim].size) util.f[dim] = null;
@@ -1517,12 +1681,28 @@ async function boot() {
       renderUtil();
       return;
     }
-    const bar = e.target.closest("#pharm-chart .bar");
-    if (bar) {
-      const pi = Number(bar.dataset.pi);
-      util.f.pharm = util.f.pharm === pi ? null : pi;
+    const bar = e.target.closest("#pharm-chart .bar, #util-locations .bar-row[data-pi]");
+    if (bar) { togglePharm(Number(bar.dataset.pi)); return; }
+    const pin = e.target.closest("#util-map .pin");
+    if (pin) {
+      // toggle the whole cluster: if any member is selected, deselect all; else select all
+      const pis = pin.dataset.pis.split(",").map(Number);
+      const cur = util.f.pharmacies;
+      const anySel = cur && pis.some((i) => cur.has(i));
+      if (!util.f.pharmacies) util.f.pharmacies = new Set();
+      for (const i of pis) anySel ? util.f.pharmacies.delete(i) : util.f.pharmacies.add(i);
+      if (!util.f.pharmacies.size) util.f.pharmacies = null;
       renderUtil();
     }
+  });
+  // slicer search boxes filter their pop's rows without re-rendering
+  $("util-slicers").addEventListener("input", (e) => {
+    const inp = e.target.closest("input[data-usearch]");
+    if (!inp) return;
+    util.psearch[inp.dataset.usearch] = inp.value;
+    const q = inp.value.toLowerCase();
+    for (const lbl of inp.parentElement.querySelectorAll("label:not(.allrow)"))
+      lbl.style.display = !q || lbl.textContent.toLowerCase().includes(q) ? "" : "none";
   });
   $("util-slicers").addEventListener("change", (e) => {
     const cb = e.target.closest("input[data-udim]");
