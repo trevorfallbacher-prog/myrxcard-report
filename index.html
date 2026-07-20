@@ -1,0 +1,981 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>myrxcard · Live Search Report</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* MyRxCard brand — sampled from myrxcard.com: teal-blues, navy ink, gold step accents */
+    --bg: #FFFFFF;
+    --bg-base: #EEF4FB;
+    --card: #FFFFFF;
+    --card-solid: #EEF4FB;
+    --primary: #0A4C70;
+    --secondary: #16688F;
+    --tertiary: #3884A4;
+    --accent: #E9AE2E;
+    --accent-bright: #F5C43C;
+    --ink: #1A2E3B;
+    --ink-soft: #4A6274;
+    --ink-mute: #7A8FA0;
+    --hair: #DCE7F0;
+    --hair-bright: #B9CEDD;
+    --danger: #C94F4E;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { background: var(--bg); }
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: linear-gradient(var(--bg) 0%, var(--bg) 55%, var(--bg-base) 100%);
+    min-height: 100vh;
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  .num { font-variant-numeric: tabular-nums; }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+  }
+
+  /* ---------- Password gate ---------- */
+  #gate {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: inherit; z-index: 50;
+  }
+  #gate[hidden] { display: none; }
+  .gate-panel { width: min(360px, calc(100vw - 48px)); }
+  .gate-panel .kicker { color: var(--tertiary); margin-bottom: 10px; }
+  .gate-panel h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 6px; }
+  .gate-panel p { color: var(--ink-soft); margin-bottom: 22px; }
+  .gate-panel form { display: flex; gap: 8px; }
+  .gate-panel input {
+    flex: 1; background: var(--card-solid); border: 1px solid var(--hair);
+    border-radius: 8px; padding: 10px 12px; color: var(--ink);
+    font: inherit; outline: none; transition: border-color 150ms ease-out;
+  }
+  .gate-panel input:focus { border-color: var(--secondary); }
+  .gate-panel button {
+    background: var(--secondary); color: #F2F8FF; border: none; border-radius: 8px;
+    padding: 10px 18px; font: inherit; font-weight: 600; cursor: pointer;
+    transition: background 150ms ease-out;
+  }
+  .gate-panel button:hover { background: var(--tertiary); }
+  .gate-panel button:disabled { background: var(--hair-bright); color: #fff; cursor: default; }
+  .gate-error { color: var(--danger); font-size: 13px; margin-top: 12px; min-height: 18px; }
+
+  /* ---------- Shell ---------- */
+  #app { display: none; max-width: 1180px; margin: 0 auto; padding: 28px 28px 64px; }
+  header.top {
+    display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+    flex-wrap: wrap; margin-bottom: 26px;
+  }
+  .brand .kicker { color: var(--tertiary); margin-bottom: 4px; }
+  .brand h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.015em; }
+  .controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .range { display: flex; border: 1px solid var(--hair); border-radius: 8px; overflow: hidden; }
+  .range button {
+    background: transparent; border: none; color: var(--ink-soft);
+    font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: 0.08em;
+    padding: 7px 14px; cursor: pointer; transition: background 150ms ease-out, color 150ms ease-out;
+  }
+  .range button + button { border-left: 1px solid var(--hair); }
+  .range button:hover { color: var(--ink); }
+  .range button.on { background: var(--secondary); color: #fff; }
+  .sync { display: flex; align-items: center; gap: 10px; }
+  .sync .stamp { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); letter-spacing: 0.04em; }
+  .sync .dot { width: 7px; height: 7px; border-radius: 50%; background: #2F9C5C; box-shadow: 0 0 6px rgba(47,156,92,0.45); }
+  .sync .dot.err { background: var(--danger); box-shadow: 0 0 6px rgba(201,79,78,0.45); }
+  .iconbtn {
+    background: transparent; border: 1px solid var(--hair); border-radius: 8px;
+    color: var(--ink-soft); padding: 6px 12px; font-family: var(--mono); font-size: 12px;
+    letter-spacing: 0.06em; cursor: pointer; transition: border-color 150ms ease-out, color 150ms ease-out;
+  }
+  .iconbtn:hover { border-color: var(--hair-bright); color: var(--ink); }
+
+  .badge-sample {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em;
+    color: var(--ink); background: var(--accent-bright); border-radius: 6px; padding: 4px 10px;
+  }
+
+  .badge-filter {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em;
+    color: var(--secondary); background: none; border: 1.5px solid var(--secondary);
+    border-radius: 6px; padding: 3px 9px; cursor: pointer; font-weight: 600;
+  }
+  .badge-filter .x { color: var(--ink-mute); margin-left: 3px; }
+  .badge-filter:hover { background: var(--card-solid); }
+  .badge-filter.reset { color: var(--ink-mute); border-color: var(--hair-bright); font-weight: 500; }
+  .badge-filter.reset:hover { color: var(--danger); border-color: var(--danger); background: none; }
+
+  #notice { display: none; border: 1px solid var(--danger); border-radius: 8px;
+    padding: 10px 14px; color: var(--danger); margin-bottom: 20px; font-size: 13px; }
+
+  /* ---------- Stat strip ---------- */
+  .stats {
+    display: grid; grid-template-columns: repeat(6, 1fr);
+    border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair);
+    margin-bottom: 30px;
+  }
+  .stat { padding: 18px 18px 16px; }
+  .stat + .stat { border-left: 1px solid var(--hair); }
+  .stat .v { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+  .stat .k { margin-top: 5px; }
+
+  /* ---------- Grid ---------- */
+  .grid { display: grid; gap: 20px; grid-template-columns: repeat(12, 1fr); }
+  .panel {
+    background: var(--card); border: 1px solid var(--hair); border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 1px 2px rgba(10,76,112,0.04), 0 6px 20px rgba(10,76,112,0.05);
+  }
+  .panel > .kicker { margin-bottom: 16px; }
+  .span7 { grid-column: span 7; }
+  .span6 { grid-column: span 6; }
+  .span5 { grid-column: span 5; }
+  .span4 { grid-column: span 4; }
+  .span12 { grid-column: span 12; }
+
+  /* trend */
+  .trend-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .trend-head .big { font-size: 20px; font-weight: 600; }
+  svg text { font-family: var(--mono); font-size: 10.5px; fill: var(--ink-mute); }
+
+  /* funnel */
+  .funnel-row { margin-bottom: 16px; }
+  .funnel-row .lbl { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+  .funnel-row .lbl .name { color: var(--ink-soft); font-size: 13px; }
+  .funnel-row .lbl .val { font-weight: 600; font-size: 15px; }
+  .funnel-row .lbl .pct { color: var(--ink-mute); font-size: 12px; font-family: var(--mono); margin-left: 8px; }
+  .funnel-bar { height: 8px; background: #E7EEF5; border-radius: 4px; overflow: hidden; }
+  .funnel-bar i { display: block; height: 100%; border-radius: 4px; transition: width 250ms ease-out; }
+  .funnel-note { color: var(--ink-mute); font-size: 12.5px; margin-top: 14px; border-top: 1px solid var(--hair); padding-top: 12px; }
+  .funnel-note b { color: var(--secondary); font-weight: 600; }
+
+  /* bar lists */
+  .bars { display: flex; flex-direction: column; gap: 9px; }
+  .bar-row { display: grid; grid-template-columns: 130px 1fr 40px; align-items: center; gap: 10px; }
+  .bar-row .name { font-size: 12.5px; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  [data-dim] { cursor: pointer; }
+  .bar-row[data-dim]:hover .name, .funnel-row[data-dim]:hover .name, .split .row[data-dim]:hover .l, td[data-dim]:hover { color: var(--secondary); }
+  .bar-row.on .name, .funnel-row.on .name, .split .row.on .l { color: var(--secondary); font-weight: 700; }
+  .bar-row.on .track i { background: var(--accent); }
+  .bar-row .track { height: 7px; background: #E7EEF5; border-radius: 4px; overflow: hidden; }
+  .bar-row .track i { display: block; height: 100%; border-radius: 4px; background: var(--secondary); }
+  .bar-row .n { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
+
+  /* split */
+  .split { display: flex; flex-direction: column; gap: 10px; }
+  .split .row { display: flex; justify-content: space-between; font-size: 13px; }
+  .split .row .l { color: var(--ink-soft); }
+  .split .row .r { font-family: var(--mono); font-size: 12px; }
+  .split-track { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 4px; }
+  .split-track i { display: block; height: 100%; }
+
+  /* spread */
+  .spread .drug { font-size: 17px; font-weight: 600; margin-bottom: 2px; }
+  .spread .where { color: var(--ink-soft); font-size: 13px; margin-bottom: 14px; }
+  .spread .prices { display: flex; align-items: baseline; gap: 14px; }
+  .spread .lo { font-size: 26px; font-weight: 600; color: var(--primary); }
+  .spread .hi { font-size: 18px; color: var(--ink-mute); text-decoration: line-through; }
+  .spread .x { font-family: var(--mono); font-size: 12px; color: var(--tertiary); border: 1px solid var(--hair-bright); border-radius: 6px; padding: 2px 8px; }
+  .spread .cap { color: var(--ink-mute); font-size: 12.5px; margin-top: 12px; }
+
+  /* table */
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    text-align: left; font-family: var(--mono); font-size: 11.5px; font-weight: 500;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-mute);
+    padding: 0 7px 10px; border-bottom: 1px solid var(--hair); white-space: nowrap;
+  }
+  td { padding: 9px 7px; border-bottom: 1px solid #EBF1F7; font-size: 12.5px; color: var(--ink-soft); white-space: nowrap; }
+  td.drug { color: var(--ink); font-weight: 500; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+  td .dose { color: var(--ink-mute); font-weight: 400; font-size: 12px; margin-left: 6px; }
+  td.r, th.r { text-align: right; }
+  tr:last-child td { border-bottom: none; }
+  .tag { font-family: var(--mono); font-size: 11.5px; border-radius: 5px; padding: 2px 7px; letter-spacing: 0.05em; }
+  .tag.yes { color: var(--secondary); border: 1px solid rgba(22,104,143,0.35); font-weight: 600; }
+  .tag.feat { color: #9A7414; border: 1px solid rgba(233,174,46,0.5); font-weight: 600; }
+  .tag.no { color: var(--ink-mute); }
+  td.pharm { max-width: 165px; overflow: hidden; text-overflow: ellipsis; text-transform: capitalize; }
+  .table-wrap { overflow-x: auto; }
+
+  footer { margin-top: 26px; color: var(--ink-mute); font-size: 12.5px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+
+  /* US map + drill-down */
+  #usmap svg { width: 100%; height: auto; display: block; }
+  #usmap path { stroke: #fff; stroke-width: 1; cursor: pointer; transition: fill 150ms ease-out; }
+  #usmap path:hover { stroke: var(--secondary); stroke-width: 1.5; }
+  #usmap path.sel { stroke: var(--accent-bright); stroke-width: 2.5; }
+  .legend { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-family: var(--mono); font-size: 12px; color: var(--ink-mute); }
+  .legend .lg { width: 90px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #E2ECF3, #0A4C70); }
+  .legend .legend-hint { margin-left: auto; }
+  .drill-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .drill-head .name { font-size: 18px; font-weight: 700; }
+  .mini-stats { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--hair); border-bottom: 1px solid var(--hair); margin-bottom: 16px; }
+  .mini-stats .ms { padding: 10px 10px 9px; }
+  .mini-stats .ms + .ms { border-left: 1px solid var(--hair); }
+  .mini-stats .v { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+  .mini-stats .k { font-family: var(--mono); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-mute); margin-top: 2px; }
+  .drill .sub { font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-mute); margin: 14px 0 10px; }
+  .state-list { display: flex; flex-direction: column; }
+  .state-list button {
+    display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; text-align: left;
+    background: none; border: none; border-bottom: 1px solid #EBF1F7; padding: 8px 2px;
+    font: inherit; font-size: 13px; color: var(--ink-soft); cursor: pointer;
+  }
+  .state-list button:hover { color: var(--secondary); }
+  .state-list button:last-child { border-bottom: none; }
+  .state-list .n { font-family: var(--mono); font-size: 12px; }
+
+  /* MyRxCard wordmark */
+  .logo { display: flex; align-items: center; font-size: 19px; font-weight: 800; letter-spacing: -0.01em; color: var(--ink); margin-bottom: 6px; }
+  .logo .rx { background: var(--secondary); color: #fff; border-radius: 7px; padding: 0 6px; margin: 0 3px; font-weight: 700; }
+
+  /* ---------- Print / PDF export ---------- */
+  .print-meta {
+    display: none; font-family: var(--mono); font-size: 12px; color: var(--ink-mute);
+    letter-spacing: 0.04em; margin: -12px 0 18px;
+  }
+  @media print {
+    @page { margin: 12mm; }
+    html, body { background: #fff !important; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .controls, footer, #notice { display: none !important; }
+    #app { padding: 0; max-width: none; }
+    header.top { margin-bottom: 14px; }
+    .print-meta { display: block; }
+    .stats { margin-bottom: 18px; }
+    .grid { display: block; }
+    .grid .panel { margin-bottom: 14px; break-inside: avoid; box-shadow: none; }
+    .table-wrap { overflow: visible; }
+  }
+
+  /* setup panel (no config yet) */
+  #setup { display: none; max-width: 640px; margin: 12vh auto 0; padding: 0 28px; }
+  #setup .panel { padding: 28px; }
+  #setup h2 { font-size: 19px; margin: 6px 0 14px; }
+  #setup p, #setup li { color: var(--ink-soft); font-size: 13.5px; margin-bottom: 10px; }
+  #setup ol { padding-left: 20px; }
+  #setup code { font-family: var(--mono); font-size: 12px; color: var(--tertiary); background: var(--card-solid); border-radius: 5px; padding: 2px 6px; }
+
+  @media (max-width: 980px) {
+    .stats { grid-template-columns: repeat(3, 1fr); }
+    .stat:nth-child(4) { border-left: none; }
+    .stat { border-top: 1px solid var(--hair); }
+    .stat:nth-child(-n+3) { border-top: none; }
+    .span7, .span6, .span5, .span4 { grid-column: span 12; }
+  }
+  @media (max-width: 560px) {
+    #app { padding: 20px 16px 48px; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .stat:nth-child(odd) { border-left: none; }
+    .stat:nth-child(-n+2) { border-top: none; }
+    .stat:nth-child(n+3) { border-top: 1px solid var(--hair); }
+    .bar-row { grid-template-columns: 100px 1fr 36px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="gate" hidden>
+  <div class="gate-panel">
+    <div class="logo" aria-label="MyRxCard"><span>My</span><span class="rx">Rx</span><span>Card</span></div>
+    <h1>Search performance</h1>
+    <p>Enter the report password to unlock live data.</p>
+    <form id="gate-form">
+      <input id="gate-pw" type="password" autocomplete="current-password" placeholder="Password" autofocus>
+      <button id="gate-btn" type="submit">Unlock</button>
+    </form>
+    <div class="gate-error" id="gate-err"></div>
+  </div>
+</div>
+
+<div id="setup">
+  <div class="panel">
+    <div class="kicker">myrxcard · live report</div>
+    <h2>Not wired to Xano yet</h2>
+    <p>This page found neither <code>config.enc.json</code> (live mode) nor <code>sample-data.json</code> (preview mode). To go live:</p>
+    <ol>
+      <li>In Xano, add a GET endpoint that returns rows from <code>search_events</code>.</li>
+      <li>Run <code>node scripts/encrypt-config.mjs --url … --password …</code></li>
+      <li>Deploy <code>index.html</code> + <code>config.enc.json</code> together.</li>
+    </ol>
+  </div>
+</div>
+
+<div id="app">
+  <header class="top">
+    <div class="brand">
+      <div class="logo" aria-label="MyRxCard"><span>My</span><span class="rx">Rx</span><span>Card</span></div>
+      <h1>Search performance</h1>
+    </div>
+    <div class="controls">
+      <span class="badge-sample" id="sample-badge" hidden>SAMPLE DATA</span>
+      <span id="filter-chips" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span>
+      <div class="range" id="range"></div>
+      <div class="sync">
+        <span class="dot" id="sync-dot"></span>
+        <span class="stamp" id="sync-stamp">—</span>
+      </div>
+      <button class="iconbtn" id="pdf-btn" type="button">EXPORT PDF</button>
+      <button class="iconbtn" id="refresh-btn" type="button">REFRESH</button>
+      <button class="iconbtn" id="lock-btn" type="button" hidden>LOCK</button>
+    </div>
+  </header>
+
+  <div class="print-meta" id="print-meta"></div>
+
+  <div id="notice"></div>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="grid">
+    <div class="panel span7">
+      <div class="kicker">Searches per day</div>
+      <div class="trend-head">
+        <span class="big num" id="trend-total"></span>
+        <span class="kicker" id="trend-range"></span>
+      </div>
+      <div id="trend"></div>
+    </div>
+
+    <div class="panel span5">
+      <div class="kicker">Search-to-card funnel</div>
+      <div id="funnel"></div>
+    </div>
+
+    <div class="panel span7">
+      <div class="kicker">Searches by state</div>
+      <div id="usmap"></div>
+      <div class="legend"><span>Fewer</span><i class="lg"></i><span>More</span><span class="legend-hint">Tap a state to drill in</span></div>
+    </div>
+
+    <div class="panel span5">
+      <div class="kicker">State drill-down</div>
+      <div id="drill"></div>
+    </div>
+
+    <div class="panel span6">
+      <div class="kicker">Search groups</div>
+      <div id="groups"></div>
+    </div>
+
+    <div class="panel span6">
+      <div class="kicker">Top drugs</div>
+      <div class="bars" id="top-drugs"></div>
+    </div>
+
+    <div class="panel span6">
+      <div class="kicker">Devices</div>
+      <div id="devices"></div>
+    </div>
+
+    <div class="panel span6">
+      <div class="kicker">Best price spread</div>
+      <div class="spread" id="spread"></div>
+    </div>
+
+    <div class="panel span12">
+      <div class="kicker">Latest searches</div>
+      <div class="table-wrap" id="recent"></div>
+    </div>
+  </div>
+
+  <footer>
+    <span id="foot-src">Source: search_events via Xano</span>
+    <span id="foot-window"></span>
+  </footer>
+</div>
+
+<script>window.US_PATHS = {"AL":["m 643,467.4 .4,-7.3 -.9,-1.2 -1.7,-.7 -2.5,-2.8 .5,-2.9 48.8,-5.1 -.7,-2.2 -1.5,-1.5 -.5,-1.4 .6,-6.3 -2.4,-5.7 .5,-2.6 .3,-3.7 2.2,-3.8 -.2,-1.1 -1.7,-1 v -3.2 l -1.8,-1.9 -2.9,-6.1 -12.9,-45.8 -45.7,4 1.3,2 -1.3,67 4.4,33.2 .9,-.5 1.3,.1 .6,.4 .8,-.1 2,-3.8 v -2.3 l 1.1,-1.1 1.4,.5 3.4,6.4 v .9 l -3.3,2.2 3.5,-.4 4.9,-1.6 z"],"AK":["m 15.8,572 h 2.4 l .7,.7 -1,1.2 -1.9,.2 -2.5,1.3 -3.7,-.1 2.2,-.9 .3,-1.1 2.5,-.3 z m 8.3,-1.7 1.3,.5 h .9 l .5,1.2 .3,-.6 .9,.2 1.1,1.5 0,.5 -4.2,1.9 -2.4,-.1 -1,-.5 -1.1,.7 -2,0 -1.1,-1.4 4.7,-.5 z m 5.4,-.1 1,.1 .7,.7 v 1 l -1.3,.1 -.9,-1.1 z m 2.5,.3 1.3,-.1 -.1,1 -1.1,.6 z m .3,2.2 3.4,-.1 .2,1.1 -1.3,.1 -.3,-.5 -.8,.6 -.4,-.6 -.9,-.2 z m 166.3,7.6 2.1,.1 -1,1.9 -1.1,-.1 -.4,-.8 .5,-1.3 m -1.1,-2.9 .6,-1.3 -.2,-2.3 2.4,-.5 4.5,4.4 1.3,3.4 1.9,1.6 .3,5.1 -1.4,0 -1.3,-2.3 -3.1,-2.4 h -.6 l 1.1,2.8 1.7,.2 .2,2.1 -.9,.1 -4.1,-4.4 -.1,-.9 1.9,-1 0,-1 -.5,-.8 -1.6,-.6 -1.7,-1.3 1.4,.1 .5,-.4 -.6,-.9 -.6,.5 z m -3.6,-9.1 1.3,.1 2.4,2.5 -.2,.8 -.8,-.1 -.1,1.8 .5,.5 0,1.5 -.8,.3 -.4,1.2 -.8,-.4 -.4,-2.2 1.1,-1.4 -2.1,-2.2 .1,-1.2 z m 1.5,-1.5 1.9,.2 2.5,.1 3.4,3.2 -.2,.5 -1.1,.6 -1.1,-.2 -.1,-.7 -1.2,-1.6 -.3,.7 1,1.3 -.2,1.2 -.8,-.1 -1.3,.2 -.1,-1.7 -2.6,-2.8 z m -12.7,-8.9 .9,-.4 h 1.6 l .7,-.5 4.1,2.2 .1,1.5 -.5,.5 h -.8 l -1.4,-.7 1.1,1.3 1.8,0 .5,2 -.9,0 -2.2,-1.5 -1.1,-.2 .6,1.3 .1,.9 .8,-.6 1.7,1.2 1.3,-.1 -.2,.8 1.9,4.3 0,3.4 .4,2.1 -.8,.3 -1.2,-2 -.5,-1.5 -1.6,-1.6 -.2,-2.7 -.6,-1.7 h -.7 l .3,1.1 0,.5 -1.4,1 .1,-3.3 -1.6,-1.6 -1.3,-2.3 -1.2,-1.2 z m 7.2,-2.3 1.1,1.8 2.4,-.1 1,2.1 -.6,.6 2,3.2 v 1.3 l -1.2,.8 v .7 l -2,1.9 -.5,-1.4 -.1,-1.3 .6,-.7 v -1.1 l -1.5,-1.9 -.5,-3.7 -.9,-1.5 z m -56.7,-18.3 -4,4.1 v 1.6 l 2.1,-.8 .8,-1.9 2.2,-2.4 z m -31.6,16.6 0,.6 1.8,1.2 .2,-1.4 .6,.9 3.5,.1 .7,-.6 .2,-1.8 -.5,-.7 -1.4,0 0,-.8 .4,-.6 v -.4 l -1.5,-.3 -3.3,3.6 z m -8.1,6.2 1.5,5.8 h 2.1 l 2.4,-2.5 .3,1.2 6.3,-4 .7,-1 -1,-1.1 v -.7 l .5,-1.3 -.9,-.1 -2,1 0,-1.2 -2.7,-.6 -2.4,.3 -.2,3.4 -.8,-2 -1.5,-.1 -1,.6 z m -2.2,8.2 .1,-.7 2.1,-1.3 .6,.3 1.3,.2 1.3,1.2 -2.2,-.2 -.4,-.6 -1,.6 z m -5.2,3.3 -1.1,.8 1.5,1.4 .8,-.7 -.1,-1.3 z m -6.3,-7.9 1.4,.1 .4,.6 -1.8,.1 z m -13.9,11.9 v .5 l .7,.1 -.1,-.6 z m -.4,-3.2 -1,1 v .5 l .7,1.1 1,-1 -.7,-.1 z m -2,-.8 -.3,1 -1.3,.1 -.4,.2 0,1.3 -.5,.9 .6,0 .7,-.9 .8,-.1 .9,-1 .2,-1.3 z m -4.4,-2 -.2,1.8 1.4,.8 1.2,-.6 0,-1 1.7,-.3 -.1,-.6 -.9,-.2 -.7,.6 -.9,-.5 z m -4.9,-.1 1,.7 -.3,1.2 -1.4,-1.1 z m -4.2,1.3 1.4,.1 -.7,.8 z m -3.5,3 1.8,1.1 -1.7,.1 z m -25.4,-31.2 1.2,.6 -.8,.6 z m -.7,-6.3 .4,1.2 .8,-1.2 z m 24.3,-19.3 1.5,-.1 .9,.4 1.1,-.5 1.3,-.1 1.6,.8 .8,1.9 -.1,.9 -1.2,2 -2.4,-.2 -2.1,-1.8 -1,-.4 -1.1,-2 z m -21.1,-14.4 .1,1.9 2,2 v .5 l -.8,-.2 -1.7,-.8 -.3,-1.1 -.3,-1.6 z m 18.3,-23.3 v 1.2 l 1.9,1.8 h 2.3 l .6,1.1 v 1.6 l 2.1,1.9 1.8,1.2 -.1,.7 -.7,1.1 -1.4,-1.2 -2.1,.1 -.8,-.8 -.9,-2.1 -1.5,-2.2 -2.6,-.1 -1,-.7 1,-2.1 z m 16.8,-4.5 1,0 .1,1.1 h -1 z m 16.2,19.7 .9,.1 0,1.2 -1.7,-.5 z m 127.8,77.7 -1.2,.4 -.1,1.1 h 1.2 z m -157.6,-4.5 -1.3,-.4 -4.1,.6 -2.8,1.4 -.1,1.9 1.9,.7 1.5,-.9 1.7,-.1 4.7,1.4 .1,-1.3 -1.6,-1.1 z m 2.1,2.3 -.4,-1.4 1.2,.2 .1,1.4 1.8,0 .4,-2.5 .3,2.4 2.5,-.1 3.2,-3.3 .8,.1 -.7,1.3 1.4,.9 4.2,-.2 2.6,-1.2 1.4,-.1 .3,1.5 .6,-.5 .4,-1.4 5.9,.2 1.9,-1.6 -1.3,-1.1 .6,-1.2 2.6,.2 -.2,-1.2 2.5,.2 .7,-1.1 1.1,.2 4.6,-1.9 .2,-1.7 5.6,-2.4 2,-1.9 1.2,-.6 1.3,.8 2.3,-.9 1.1,-1.9 .5,-1.3 1.7,-.9 1.5,-.7 .4,-1.4 -1.1,-1.7 -2.2,-.2 -.2,-1.3 .8,-1.6 1.4,-.2 1.3,-1.5 1.9,-.1 3.4,-3.2 .4,-1.4 1.5,-2.3 3.8,-4.1 2.5,-.9 1.9,-.9 2.1,.8 1.4,2.6 -1.5,0 -1.4,-1.5 -3,2 -1.7,.1 -.2,3.1 -3.1,4.9 .6,2 2.3,0 -.6,1 -1.4,.1 -2.4,1.8 0,.9 1.9,1 3.4,-.6 1.4,-1.7 1.4,.1 3,-1.7 .5,-2.3 1.6,-.1 6.3,.8 1,-1.1 1,-4.5 -1.6,1.1 .6,-2.2 -1.6,-1.4 .8,-1.5 .1,1.5 3.4,0 .7,-1 1.6,-.1 -.3,1.7 1.9,.1 -1.9,1.3 4.1,1.1 -3.5,.4 -1.3,1.2 .9,1.4 4.6,-1.7 2.3,1.7 .7,-.9 .6,1.4 4,2.3 h 2.9 l 3.9,-.5 4.3,1.1 2,1.9 4.5,.4 1.8,-1.5 .8,2.4 -1.8,.7 1.2,1.2 7.4,3.8 1.4,2.5 5.4,4.1 3.3,-2 -.6,-2.2 -3.5,-2 3.1,1.2 .5,-.7 .9,1.3 0,2.7 2.1,-.6 2.1,1.8 -2.5,-9.8 1.2,1.3 1.4,6 2.2,2.5 2.4,-.4 1.8,3.5 h .9 l .6,5.6 3.4,.5 1.6,2.2 1.8,1.1 .4,2.8 -1.8,2.6 2.9,1.6 1.2,-2.4 -.2,3.1 -.8,.9 1.4,1.7 .7,-2.4 -.2,-1.2 .8,.2 .6,2.3 -1,1.4 .6,2.6 .5,.4 .3,-1.6 .7,.6 -.3,2 1.2,.2 -.4,.9 1.7,-.1 0,-1 h -1 l .1,-1.7 -.8,-.6 1.7,-.3 .5,-.8 0,-1.6 .5,1.3 -.6,1.8 1.2,3.9 1.8,.1 2.2,-4.2 .1,-1.9 -1.3,-4 -.1,-1.2 .5,-1.2 -.7,-.7 -1.7,.1 -2.5,-2 -1.7,0 -2,-1.4 -1.5,0 -.5,-1.6 -1.4,-.3 -.2,-1.5 -1,-.5 .1,-1.7 -5.1,-7.4 -1.8,-1.5 v -1.2 l -4.3,-3.5 -.7,-1.1 -1.6,-2 -1.9,-.6 0,-2.2 -1.2,-1.3 -1.7,-.7 -2.1,1.3 -1.6,2.1 -.4,2.4 -1.5,.1 -2.5,2.7 -.8,-.3 v -2.5 l -2.4,-2.2 -2.3,-2 -.5,-2 -2.5,-1.3 .2,-2.2 -2.8,-.1 -.7,1.1 -1.2,0 -.7,-.7 -1.2,.8 -1.8,-1.2 0,-85.8 -6.9,-4.1 -1.8,-.5 -2.2,1.1 -2.2,.1 -2.3,-1.6 -4.3,-.6 -5.8,-3.6 -5.7,-.4 -2,.5 -.2,-1.8 -1.8,-.7 1.1,-1 -.2,-.9 -3.2,-1.1 h -2.4 l -.4,.4 -.9,-.6 .1,-2.6 -.8,-.9 -2.5,2.9 -.8,-.1 v -.8 l 1.7,-.8 v -.8 l -1.9,-2.4 -1.1,-.1 -4.5,3.1 h -3.9 l .4,-.9 -1.8,-.1 -5.2,3.4 -1.8,0 -.6,-.8 -2.7,1.5 -3.6,3.7 -2.8,2.7 -1.5,1.2 -2.6,.1 -2.2,-.4 -2.3,-1.3 v 0 l -2.8,3.9 -.1,2.4 2.6,2.4 2.1,4.5 .2,5.3 2.9,2 3.4,.4 .7,.8 -1.5,2.3 .7,2.7 -1.7,-2.6 v -2.4 l -1.5,-.3 .1,1.2 .7,2.1 2.9,3.7 h -1.4 l -2.2,1.1 -6.2,-2.5 -.1,-2 1.4,-1.3 0,-1.4 -2.1,-.5 -2.3,.2 -4.8,.2 1.5,2.3 -1.9,-1.8 -8.4,1.2 -.8,1.5 4.9,4.7 -.8,1.4 -.3,2 -.7,.8 -.1,1.9 4.4,3.6 4.1,.2 4.6,1.9 h 2 l .8,-.6 3.8,.1 .1,-.8 1.2,1.1 .1,2 -2.5,-.1 .1,3.3 .5,3.2 -2.9,2.7 -1.9,-.1 -2,-.8 -1,.1 -3.1,2.1 -1.7,.2 -1.4,-2.8 -3.1,0 -2.2,2 -.5,1.8 -3.3,1.8 -5.3,4.3 -.3,3.1 .7,2.2 1,1.2 1,-.4 .9,1 -.8,.6 -1.5,.9 1.1,1.5 -2.6,1.1 .8,2.2 1.7,2.3 .8,4.1 4,1.5 2.6,-.8 1.7,-1.1 .5,2.1 .3,4.4 -1.9,1.4 0,4.4 -.6,.9 h -1.7 l 1.7,1.2 2.1,-.1 .4,-1 4.6,-.6 2,2.6 1.3,-.7 1.3,5.1 1,.5 1,-.7 .1,-2.4 .9,-1 .7,1.1 .2,1.6 1.6,.4 4.7,-1.2 .2,1.2 -2,1.1 -1.6,1.7 -2.8,7 -4.3,2 -1.4,1.5 -.3,1.4 -1,-.6 -9.3,3.3 -1.8,4.1 -1.3,-.4 .5,-1.1 -1.5,-1.4 -3.5,-.2 -5.3,3.2 -2.2,1.3 -2.3,0 -.5,2.4 z"],"AZ":["m 139.6,387.6 3,-2.2 .8,-2.4 -1,-1.6 -1.8,-.2 -1.1,-1.6 1.1,-6.9 1.6,-.3 2.4,-3.2 1.6,-7 2.4,-3.6 4.8,-1.7 1.3,-1.3 -.4,-1.9 -2.3,-2.5 -1.2,-5.8 -1.4,-1.8 -1.3,-3.4 .9,-2.1 1.4,-3 .5,-2.9 -.5,-4.9 1,-13.6 3.5,-.6 3.7,1.4 1.2,2.7 h 2 l 2.4,-2.9 3.4,-17.5 46.2,8.2 40,6 -17.4,124.1 -37.3,-5.4 -64.2,-37.5 .5,-2.9 2,-1.8 z"],"AR":["m 584.2,367 .9,-2.2 1.2,.5 .7,-1 -.8,-.7 .3,-1.5 -1.1,-.9 .6,-1 -.1,-1.5 -1.1,-.1 .8,-.8 1.3,.8 .3,-1.4 -.4,-1.1 .1,-.7 2,.6 -.4,-1.5 1.6,-1.3 -.5,-.9 -1.1,.1 -.6,-.9 .9,-.9 1.6,-.2 .5,-.8 1.4,-.2 -.1,-.8 -.9,-.9 v -.5 h 1.5 l .4,-.7 -1.4,-1 -.1,-.6 -11.2,.8 2.8,-5.1 1.7,-1.5 v -2.2 l -1.6,-2.5 -39.8,2 -39.1,.7 4.1,24.4 -.7,39 2.6,2.3 2.8,-1.3 3.2,.8 .2,11.9 52.3,-1.3 1.2,-1.5 .5,-3 -1.5,-2.3 -.5,-2.2 .9,-.7 v -.8 l -1.7,-1.1 -.1,-.7 1.6,-.9 -1.2,-1.1 1.7,-7.1 3.4,-1.6 v -.8 l -1.1,-1.4 2.9,-5.4 h 1.9 l 1.5,-1.2 -.3,-5.2 3.1,-4.5 1.8,-.6 -.5,-3.1 z"],"CA":["m 69.4,365.6 3.4,5.2 -1.4,.1 -1.8,-1.9 z m 1.9,-9.8 1.8,4.1 2.6,1 .7,-.6 -1.3,-2.5 -2.6,-2.4 z m -19.9,-19 v 2.4 l 2,1.2 4.4,-.2 1,-1 -3.1,-.2 z m -5.9,.1 3.3,.5 1.4,2.2 h -3.8 z m 47.9,45.5 -1,-3 .2,-3 -.4,-7.9 -1.8,-4.8 -1.2,-1.4 -.6,-1.5 -7,-8.6 -3.6,.1 -2,-1.9 1.1,-1.8 -.7,-3.7 -2.2,-1.2 -3.9,-.6 -2.8,-1.3 -1.5,-1.9 -4.5,-6.6 -2.7,-2.2 -3.7,-.5 -3.1,-2.3 -4.7,-1.5 -2.8,-.3 -2.5,-2.5 .2,-2.8 .8,-4.8 1.8,-5.1 -1.4,-1.6 -4,-9.4 -2.7,-3.7 -.4,-3 -1.6,-2.3 .2,-2.5 -2,-5 -2.9,-2.7 .6,-7.1 2.4,-.8 1.8,-3.1 -.4,-3.2 -1,-.9 h -2.5 l -2.5,-3.3 -1.5,-3.5 v -7.5 l 1.2,-4.2 .2,-2.1 2.5,.2 -.1,1.6 -.8,.7 v 2.5 l 3.7,3.2 v -4.7 l -1.4,-3.4 .5,-1.1 -1,-1.7 2.8,-1.5 -1.9,-3 -1.4,.5 -1.5,3.8 .5,1.3 -.8,1 -.9,-.1 -5.4,-6.1 .7,-5.6 -1.1,-3.9 -6.5,-12.8 .8,-10.7 2.3,-3.6 .2,-6.4 -5.5,-11.1 .3,-5.2 6.9,-7.5 1.7,-2.4 -.1,-1.4 4,-9.2 .1,-8.4 .9,-2.5 66.1,18.6 -16.4,63.1 1.1,3.5 70.4,105 -.9,2.1 1.3,3.4 1.4,1.8 1.2,5.8 2.3,2.5 .4,1.9 -1.3,1.3 -4.8,1.7 -2.4,3.6 -1.6,7 -2.4,3.2 -1.6,.3 -1.1,6.9 1.1,1.6 1.8,.2 1,1.6 -.8,2.4 -3,2.2 -2.2,-.1 z"],"CO":["m 374.6,323.3 -16.5,-1 -51.7,-4.8 -52.6,-6.5 11.5,-88.3 44.9,5.7 37.5,3.4 33.1,2.4 -1.4,22.1 z"],"CT":["m 873.5,178.9 .4,-1.1 -3.2,-12.3 -.1,-.3 -14.9,3.4 v .7 l -.9,.3 -.5,-.7 -10.5,2.4 2.8,16.3 1.8,1.5 -3.5,3.4 1.7,2.2 5.4,-4.5 1.7,-1.3 h .8 l 2.4,-3.1 1.4,.1 2.9,-1.1 h 2.1 l 5.3,-2.7 2.8,-.9 1,-1 1.5,.5 z"],"DE":["m 822.2,226.6 -1.6,.3 -1.5,1.1 -1.2,2.1 7.6,27.1 10.9,-2.3 -2.2,-7.6 -1.1,.5 -3.3,-2.6 -.5,-1.7 -1.8,-1 -.2,-3.7 -2.1,-2.2 -1.1,-.8 -1.2,-1.1 -.4,-3.2 .3,-2.1 1,-2.2 z"],"FL":["m 751.7,445.1 -4,-.7 -1.7,-.9 -2.2,1.4 v 2.5 l 1.4,2.1 -.5,4.3 -2.1,.6 -1,-1.1 -.6,-3.2 -50.1,3.3 -3.3,-6 -48.8,5.1 -.5,2.9 2.5,2.8 1.7,.7 .9,1.2 -.4,7.3 -1.1,.6 .5,.4 1,-.3 .7,-.8 10.5,-2.7 9.2,-.5 8.1,1.9 8.5,5 2.4,.8 2.2,2 -.1,2.7 h 2.4 l 1.9,-1 2.5,.1 2,-.8 2.9,-2 3.1,-2.9 1.1,-.4 .6,.5 h 1.4 l .5,-.8 -.5,-1.2 -.6,-.6 .2,-.8 2,-1.1 5,-.4 .8,1 1,.1 2.3,1 3,1.8 1.2,1.7 1.1,1.2 2.8,1.4 v 2.4 l 2.8,1.9 1,.1 1.6,1.4 .7,1.6 1,.2 .8,2.1 .7,.6 1,-1.1 2.9,.1 .5,1.4 1.1,.9 v 1.3 l 2.9,2.2 .2,9.6 -1.8,5.8 1,1.2 -.2,3.4 -.8,1.4 .7,1.2 2.3,2.3 .3,1.5 .8,1 -.4,-1.9 1.3,-.6 .8,-3.6 -3,-1.2 .1,-.6 2.6,-.4 .9,2.6 1.1,.6 .1,-2 1.1,.3 .6,.8 -.1,.7 -2.9,4.2 -.2,1.1 -1.7,1.9 v 1.1 l 3.7,3.8 5.3,7.9 1.8,2.1 v 1.8 l 2.8,4.6 2.3,.6 .7,-1.2 -2.1,.3 -3,-4.5 .2,-1.4 1.5,-.8 v -1.5 l -.6,-1.3 .9,-.9 .4,.9 .7,.5 v 4 l -1.2,-.6 -.8,.9 1.4,1.6 1,2.6 1.2,-.6 2.3,1.2 2.1,2.2 1.6,5.1 3.1,4.8 .8,-1.3 2.8,-.5 3.2,1.3 .3,1.7 3.3,3.8 .1,1.1 2.2,2.7 -.7,.5 v 2.7 l 2.7,1.4 h 1.5 l 2.7,-1.8 1.5,.3 1.1,.4 2.3,-1.7 .2,-.7 1.2,.3 2.4,-1.7 1.3,-2.3 -.7,-3.2 -.2,-1.3 1.1,-4 .6,-.2 .6,1.6 .8,-1.8 -.8,-7.2 -.4,-10.5 -1,-6.8 -.7,-1.7 -6.6,-11.1 -5.2,-9.1 -2.2,-3.3 -1.3,-3.6 -.2,-3.4 .9,-.3 v -.9 l -1.1,-2.2 -4,-4 -7.6,-9.7 -5.7,-10.4 -4.3,-10.7 -.6,-3.7 -1.2,-1 -.5,-3.8 z m 9.2,134.5 1.7,-.1 -.7,-1 z m 7.3,-1.1 v -.7 l 1.6,-.2 3.7,-3.3 1.5,-.6 2.4,-.9 .3,1.3 1.7,.8 -2.6,1.2 h -2.4 l -3.9,2.5 z m 17.2,-7.6 -3,1.4 -1,1.3 1.1,.1 z m 3.8,-2.9 -1.1,.3 -1.4,2 1.1,-.2 1.5,-1.6 z m 8.3,-15.7 -1.7,5.6 -.8,1 -1,2.6 -1.2,1.6 -.7,1.7 -1.9,2.2 v .9 l 2.7,-2.8 2.4,-3.5 .6,-2 2.1,-4.9 z"],"GA":["m 761.8,414.1 v 1.4 l -4.2,6.2 -1.2,.2 1.5,.5 v 2 l -.9,1.1 -.6,6 -2.3,6.2 .5,2 .7,5.1 -3.6,.3 -4,-.7 -1.7,-.9 -2.2,1.4 v 2.5 l 1.4,2.1 -.5,4.3 -2.1,.6 -1,-1.1 -.6,-3.2 -50.1,3.3 -3.3,-6 -.7,-2.2 -1.5,-1.5 -.5,-1.4 .6,-6.3 -2.4,-5.7 .5,-2.6 .3,-3.7 2.2,-3.8 -.2,-1.1 -1.7,-1 v -3.2 l -1.8,-1.9 -2.9,-6.1 -12.9,-45.8 22.9,-2.9 21.4,-3 -.1,1.9 -1.9,1 -1.4,3.2 .2,1.3 6.1,3.8 2.6,-.3 3.1,4 .4,1.7 4.2,5.1 2.6,1.7 1.4,.2 2.2,1.6 1.1,2.2 2,1.6 1.8,.5 2.7,2.7 .1,1.4 2.6,2.8 5,2.3 3.6,6.7 .3,2.7 3.9,2.1 2.5,4.8 .8,3.1 4.2,.4 z"],"HI":["m 317,553.7 -.2,3.2 1.7,1.9 .1,1.2 -4.8,4.5 -.1,1.2 1.9,3.2 1.7,4.2 v 2.6 l -.5,1.2 .1,3.4 4.1,2.1 1.1,1.1 1.2,-1.1 2.1,-3.6 4.5,-2.9 3.3,-.5 2.5,-1 1.7,-1.2 3.2,-3.5 -2.8,-1.1 -1.4,-1.4 .1,-1.7 -.5,-.6 h -2 l .2,-2.5 -.7,-1.2 -2.6,-2.3 -4.5,-1.9 -2.8,-.2 -3.3,-2.7 -1.2,-.6 z m -15.3,-17 -1.1,1.5 -.1,1.7 2.7,2.4 1.9,.5 .6,1 .4,3 3.6,.2 5.3,-2.6 -.1,-2.5 -1.4,-.5 -3.5,-2.6 -1.8,-.3 -2.9,1.3 -1.5,-2.7 z m -1.5,11.5 .9,-1.4 2.5,-.3 .6,1.8 z m -7,-8.7 1.7,4 3.1,-.6 .3,-2 -1.4,-1.5 z m -4.1,-6.7 -1.1,2.4 h 5 l 4.8,1.6 2.5,-1.6 .2,-1.5 -4.8,.2 z m -16,-10.6 -1.9,2.1 -2.9,.6 .8,2.2 2.2,2.8 .1,1 2.1,-.3 2.3,.1 1.7,1.2 3.5,-.8 v -.7 l -1,-.8 -.5,-2.1 -.8,-.3 -.5,1 -1.2,-1.3 .2,-1.4 -1.8,-3.3 -1.1,-.7 z m -31.8,-12.4 -4.2,2.9 .2,2.3 2.4,1.2 1.9,1.3 2.7,.4 2.6,-2.2 -.2,-1.9 .8,-1.7 v -1.4 l -1,-.9 z m -10.8,4.8 -.3,1.2 -1.9,.9 -.6,1.8 1,.8 1.1,-1.5 1.9,-.6 .4,-2.6 z"],"ID":["m 165.3,183.1 -24.4,-5.4 8.5,-37.3 2.9,-5.8 .4,-2.1 .8,-.9 -.9,-2 -2.9,-1.2 .2,-4.2 4,-5.8 2.5,-.8 1.6,-2.3 -.1,-1.6 1.8,-1.6 3.2,-5.5 4.2,-4.8 -.5,-3.2 -3.5,-3.1 -1.6,-3.6 1.1,-4.3 -.7,-4 12.7,-56.1 14.2,3 -4.8,22 3.7,7.4 -1.6,4.8 3.6,4.8 1.9,.7 3.9,8.3 v 2.1 l 2.3,3 h .9 l 1.4,2.1 h 3.2 v 1.6 l -7.1,17 -.5,4.1 1.4,.5 1.6,2.6 2.8,-1.4 3.6,-2.4 1.9,1.9 .5,2.5 -.5,3.2 2.5,9.7 2.6,3.5 2.3,1.4 .4,3 v 4.1 l 2.3,2.3 1.6,-2.3 6.9,1.6 2.1,-1.2 9,1.7 2.8,-3.3 1.8,-.6 1.2,1.8 1.6,4.1 .9,.1 -8.5,54.8 -47.9,-8.2 z"],"IL":["m 623.5,265.9 -1,5.2 v 2 l 2.4,3.5 v .7 l -.3,.9 .9,1.9 -.3,2.4 -1.6,1.8 -1.3,4.2 -3.8,5.3 -.1,7 h -1 l .9,1.9 v .9 l -2.2,2.7 .1,1.1 1.5,2.2 -.1,.9 -3.7,.6 -.6,1.2 -1.2,-.6 -1,.5 -.4,3.3 1.7,1.8 -.4,2.4 -1.5,.3 -6.9,-3 -4,3.7 .3,1.8 h -2.8 l -1.4,-1.5 -1.8,-3.8 v -1.9 l .8,-.6 .1,-1.3 -1.7,-1.9 -.9,-2.5 -2.7,-4.1 -4.8,-1.3 -7.4,-7.1 -.4,-2.4 2.8,-7.6 -.4,-1.9 1.2,-1.1 v -1.3 l -2.8,-1.5 -3,-.7 -3.4,1.2 -1.3,-2.3 .6,-1.9 -.7,-2.4 -8.6,-8.4 -2.2,-1.5 -2.5,-5.9 -1.2,-5.4 1.4,-3.7 .7,-.7 .1,-2.3 -.7,-.9 1,-1.5 1.8,-.6 .9,-.3 1,-1.2 v -2.4 l 1.7,-2.4 .5,-.5 .1,-3.5 -.9,-1.4 -1,-.3 -1.1,-1.6 1,-4 3,-.8 h 2.4 l 4.2,-1.8 1.7,-2.2 .1,-2.4 1.1,-1.3 1.3,-3.2 -.1,-2.6 -2.8,-3.5 h -1.2 l -.9,-1.1 .2,-1.6 -1.7,-1.7 -2.5,-1.3 .5,-.6 45.9,-2.8 .1,4.6 3.4,4.6 1.2,4.1 1.6,3.2 z"],"IN":["m 629.2,214.8 -5.1,2.3 -4.7,-1.4 4.1,50.2 -1,5.2 v 2 l 2.4,3.5 v .7 l -.3,.9 .9,1.9 -.3,2.4 -1.6,1.8 -1.3,4.2 -3.8,5.3 -.1,7 h -1 l .9,1.9 1.1,.8 .6,-1 -.7,-1.7 4.6,-.5 .2,1.2 1.1,.2 .4,-.9 -.6,-1.3 .3,-.8 1.3,.8 1.7,-.4 1.7,.6 3.4,2.1 1.8,-2.8 3.5,-2.2 3,3.3 1.6,-2.1 .3,-2.7 3.8,-2.3 .2,1.3 1.9,1.2 3,-.2 1.2,-.7 .1,-3.4 2.5,-3.7 4.6,-4.4 -.1,-1.7 1.2,-3.8 2.2,1 6.7,-4.5 -.4,-1.7 -1.5,-2.1 1,-1.9 -6.6,-57.2 -.1,-1.4 -32.4,3.4 z"],"IA":["m 556.9,183 2.1,1.6 .6,1.1 -1.6,3.3 -.1,2.5 2,5.5 2.7,1.5 3.3,.7 1.3,2.8 -.5,.6 2.5,1.3 1.7,1.7 -.2,1.6 .9,1.1 h 1.2 l 2.8,3.5 .1,2.6 -1.3,3.2 -1.1,1.3 -.1,2.4 -1.7,2.2 -4.2,1.8 h -2.4 l -3,.8 -1,4 1.1,1.6 1,.3 .9,1.4 -.1,3.5 -.5,.5 -1.7,2.4 v 2.4 l -1,1.2 -.9,.3 -1.8,.6 -1,1.5 .7,.9 -.1,2.3 -.7,.7 -1.5,-.8 -1.1,-1.1 -.6,-1.6 -1.7,-1.3 -14.3,.8 -27.2,1.2 -25.9,-.1 -1.8,-4.4 .7,-2.2 -.8,-3.3 .2,-2.9 -1.3,-.7 -.4,-6.1 -2.8,-5 -.2,-3.7 -2.2,-4.3 -1.3,-3.7 v -1.4 l -.6,-1.7 v -2.3 l -.5,-.9 -.7,-1.7 -.3,-1.3 -1.3,-1.2 1,-4.3 1.7,-5.1 -.7,-2 -1.3,-.4 -.4,-1.6 1,-.5 .1,-1.1 -1.3,-1.5 .1,-1.6 2.2,.1 h 28.2 l 36.3,-.9 18.6,-.7 z"],"KS":["m 459.1,259.5 -43.7,-1.2 -36,-2 -4.8,67 67.7,2.9 62,.1 -.5,-48.1 -3.2,-.7 -2.6,-4.7 -2.5,-2.5 .5,-2.3 2.7,-2.6 .1,-1.2 -1.5,-2.1 -.9,1 -2,-.6 -2.9,-3 z"],"KY":["m 692.1,322.5 -20.5,1.4 -5.2,.8 -17.4,1 -2.6,.8 -22.6,2 -.7,-.6 h -3.7 l 1.2,3.2 -.6,.9 -23.3,1.5 1,-2.7 1.4,.9 .7,-.4 1.2,-4.1 -1,-1 1,-2 .2,-.9 -1.3,-.8 -.3,-1.8 4,-3.7 6.9,3 1.5,-.3 .4,-2.4 -1.7,-1.8 .4,-3.3 1,-.5 1.2,.6 .6,-1.2 3.7,-.6 .1,-.9 -1.5,-2.2 -.1,-1.1 2.2,-2.7 0,-.9 1.1,.8 .6,-1 -.7,-1.7 4.6,-.5 .2,1.2 1.1,.2 .4,-.9 -.6,-1.3 .3,-.8 1.3,.8 1.7,-.4 1.7,.6 3.4,2.1 1.8,-2.8 3.5,-2.2 3,3.3 1.6,-2.1 .3,-2.7 3.8,-2.3 .2,1.3 1.9,1.2 3,-.2 1.2,-.7 .1,-3.4 2.5,-3.7 4.6,-4.4 -.1,-1.7 1.2,-3.8 2.2,1 6.7,-4.5 -.4,-1.7 -1.5,-2.1 1,-1.9 1.3,.5 2.2,.1 1.9,-.8 2.9,1.2 2.2,3.4 v 1 l 4.1,.7 2.3,-.2 1.9,2.1 2.2,.2 v -1 l 1.9,-.8 3,.8 1.2,.8 1.3,-.7 h .9 l .6,-1.7 3.4,-1.8 .5,.8 .8,2.9 3.5,1.4 1.2,2.1 -.1,1.1 .6,1 -.6,3.6 1.9,1.6 .8,1.1 1,.6 -.1,.9 4.4,5.6 h 1.4 l 1.5,1.8 1.2,.3 1.4,-.1 -4.9,6.6 -2.9,1 -3,3 -.4,2.2 -2.1,1.3 -.1,1.7 -1.4,1.4 -1.8,.5 -.5,1.9 -1,.4 -6.9,4.2 z m -98,11.3 -.7,-.7 .2,-1 h 1.1 l .7,.7 -.3,1 z"],"LA":["m 602.5,472.8 -1.2,-1.8 .3,-1.3 -4.8,-6.8 .9,-4.6 1,-1.4 .1,-1.4 -36,2 1.7,-11.9 2.4,-4.8 6,-8.4 -1.8,-2.5 h 2 v -3.3 l -2.4,-2.5 .5,-1.7 -1.2,-1 -1.6,-7.1 .6,-1.4 -52.3,1.3 .5,19.9 .7,3.4 2.6,2.8 .7,5.4 3.8,4.6 .8,4.3 h 1 l -.1,7.3 -3.3,6.4 1.3,2.3 -1.3,1.5 .7,3 -.1,4.3 -2.2,3.5 -.1,.8 -1.7,1.2 1,1.8 1.2,1.1 1.6,-1.3 5.3,-.9 6.1,-.1 9.6,3.8 8,1 1.5,-1.4 1.8,-.2 4.8,2.2 1.6,-.4 1.1,-1.5 -4.2,-1.8 -2.2,1 -1.1,-.2 -1.4,-2 3.3,-2.2 1.6,-.1 v 1.7 l 1.5,-.1 3.4,-.3 .4,2.3 1.1,.4 .6,1.9 4.8,1 1.7,1.6 v .7 h -1.2 l -1.5,1.7 1.7,1.2 5.4,1 2.7,2.8 4.4,-1 -3.7,.2 -.1,-.6 2.8,-.7 .2,-1.8 1.2,-.3 v -1.4 l 1.1,.1 v 1.6 l 2.5,.1 .8,-1.9 .9,.3 .2,2.5 1.2,.2 -1.8,2 2.6,-.9 2,-1.1 2.9,-3.3 h -.7 l -1.3,1.2 -.4,-.1 -.5,-.8 .9,-1.2 v -2.3 l 1.1,-.8 .7,.7 1,-.8 1,-.1 .6,1.3 -.6,1.9 h 2.4 l 5.1,1.7 .5,1.3 1.6,1.4 2.8,.1 1.3,.7 1.8,-1 .9,-1.7 v -1.7 h -1.4 l -1.2,-1.4 -1.1,-1.1 -3.2,-.9 -2.6,.2 -4.2,-2.4 v -2.3 l 1.3,-1 2.4,.6 -3.1,-1.6 .2,-.8 h 3.6 l 2.6,-3.5 -2.6,-1.8 .8,-1.5 -1.2,-.8 h -.8 l -2,2.1 v 2.1 l -.6,.7 -1.1,-.1 -1.6,-1.4 h -1.3 v -1.5 l .6,-.7 .8,.7 1.7,-1.6 .7,-1.6 .8,-.3 z m -10.3,-2.7 1.9,1 .8,1.1 2.5,.1 1.5,.8 .2,1.4 -.4,.6 -.9,-1.5 -1.4,1.2 -.9,1.4 -2.8,.8 -1.6,.1 -3.7,-1 .1,-1.7 2,-2 1.1,-2.4 z m -4.7,1.2 v 1.1 l -1.8,2 h -1.2 v -2.2 l 1.6,-1.5 z"],"ME":["m 875,128.7 .6,4 3.2,2 .8,2.2 2.3,1.4 1.4,-.3 1,-3 -.8,-2.9 1.6,-.9 .5,-2.8 -.6,-1.3 3.3,-1.9 -2.2,-2.3 .9,-2.4 1.4,-2.2 .5,3.2 1.6,-2 1.3,.9 1.2,-.8 v -1.7 l 3.2,-1.3 .3,-2.9 2.5,-.2 2.7,-3.7 v -.7 l -.9,-.5 -.1,-3.3 .6,-1.1 .2,1.6 1,-.5 -.2,-3.2 -.9,.3 -.1,1.2 -1.2,-1.4 .9,-1.4 .6,.1 1.1,-.4 .5,2.8 2,-.3 2.9,.7 v -1 l -1.1,-1.2 1.3,.1 .1,-2.3 .6,.8 .3,1.9 2.1,1.5 .2,-1 .9,-.2 -.3,-.8 .8,-.6 -.1,-1.6 -1.6,-.2 -2,.7 1.4,-1.6 .7,-.8 1.3,-.2 .4,1.3 1.7,1.6 .4,-2.1 2.3,-1.2 -.9,-1.3 .1,-1.7 1.1,.5 h .7 l 1.7,-1.4 .4,-2.3 2.2,.3 .1,-.7 .2,-1.6 .5,1.4 1.5,-1 2.3,-4.1 -.1,-2.2 -1.4,-2 -3,-3.2 h -1.9 l -.8,2.2 -2.9,-3 .3,-.8 v -1.5 l -1.6,-4.5 -.8,-.2 -.7,.4 h -4.8 l -.3,-3.6 -8.1,-26 -7.3,-3.7 -2.9,-.1 -6.7,6.6 -2.7,-1 -1,-3.9 h -2.7 l -6.9,19.5 .7,6.2 -1.7,2.4 -.4,4.6 1.3,3.7 .8,.2 v 1.6 l -1.6,4.5 -1.5,1.4 -1.3,2.2 -.4,7.8 -2.4,-1 -1.5,.4 z m 34.6,-24.7 -1,.8 v 1.3 l .7,-.8 .9,.8 .4,-.5 1.1,.2 -1,-.8 .4,-.8 z m -1.7,2.6 -1,1.1 .5,.4 -.1,1 h 1.1 v -1.8 z m -3,-1.6 .9,1.3 1,.5 .3,-1 v -1.8 l -1.3,-.7 -.4,1.2 z m -1,5 -1.7,-1.7 1.6,-2.4 .8,.3 .2,1.1 1,.8 v 1.1 l -1,1 z"],"MD":["m 822.9,269.3 0,-1.7 h -.8 l 0,1.8 z m 11.8,-3.9 1.2,-2.2 .1,-2.5 -.6,-.6 -.7,.9 -.2,2.1 -.8,1.4 -.3,1.1 -4.6,1.6 -.7,.8 -1.3,.2 -.4,.9 -1.3,.6 -.3,-2.5 .4,-.7 -.8,-.5 .2,-1.5 -1.6,1 v -2 l 1.2,-.3 -1.9,-.4 -.7,-.8 .4,-1.3 -.8,-.6 -.7,1.6 .5,.8 -.7,.6 -1.1,.5 -2,-1 -.2,-1.2 -1,-1.1 -1.4,-1.7 1.5,-.8 -1,-.6 v -.9 l .6,-1 1.7,-.3 -1.4,-.6 -.1,-.7 -1.3,-.1 -.4,1.1 -.6,.3 .1,-3.4 1,-1 .8,.7 .1,-1.6 -1,-.9 -.9,1.1 -1,1.4 -.6,-1 .2,-2.4 .9,-1 .9,.9 1.2,-.7 -.4,-1.7 -1,1 -.9,-2.1 -.2,-1.7 1.1,-2.4 1.1,-1.4 1.4,-.2 -.5,-.8 .5,-.6 -.3,-.7 .2,-2.1 -1.5,.4 -.8,1.1 1,1.3 -2.6,3.6 -.9,-.4 -.7,.9 -.6,2.2 -1.8,.5 1.3,.6 1.3,1.3 -.2,.7 .9,1.2 -1.1,1 .5,.3 -.5,1.3 v 2.1 l -.5,1.3 .9,1.1 .7,3.4 1.3,1.4 1.6,1.4 .4,2.8 1.6,2 .4,1.4 v 1 h -.7 l -1.5,-1.2 -.4,.2 -1.2,-.2 -1.7,-1.4 -1.4,-.3 -1,.5 -1.2,-.3 -.4,.2 -1.7,-.8 -1,-1 -1,-1.3 -.6,-.2 -.8,.7 -1.6,1.3 -1.1,-.8 -.4,-2.3 .8,-2.1 -.3,-.5 .3,-.4 -.7,-1 1,-.1 1,-.9 .4,-1.8 1.7,-2.6 -2.6,-1.8 -1,1.7 -.6,-.6 h -1 l -.6,-.1 -.4,-.4 .1,-.5 -1.7,-.6 -.8,.3 -1.2,-.1 -.7,-.7 -.5,-.2 -.2,-.7 .6,-.8 v -.9 l -1.2,-.2 -1,-.9 -.9,.1 -1.6,-.3 -.9,-.4 .2,-1.6 -1,-.5 -.2,-.7 h -.7 l -.8,-1.2 .2,-1 -2.6,.4 -2.2,-1.6 -1.4,.3 -.9,1.4 h -1.3 l -1.7,2.9 -3.3,.4 -1.9,-1 -2.6,3.8 -2.2,-.3 -3.1,3.9 -.9,1.6 -1.8,1.6 -1.7,-11.4 60.5,-11.8 7.6,27.1 10.9,-2.3 0,5.3 -.1,3.1 -1,1.8 z m -13.4,-1.8 -1.3,.9 .8,1.8 1.7,.8 -.4,-1.6 z"],"MA":["m 899.9,174.2 h 3.4 l .9,-.6 .1,-1.3 -1.9,-1.8 .4,1 -1.5,1.5 h -2.3 l .1,.8 z m -9,1.8 -1.2,-.6 1,-.8 .6,-2.1 1.2,-1 .8,-.2 .6,.9 1.1,.2 .6,-.6 .5,1.9 -1.3,.3 -2.8,.7 z m -34.9,-23.4 18.4,-3.8 1,-1.5 .3,-1.7 1.9,-.6 .5,-1.1 1.7,-1.1 1.3,.3 1.7,3.3 1,.4 1.1,-1.3 .8,1.3 v 1.1 l -3,2.4 .2,.8 -.9,1 .4,.8 -1.3,.3 .9,1.2 -.8,.7 .6,1 .9,-.2 .3,-.8 1.1,.6 h 1.8 l 2.5,2.6 .2,2.6 1.8,.1 .8,1.1 .6,2 1,.7 h 1.9 l 1.9,-.1 .8,-.9 1.6,-1.2 1.1,-.3 -1.2,-2.1 -.3,.9 -1.5,-3.6 h -.8 l -.4,.9 -1.2,-1 1.3,-1.1 1.8,.4 2.3,2.1 1.3,2.7 1.2,3.3 -1,2.8 v -1.8 l -.7,-1 -3.5,2.3 -.9,-.3 -1.6,1 -.1,1.2 -2.2,1.2 -2,2.1 -2,1.9 h -1.2 l 3.3,-3.3 .5,-1.9 -.5,-.6 -.3,-1.3 -.9,-.1 -.1,1.3 -1,1.2 h -1.2 l -.3,1.1 .4,1.2 -1.2,1.1 -1.1,-.2 -.4,1 -1.4,-3 -1.3,-1.1 -2.6,-1.3 -.6,-2.2 h -.8 l -.7,-2.6 -6.5,2 -.1,-.3 -14.9,3.4 v .7 l -.9,.3 -.5,-.7 -10.5,2.4 -.7,-1 .5,-15 z"],"MI":["m 663.3,209.8 .1,1.4 21.4,-3.5 .5,-1.2 3.9,-5.9 v -4.3 l .8,-2.1 2.2,-.8 2,-7.8 1,-.5 1,.6 -.2,.6 -1.1,.8 .3,.9 .8,.4 1.9,-1.4 .4,-9.8 -1.6,-2.3 -1.2,-3.7 v -2.5 l -2.3,-4.4 v -1.8 l -1.2,-3.3 -2.3,-3 -2.9,-1 -4.8,3 -2.5,4.6 -.2,.9 -3,3.5 -1.5,-.2 -2.9,-2.8 -.1,-3.4 1.5,-1.9 2,-.2 1.2,-1.7 .2,-4 .8,-.8 1.1,-.1 .9,-1.7 -.2,-9.6 -.3,-1.3 -1.2,-1.2 -1.7,-1 -.1,-1.8 .7,-.6 1.8,.8 -.3,-1.7 -1.9,-2.7 -.7,-1.6 -1.1,-1.1 h -2.2 l -8.1,-2.9 -1.4,-1.7 -3.1,-.3 -1.2,.3 -4.4,-2.3 h -1.4 l .5,1 -2.7,-.1 .1,.6 .6,.6 -2.5,2.1 .1,1.8 1.5,2.3 1.5,.2 v .6 l -1.5,.5 -2.1,-.1 -2.8,2.5 .1,2.5 .4,5.8 -2.2,3.4 .8,-4.5 -.8,-.6 -.9,5.3 -1,-2.3 .5,-2.3 -.5,-1 .6,-1.3 -.6,-1.1 1,-1 v -1.2 l -1.3,.6 -1.3,3.1 -.7,.7 -1.3,2.4 -1.7,-.2 -.1,1.2 h -1.6 l .2,1.5 .2,2 -3,1.2 .1,1.3 1,1.7 -.1,5.2 -1.3,4.4 -1.7,2.5 1.2,1.4 .8,3.5 -1,2.5 -.2,2.1 1.7,3.4 2.5,4.9 1.2,1.9 1.6,6.9 -.1,8.8 -.9,3.9 -2,3.2 -.9,3.7 -2,3 -1.2,1 z m -95.8,-96.8 3,3.8 17,3.8 1.4,1 4,.8 .7,.5 2.8,-.2 4.9,.8 1.4,1.5 -1,1 .8,.8 3.8,.7 1.2,1.2 .1,4.4 -1.3,2.8 2,.1 1,-.8 .9,.8 -1.1,3.1 1,1.6 1.2,.3 .8,-1.8 2.9,-4.6 1.6,-6 2.3,-2 -.5,-1.6 .5,-.9 1,1.6 -.3,2.2 2.9,-2.2 .2,-2.3 2.1,.6 .8,-1.6 .7,.6 -.7,1.5 -1,.5 -1,2 1.4,1.8 1.1,-.5 -.5,-.7 1,-1.5 1.9,-1.7 h .8 l .2,-2.6 2,-1.8 7.9,-.5 1.9,-3.1 3.8,-.3 3.8,1.2 4.2,2.7 .7,-.2 -.2,-3.5 .7,-.2 4.5,1.1 1.5,-.2 2.9,-.7 1.7,.4 1.8,.1 v -1.1 l -.7,-.9 -1.5,-.2 -1.1,-.8 .5,-1.4 -.8,-.3 -2.6,.1 -.1,-1 1.1,-.8 .6,.8 .5,-1.8 -.7,-.7 .7,-.2 -1.4,-1.3 .3,-1.3 .1,-1.9 h -1.3 l -1.5,1 -1.9,.1 -.5,1.8 -1.9,.2 -.3,-1.2 -2.2,.1 -1,1.2 -.7,-.1 -.2,-.8 -2.6,.4 -.1,-4.8 1,-2 -.7,-.1 -1.8,1.1 h -2.2 l -3.8,2.7 -6.2,.3 -4.1,.8 -1.9,1.5 -1.4,1.3 -2.5,1.7 -.3,.8 -.6,-1.7 -1.3,-.6 v .6 l .7,.7 v 1.3 l -1.5,-.6 h -.6 l -.3,1.2 -2,-1.9 -1.3,-.2 -1.3,1.5 -3.2,-.1 -.5,-1.4 -2,-1.9 -1.3,-1.6 v -.7 l -1.1,-1.4 -2.6,-1.2 -3.3,-.1 -1.1,-.9 h -1.4 l -.7,.4 -2.2,2.2 -.7,1.1 -1,-.7 .2,-1 .8,-2.1 3.2,-5 .8,-.2 1.7,-1.9 .7,-1.6 3,-.6 .8,-.6 -.1,-1 -.5,-.5 -4.5,.2 -2,.5 -2.6,1.2 -1.2,1.2 -1.7,2.2 -1.8,1 -3.3,3.4 -.4,1.6 -7.4,4.6 -4,.5 -1.8,.4 -2.3,3 -1.8,.7 -4.4,2.3 z m 100.7,3.8 3.8,.1 .6,-.5 -.2,-2 -1.7,-1.8 -1.9,.1 -.1,.5 1.1,.4 -1.6,.8 -.3,1 -.6,-.6 -.4,.8 z m -75.1,-41.9 -2.3,.2 -2.7,1.9 -7.1,5.3 .8,1 1.8,.3 2.8,-2 -1.1,-.5 2.3,-1.6 h 1 l 3,-1.9 -.1,-.9 z m 41.1,62.8 v 1 l 2.1,1.6 -.2,-2.4 z m -.7,2.8 1.1,.1 v .9 h -1 z m 21.4,-21.3 v .9 l .8,-.2 v -.5 z m 4.7,3.1 -.1,-1.1 -1.6,-.2 -.6,-.4 h -.9 l -.4,.3 .9,.4 1.1,1.1 z m -18,1.2 -.1,1.1 -.3,.7 .2,2.2 .4,.3 .7,.1 .5,-.9 .1,-1.6 -.3,-.6 -.1,-1.1 z"],"MN":["m 464.7,68.6 -1.1,2.8 .8,1.4 -.3,5.1 -.5,1.1 2.7,9.1 1.3,2.5 .7,14 1,2.7 -.4,5.8 2.9,7.4 .3,5.8 -.1,2.1 -.1,2.2 -.9,2 -3.1,1.9 -.3,1.2 1.7,2.5 .4,1.8 2.6,.6 1.5,1.9 -.2,39.5 h 28.2 l 36.3,-.9 18.6,-.7 -1.1,-4.5 -.2,-3 -2.2,-3 -2.8,-.7 -5.2,-3.6 -.6,-3.3 -6.3,-3.1 -.2,-1.3 h -3.3 l -2.2,-2.6 -2,-1.3 .7,-5.1 -.9,-1.6 .5,-5.4 1,-1.8 -.3,-2.7 -1.2,-1.3 -1.8,-.3 v -1.7 l 2.8,-5.8 5.9,-3.9 -.4,-13 .9,.4 .6,-.5 .1,-1.1 .9,-.6 1.4,1.2 .7,-.1 v 0 l -1.2,-2.2 4.3,-3.1 3.1,-3.7 1.6,-.8 4.7,-5.9 6.3,-5.8 3.9,-2.1 6.3,-2.7 7.6,-4.5 -.6,-.4 -3.7,.7 -2.8,.1 -1,-1.6 -1.4,-.9 -9.8,1.2 -1,-2.8 -1.6,-.1 -1.7,.8 -3.7,3.1 h -4.1 l -2.1,-1 -.3,-1.7 -3.9,-.8 -.6,-1.6 -.7,-1.3 -1,.9 -2.6,.1 -9.9,-5.5 h -2.9 l -.8,-.7 -3.1,1.3 -.8,1.3 -3.3,.8 -1.3,-.2 v -1.7 l -.7,-.9 h -5.9 l -.4,-1.4 h -2.6 l -1.1,.4 -2.4,-1.7 .3,-1.4 -.6,-2.4 -.7,-1.1 -.2,-3 -1,-3.1 -2.1,-1.6 h -2.9 l .1,8 -30.9,-.4 z"],"MS":["m 623.8,468.6 -5,.1 -2.4,-1.5 -7.9,2.5 -.9,-.7 -.5,.2 -.1,1.6 -.6,.1 -2.6,2.7 -.7,-.1 -.6,-.7 -1.2,-1.8 .3,-1.3 -4.8,-6.8 .9,-4.6 1,-1.4 .1,-1.4 -36,2 1.7,-11.9 2.4,-4.8 6,-8.4 -1.8,-2.5 h 2 v -3.3 l -2.4,-2.5 .5,-1.7 -1.2,-1 -1.6,-7.1 .6,-1.4 1.2,-1.5 .5,-3 -1.5,-2.3 -.5,-2.2 .9,-.7 v -.8 l -1.7,-1.1 -.1,-.7 1.6,-.9 -1.2,-1.1 1.7,-7.1 3.4,-1.6 v -.8 l -1.1,-1.4 2.9,-5.4 h 1.9 l 1.5,-1.2 -.3,-5.2 3.1,-4.5 1.8,-.6 -.5,-3.1 38.3,-2.6 1.3,2 -1.3,67 4.4,33.2 z"],"MO":["m 555.3,248.9 -1.1,-1.1 -.6,-1.6 -1.7,-1.3 -14.3,.8 -27.2,1.2 -25.9,-.1 1.3,1.3 -.3,1.4 2.1,3.7 3.9,6.3 2.9,3 2,.6 .9,-1 1.5,2.1 -.1,1.2 -2.7,2.6 -.5,2.3 2.5,2.5 2.6,4.7 3.2,.7 .5,48.1 .2,10.8 39.1,-.7 39.8,-2 1.6,2.5 v 2.2 l -1.7,1.5 -2.8,5.1 11.2,-.8 1,-2 1.2,-.5 v -.7 l -1.2,-1.1 -.6,-1 1.7,.2 .8,-.7 -1.4,-1.5 1.4,-.5 .1,-1 -.6,-1 v -1.3 l -.7,-.7 .2,-1 h 1.1 l .7,.7 -.3,1 .8,.7 .8,-1 1,-2.7 1.4,.9 .7,-.4 1.2,-4.1 -1,-1 1,-2 .2,-.9 -1.3,-.8 h -2.8 l -1.4,-1.5 -1.8,-3.8 v -1.9 l .8,-.6 .1,-1.3 -1.7,-1.9 -.9,-2.5 -2.7,-4.1 -4.8,-1.3 -7.4,-7.1 -.4,-2.4 2.8,-7.6 -.4,-1.9 1.2,-1.1 v -1.3 l -2.8,-1.5 -3,-.7 -3.4,1.2 -1.3,-2.3 .6,-1.9 -.7,-2.4 -8.6,-8.4 -2.2,-1.5 -2.5,-5.9 -1.2,-5.4 1.4,-3.7 z"],"MT":["m 247,130.5 57.3,7.9 51,5.3 2,-20.7 5.2,-66.7 -53.5,-5.6 -54.3,-7.7 -65.9,-12.5 -4.8,22 3.7,7.4 -1.6,4.8 3.6,4.8 1.9,.7 3.9,8.3 v 2.1 l 2.3,3 h .9 l 1.4,2.1 h 3.2 v 1.6 l -7.1,17 -.5,4.1 1.4,.5 1.6,2.6 2.8,-1.4 3.6,-2.4 1.9,1.9 .5,2.5 -.5,3.2 2.5,9.7 2.6,3.5 2.3,1.4 .4,3 v 4.1 l 2.3,2.3 1.6,-2.3 6.9,1.6 2.1,-1.2 9,1.7 2.8,-3.3 1.8,-.6 1.2,1.8 1.6,4.1 .9,.1 z"],"NE":["m 402.5,191.1 38,1.6 3.4,3.2 1.7,.2 2.1,2 1.8,-.1 1.8,-2 1.5,.6 1,-.7 .7,.5 .9,-.4 .7,.4 .9,-.4 1,.5 1.4,-.6 2,.6 .6,1.1 6.1,2.2 1.2,1.3 .9,2.6 1.8,.7 1.5,-.2 .5,.9 v 2.3 l .6,1.7 v 1.4 l 1.3,3.7 2.2,4.3 .2,3.7 2.8,5 .4,6.1 1.3,.7 -.2,2.9 .8,3.3 -.7,2.2 1.8,4.4 1.3,1.3 -.3,1.4 2.1,3.7 3.9,6.3 h -32.4 l -43.7,-1.2 -36,-2 1.4,-22.1 -33.1,-2.4 3.7,-44.2 z"],"NV":["m 167.6,296.8 -3.4,17.5 -2.4,2.9 h -2 l -1.2,-2.7 -3.7,-1.4 -3.5,.6 -1,13.6 .5,4.9 -.5,2.9 -1.4,3 -70.4,-105 -1.1,-3.5 16.4,-63.1 47,11.2 24.4,5.4 23.3,4.7 z"],"NH":["m 862.6,93.6 -1.3,.1 -1,-1.1 -1.9,1.4 -.5,6.1 1.2,2.3 -1.1,3.5 2.1,2.8 -.4,1.7 .1,1.3 -1.1,2.1 -1.4,.4 -.6,1.3 -2.1,1 -.7,1.5 1.4,3.4 -.5,2.5 .5,1.5 -1,1.9 .4,1.9 -1.3,1.9 .2,2.2 -.7,1.1 .7,4.5 .7,1.5 -.5,2.6 .9,1.8 -.2,2.5 -.5,1.3 -.1,1.4 2.1,2.6 18.4,-3.8 1,-1.5 .3,-1.7 1.9,-.6 .5,-1.1 1.7,-1.1 1.3,.3 .8,-4.8 -2.3,-1.4 -.8,-2.2 -3.2,-2 -.6,-4 -11.9,-36.8 z"],"NJ":["m 842.5,195.4 -14.6,-4.9 -1.8,2.5 .1,2.2 -3,5.4 1.5,1.8 -.7,2 -1,1 .5,3.6 2.7,.9 1,2.8 2.1,1.1 4.2,3.2 -3.3,2.6 -1.6,2.3 -1.8,3 -1.6,.6 -1.4,1.7 -1,2.2 -.3,2.1 .8,.9 .4,2.3 1.2,.6 2.4,1.5 1.8,.8 1.6,.8 .1,1.1 .8,.1 1.1,-1.2 .8,.4 2.1,.2 -.2,2.9 .2,2.5 1.8,-.7 1.5,-3.9 1.6,-4.8 2.9,-2.8 .6,-3.5 -.6,-1.2 1.7,-2.9 v -1.2 l -.7,-1.1 1.2,-2.7 -.3,-3.6 -.6,-8.2 -1.2,-1.4 v 1.4 l .5,.6 h -1.1 l -.6,-.4 -1.3,-.2 -.9,.6 -1.2,-1.6 .7,-1.7 v -1 l 1.7,-.7 .8,-2.1 z"],"NM":["m 357.5,332.9 h -.8 l -7.9,99.3 -31.8,-2.6 -34.4,-3.6 -.3,3 2,2.2 -30.8,-4.1 -1.4,10.2 -15.7,-2.2 17.4,-124.1 52.6,6.5 51.7,4.8 z"],"NY":["m 872.9,181.6 -1.3,.1 -.5,1 z m -30.6,22.7 .7,.6 1.3,-.3 1.1,.3 .9,-1.3 h 1.9 l 2.4,-.9 5.1,-2.1 -.5,-.5 -1.9,.8 -2,.9 .2,-.8 2.6,-1.1 .8,-1 1.2,.1 4.1,-2.3 v .7 l -4.2,3 4.5,-2.8 1.7,-2.2 1.5,-.1 4.5,-3.1 3.2,-3.1 3,-2.3 1,-1.2 -1.7,-.1 -1,1.2 -.2,.7 -.9,.7 -.8,-1.1 -1.7,1 -.1,.9 -.9,-.2 .5,-.9 -1.2,-.7 -.6,.9 .9,.3 .2,.5 -.3,.5 -1.4,2.6 h -1.9 l .9,-1.8 .9,-.6 .3,-1.7 1.4,-1.6 .9,-.8 1.5,-.7 -1.2,-.2 -.7,.9 h -.7 l -1.1,.8 -.2,1 -2.2,2.1 -.4,.9 -1.4,.9 -7.7,1.9 .2,.9 -.9,.7 -2,.3 -1,-.6 -.2,1.1 -1.1,-.4 .1,1 -1.2,-.1 -1.2,.5 -.2,1.1 h -1 l .2,1 h -.7 l .2,1 -1.8,.4 -1.5,2.3 z m -.8,-.4 -1.6,.4 v 1 l -.7,1.6 .6,.7 2.4,-2.3 -.1,-.9 z m -10.1,-95.2 -.6,1.9 1.4,.9 -.4,1.5 .5,3.2 2.2,2.3 -.4,2.2 .6,2 -.4,1 -.3,3.8 3.1,6.7 -.8,1.8 .9,2.2 .9,-1.6 1.9,1.5 3,14.2 -.5,2 1.1,1 -.5,15 .7,1 2.8,16.3 1.8,1.5 -3.5,3.4 1.7,2.2 -1.3,3.3 -1.5,1.7 -1.5,2.3 -.2,-.7 .4,-5.9 -14.6,-4.9 -1.6,-1.1 -1.9,.3 -3,-2.2 -3,-5.8 h -2 l -.4,-1.5 -1.7,-1.1 -70.5,13.9 -.8,-6 4.3,-3.9 .6,-1.7 3.9,-2.5 .6,-2.4 2.3,-2 .8,-1.1 -1.7,-3.3 -1.7,-.5 -1.8,-3 -.2,-3.2 7.6,-3.9 8.2,-1.6 h 4.4 l 3.2,1.6 .9,-.1 1.8,-1.6 3.4,-.7 h 3 l 2.6,-1.3 2.5,-2.6 2.4,-3.1 1.9,-.4 1.1,-.5 .4,-3.2 -1.4,-2.7 -1.2,-.7 2,-1.3 -.1,-1.8 h -1.5 l -2.3,-1.4 -.1,-3.1 6.2,-6.1 .7,-2.4 3.7,-6.3 5.9,-6.4 2.1,-1.7 2.5,.1 20.6,-5.2 z"],"NC":["m 829,300.1 -29.1,6.1 -39.4,7.3 -29.4,3.5 v 5.2 l -1.5,-.1 -1.4,1.2 -2.4,5.2 -2.6,-1.1 -3.5,2.5 -.7,2.1 -1.5,1.2 -.8,-.8 -.1,-1.5 -.8,-.2 -4,3.3 -.6,3.4 -4.7,2.4 -.5,1.2 -3.2,2.6 -3.6,.5 -4.6,3 -.8,4.1 -1.3,.9 -1.5,-.1 -1.4,1.3 -.1,4.9 21.4,-3 4.4,-1.9 1.3,-.1 7.3,-4.3 23.2,-2.2 .4,.5 -.2,1.4 .7,.3 1.2,-1.5 3.3,3 .1,2.6 19.7,-2.8 24.5,17.1 4,-2.2 3,-.7 h 1.7 l 1.1,1.1 .8,-2 .6,-5 1.7,-3.9 5.4,-6.1 4.1,-3.5 5.4,-2.3 2.5,-.4 1.3,.4 .7,1.1 3.3,-6.6 3.3,-5.3 -.7,-.3 -4.4,6.8 -.5,-.8 2,-2.2 -.4,-1.5 -2,-.5 1,1.3 -1.2,.1 -1.2,-1.8 -1.2,2 -1.6,.2 1,-2.7 .7,-1.7 -.2,-2.9 -2.2,-.1 .9,-.9 1.1,.3 2.7,.1 .8,-.5 h 2.3 l 2,-1.9 .2,-3.2 1.3,-1.4 1.2,-.2 1.3,-1 -.5,-3.7 -2.2,-3.8 -2.7,-.2 -.9,1.6 -.5,-1 -2.7,.2 -1.2,.4 -1.9,1.2 -.3,-.4 h -.9 l -1.8,1.2 -2.6,.5 v -1.3 l .8,-1 1,.7 h 1 l 1.7,-2.1 3.7,-1.7 2,-2.2 h 2.4 l .8,1.3 1.7,.8 -.5,-1.5 -.3,-1.6 -2.8,-3.1 -.3,-1.4 -.4,1 -.9,-1.3 z m 7,31 2.7,-2.5 4.6,-3.3 v -3.7 l -.4,-3.1 -1.7,-4.2 1.5,1.4 1,3.2 .4,7.6 -1.7,.4 -3.1,2.4 -3.2,3.2 z m 1.9,-19.3 -.9,-.2 v 1 l 2.5,2.2 -.2,-1.4 z m 2.9,2.1 -1.4,-2.8 -2.2,-3.4 -2.4,-3 -2.2,-4.3 -.8,-.7 2.2,4.3 .3,1.3 3.4,5.5 1.8,2.1 z"],"ND":["m 464.7,68.6 -1.1,2.8 .8,1.4 -.3,5.1 -.5,1.1 2.7,9.1 1.3,2.5 .7,14 1,2.7 -.4,5.8 2.9,7.4 .3,5.8 -.1,2.1 -29.5,-.4 -46,-2.1 -39.2,-2.9 5.2,-66.7 44.5,3.4 55.3,1.6 z"],"OH":["m 685.7,208.8 1.9,-.4 3,1.3 2.1,.6 .7,.9 h 1 l 1,-1.5 1.3,.8 h 1.5 l -.1,1 -3.1,.5 -2,1.1 1.9,.8 1.6,-1.5 2.4,-.4 2.2,1.5 1.5,-.1 2.5,-1.7 3.6,-2.1 5.2,-.3 4.9,-5.9 3.8,-3.1 9.3,-5.1 4.9,29.9 -2.2,1.2 1.4,2.1 -.1,2.2 .6,2 -1.1,3.4 -.1,5.4 -1,3.6 .5,1.1 -.4,2.2 -1.1,.5 -2,3.3 -1.8,2 h -.6 l -1.8,1.7 -1.3,-1.2 -1.5,1.8 -.3,1.2 h -1.3 l -1.3,2.2 .1,2.1 -1,.5 1.4,1.1 v 1.9 l -1,.2 -.7,.8 -1,.5 -.6,-2.1 -1.6,-.5 -1,2.3 -.3,2.2 -1.1,1.3 1.3,3.6 -1.5,.8 -.4,3.5 h -1.5 l -3.2,1.4 -1.2,-2.1 -3.5,-1.4 -.8,-2.9 -.5,-.8 -3.4,1.8 -.6,1.7 h -.9 l -1.3,.7 -1.2,-.8 -3,-.8 -1.9,.8 v 1 l -2.2,-.2 -1.9,-2.1 -2.3,.2 -4.1,-.7 v -1 l -2.2,-3.4 -2.9,-1.2 -1.9,.8 -2.2,-.1 -1.3,-.5 -6.6,-57.2 21.4,-3.5 z"],"OK":["m 501.5,398.6 -4.6,-3.8 -2.2,-.9 -.5,1.6 -5.1,.3 -.6,-1.5 -5,2.5 -1.6,-.7 -3.7,.3 -.6,1.7 -3.6,.9 -1.3,-1.2 -1.2,.1 -2,-1.8 -2.1,.7 -2,-.5 -1.8,-2 -2.5,4.2 -1.2,.8 -1,-1.8 .3,-2 -1.2,-.7 -2.3,2.5 -1.7,-1.2 -.1,-1.5 -1.3,.5 -2.6,-1.7 -3,2.6 -2.3,-1.1 .7,-2.1 -2.3,.1 -1.9,-3 -3.5,-1.1 -2,2.3 -2.3,-2.2 -1.4,.4 -2,.1 -3.5,-1.9 -2.3,.1 -1.2,-.7 -.5,-2.9 -2.3,-1.7 -1.1,1.5 -1.4,-1 -1.2,-.4 -1.1,1 -1.5,-.3 -2.5,-3 -2.7,-1.3 1.4,-42.7 -52.6,-3.2 .6,-10.6 16.5,1 67.7,2.9 62,.1 .2,10.8 4.1,24.4 -.7,39 z"],"OR":["m 93.9,166.5 47,11.2 8.5,-37.3 2.9,-5.8 .4,-2.1 .8,-.9 -.9,-2 -2.9,-1.2 .2,-4.2 4,-5.8 2.5,-.8 1.6,-2.3 -.1,-1.6 1.8,-1.6 3.2,-5.5 4.2,-4.8 -.5,-3.2 -3.5,-3.1 -1.6,-3.6 -30.3,-7.3 -2.8,1 -5.4,-.9 -1.8,-.9 -1.5,1.2 -3.3,-.4 -4.5,.5 -.9,.7 -4.2,-.4 -.8,-1.6 -1.2,-.2 -4.4,1.3 -1.6,-1.1 -2.2,.8 -.2,-1.8 -2.3,-1.2 -1.5,-.2 -1,-1.1 -3,.3 -1.2,-.8 h -1.2 l -1.2,.9 -5.5,.7 -6.6,-4.2 1.1,-5.6 -.4,-4.1 -3.2,-3.7 -3.7,.1 -.4,-1.1 .4,-1.2 -.7,-.8 -1,.1 -1.1,1.3 -1.5,-.2 -.5,-1.1 -1,-.1 -.7,.6 -2,-1.9 v 4.3 l -1.3,1.3 -1.1,3.5 -.1,2.3 -4.5,12.3 -13.2,31.3 -3.2,4.6 -1.6,-.1 .1,2.1 -5.2,7.1 -.3,3.3 1,1.3 .1,2.4 -1.2,1.1 -1.2,3 .1,5.7 1.2,2.9 z"],"PA":["m 826.3,189.4 -1.9,.3 -3,-2.2 -3,-5.8 h -2 l -.4,-1.5 -1.7,-1.1 -70.5,13.9 -.8,-6 -4.2,3.4 -.9,.1 -2.7,3 -3.3,1.7 4.9,29.9 3.2,19.7 17.4,-2.9 60.5,-11.8 1.2,-2.1 1.5,-1.1 1.6,-.3 1.6,.6 1.4,-1.7 1.6,-.6 1.8,-3 1.6,-2.3 3.3,-2.6 -4.2,-3.2 -2.1,-1.1 -1,-2.8 -2.7,-.9 -.5,-3.6 1,-1 .7,-2 -1.5,-1.8 3,-5.4 -.1,-2.2 1.8,-2.5 z"],"RI":["m 883.2,170.7 -1.3,-1.1 -2.6,-1.3 -.6,-2.2 h -.8 l -.7,-2.6 -6.5,2 3.2,12.3 -.4,1.1 .4,1.8 5.6,-3.6 .1,-3 -.8,-.8 .4,-.6 -.1,-1.3 -.9,-.7 1.2,-.4 -.9,-1.6 1.8,.7 .3,1.4 .7,1.2 -1.4,-.8 1.1,1.7 -.3,1.2 -.6,-1.1 v 2.5 l .6,-.9 .4,.9 1.3,-1.5 -.2,-2.5 1.4,3.1 1,-.9 z m -4.7,12.2 h .9 l .5,-.6 -.8,-1.3 -.7,.7 z"],"SC":["m 772.3,350.2 -19.7,2.8 -.1,-2.6 -3.3,-3 -1.2,1.5 -.7,-.3 .2,-1.4 -.4,-.5 -23.2,2.2 -7.3,4.3 -1.3,.1 -4.4,1.9 -.1,1.9 -1.9,1 -1.4,3.2 .2,1.3 6.1,3.8 2.6,-.3 3.1,4 .4,1.7 4.2,5.1 2.6,1.7 1.4,.2 2.2,1.6 1.1,2.2 2,1.6 1.8,.5 2.7,2.7 .1,1.4 2.6,2.8 5,2.3 3.6,6.7 .3,2.7 3.9,2.1 2.5,4.8 .8,3.1 4.2,.4 .8,-1.5 h .6 l 1.8,-1.5 .5,-2 3.2,-2.1 .3,-2.4 -1.2,-.9 .8,-.7 .8,.4 1.3,-.4 1.8,-2.1 3.8,-1.8 1.6,-2.4 .1,-.7 4.8,-4.4 -.1,-.5 -.9,-.8 1.1,-1.5 h .8 l .4,.5 .7,-.8 h 1.3 l .6,-1.5 2.3,-2.1 -.3,-5.4 .8,-2.3 3.6,-6.2 2.4,-2.2 2.2,-1.1 z"],"SD":["m 396.5,125.9 46,2.1 29.5,.4 -.1,2.2 -.9,2 -3.1,1.9 -.3,1.2 1.7,2.5 .4,1.8 2.6,.6 1.5,1.9 -.2,39.5 -2.2,-.1 -.1,1.6 1.3,1.5 -.1,1.1 -1,.5 .4,1.6 1.3,.4 .7,2 -1.7,5.1 -1,4.3 1.3,1.2 .3,1.3 .7,1.7 -1.5,.2 -1.8,-.7 -.9,-2.6 -1.2,-1.3 -6.1,-2.2 -.6,-1.1 -2,-.6 -1.4,.6 -1,-.5 -.9,.4 -.7,-.4 -.9,.4 -.7,-.5 -1,.7 -1.5,-.6 -1.8,2 -1.8,.1 -2.1,-2 -1.7,-.2 -3.4,-3.2 -38,-1.6 -51.1,-3.5 3.9,-43.9 2,-20.7 z"],"TN":["m 620.9,365.1 45.7,-4 22.9,-2.9 .1,-4.9 1.4,-1.3 1.5,.1 1.3,-.9 .8,-4.1 4.6,-3 3.6,-.5 3.2,-2.6 .5,-1.2 4.7,-2.4 .6,-3.4 4,-3.3 .8,.2 .1,1.5 .8,.8 1.5,-1.2 .7,-2.1 3.5,-2.5 2.6,1.1 2.4,-5.2 1.4,-1.2 1.5,.1 0,-5.2 .3,-.7 -4.6,.5 -.2,1 -28.9,3.3 -5.6,1.4 -20.5,1.4 -5.2,.8 -17.4,1 -2.6,.8 -22.6,2 -.7,-.6 h -3.7 l 1.2,3.2 -.6,.9 -23.3,1.5 -.8,1 -.8,-.7 h -1 v 1.3 l .6,1 -.1,1 -1.4,.5 1.4,1.5 -.8,.7 -1.7,-.2 .6,1 1.2,1.1 v .7 l -1.2,.5 -1,2 .1,.6 1.4,1 -.4,.7 h -1.5 v .5 l .9,.9 .1,.8 -1.4,.2 -.5,.8 -1.6,.2 -.9,.9 .6,.9 1.1,-.1 .5,.9 -1.6,1.3 .4,1.5 -2,-.6 -.1,.7 .4,1.1 -.3,1.4 -1.3,-.8 -.8,.8 1.1,.1 .1,1.5 -.6,1 1.1,.9 -.3,1.5 .8,.7 -.7,1 -1.2,-.5 -.9,2.2 -1.6,.7 z"],"TX":["m 282.3,429 .3,-3 34.4,3.6 31.8,2.6 7.9,-99.3 .8,0 52.6,3.2 -1.4,42.7 2.7,1.3 2.5,3 1.5,.3 1.1,-1 1.2,.4 1.4,1 1.1,-1.5 2.3,1.7 .5,2.9 1.2,.7 2.3,-.1 3.5,1.9 2,-.1 1.4,-.4 2.3,2.2 2,-2.3 3.5,1.1 1.9,3 2.3,-.1 -.7,2.1 2.3,1.1 3,-2.6 2.6,1.7 1.3,-.5 .1,1.5 1.7,1.2 2.3,-2.5 1.2,.7 -.3,2 1,1.8 1.2,-.8 2.5,-4.2 1.8,2 2,.5 2.1,-.7 2,1.8 1.2,-.1 1.3,1.2 3.6,-.9 .6,-1.7 3.7,-.3 1.6,.7 5,-2.5 .6,1.5 5.1,-.3 .5,-1.6 2.2,.9 4.6,3.8 6.4,1.9 2.6,2.3 2.8,-1.3 3.2,.8 .2,11.9 .5,19.9 .7,3.4 2.6,2.8 .7,5.4 3.8,4.6 .8,4.3 h 1 l -.1,7.3 -3.3,6.4 1.3,2.3 -1.3,1.5 .7,3 -.1,4.3 -2.2,3.5 -.1,.8 -1.7,1.2 1,1.8 1.2,1.1 -3.5,.3 -8.4,3.9 -3.5,1.4 -1.8,1.8 -.7,-.5 2.1,-2.3 1.8,-.7 .5,-.9 -2.9,-.1 -.7,-.8 .8,-2 -.9,-1.8 h -.6 l -2.4,1.3 -1.9,2.6 .3,1.7 3.3,3.4 1.3,.3 v .8 l -2.3,1.6 -4.9,4 -4,3.9 -3.2,1.4 -5,3 -3.7,2 -4.5,1.9 -4.1,2.5 3.2,-3 v -1.1 l .6,-.8 -.2,-1.8 -1.5,-.1 -1.1,1.5 -2.6,1.3 -1.8,-1.2 -.3,-1.7 h -1.5 l .8,2.2 1.4,.7 1.2,.9 1.8,1.6 -.7,.8 -3.9,1.7 -1.7,.1 -1.2,-1.2 -.5,2.1 .5,1.1 -2.7,2 -1.5,.2 -.8,.7 -.4,1.7 -1.8,3.3 -1.6,.7 -1.6,-.6 -1.8,1.1 .3,1.4 1.3,.8 1,.8 -1.8,3.5 -.3,2.8 -1,1.7 -1.4,1 -2.9,.4 1.8,.6 1.9,-.6 -.4,3.2 -1.1,-.1 .2,1.2 .3,1.4 -1.3,.9 v 3.1 l 1.6,1.4 .6,3.1 -.4,2.2 -1,.4 .4,1.5 1.1,.4 .8,1.7 v 2.6 l 1.1,2.1 2.2,2.6 -.1,.7 -2.2,-.2 -1.6,1.4 .2,1.4 -.9,-.3 -1.4,-.2 -3.4,-3.7 -2.3,-.6 h -7.1 l -2.8,-.8 -3.6,-3 -1.7,-1 -2.1,.1 -3.2,-2.6 -5.4,-1.6 v -1.3 l -1.4,-1.8 -.9,-4.7 -1.1,-1.7 -1.7,-1.4 v -1.6 l -1.4,-.6 .6,-2.6 -.3,-2.2 -1.3,-1.4 .7,-3 -.8,-3.2 -1.7,-1.4 h -1.1 l -4,-3.5 .1,-1.9 -.8,-1.7 -.8,-.2 -.9,-2.4 -2,-1.6 -2.9,-2.5 -.2,-2.1 -1,-.7 .2,-1.6 .5,-.7 -1.4,-1.5 .1,-.7 -2,-2.2 .1,-2.1 -2.7,-4.9 -.1,-1.7 -1.8,-3.1 -5.1,-4.8 v -1.1 l -3.3,-1.7 -.1,-1.8 -1.2,-.4 v -.7 l -.8,-.2 -2.1,-2.8 h -.8 l -.7,-.6 -1.3,1.1 h -2.2 l -2.6,-1.1 h -4.6 l -4.2,-2.1 -1.3,1.9 -2.2,-.6 -3.3,1.2 -1.7,2.8 -2,3.2 -1.1,4.4 -1.4,1.2 -1.1,.1 -.9,1.6 -1.3,.6 -.1,1.8 -2.9,.1 -1.8,-1.5 h -1 l -2,-2.9 -3.6,-.5 -1.7,-2.3 -1.3,-.2 -2.1,-.8 -3.4,-3.4 .2,-.8 -1.6,-1.2 -1,-.1 -3.4,-3.1 -.1,-2 -2.3,-4 .2,-1.6 -.7,-1.3 .8,-1.5 -.1,-2.4 -2.6,-4.1 -.6,-4.2 -1.6,-1.6 v -1 l -1.2,-.2 -.7,-1.1 -2.4,-1.7 -.9,-.1 -1.9,-1.6 v -1.1 l -2.9,-1.8 -.6,-2.1 -2.6,-2.3 -3.2,-4.4 -3,-1.3 -2.1,-1.8 .2,-1.2 -1.3,-1.4 -1.7,-3.7 -2.4,-1 z m 174.9,138.3 .8,.1 -.6,-4.8 -3.5,-12.3 -.2,-8.1 4.9,-10.5 6.1,-8.2 7.2,-5.1 v -.7 h -.8 l -2.6,1 -3.6,2.3 -.7,1.5 -8.2,11.6 -2.8,7.9 v 8.8 l 3.6,12 z"],"UT":["m 233.2,217.9 3.3,-21.9 -47.9,-8.2 -21,109 46.2,8.2 40,6 11.5,-88.3 z"],"VT":["m 859.1,102.4 -1.1,3.5 2.1,2.8 -.4,1.7 .1,1.3 -1.1,2.1 -1.4,.4 -.6,1.3 -2.1,1 -.7,1.5 1.4,3.4 -.5,2.5 .5,1.5 -1,1.9 .4,1.9 -1.3,1.9 .2,2.2 -.7,1.1 .7,4.5 .7,1.5 -.5,2.6 .9,1.8 -.2,2.5 -.5,1.3 -.1,1.4 2.1,2.6 -12.4,2.7 -1.1,-1 .5,-2 -3,-14.2 -1.9,-1.5 -.9,1.6 -.9,-2.2 .8,-1.8 -3.1,-6.7 .3,-3.8 .4,-1 -.6,-2 .4,-2.2 -2.2,-2.3 -.5,-3.2 .4,-1.5 -1.4,-.9 .6,-1.9 -.8,-1.7 27.3,-6.9 z"],"VA":["m 834.7,265.4 -1.1,2.8 .5,1.1 .4,-1.1 .8,-3.1 z m -34.6,-7 -.7,-1 1,-.1 1,-.9 .4,-1.8 -.2,-.5 .1,-.5 -.3,-.7 -.6,-.5 -.4,-.1 -.5,-.4 -.6,-.6 h -1 l -.6,-.1 -.4,-.4 .1,-.5 -1.7,-.6 -.8,.3 -1.2,-.1 -.7,-.7 -.5,-.2 -.2,-.7 .6,-.8 v -.9 l -1.2,-.2 -1,-.9 -.9,.1 -1.6,-.3 -.4,.7 -.4,1.6 -.5,2.3 -10,-5.2 -.2,.9 .9,1.6 -.8,2.3 .1,2.9 -1.2,.8 -.5,2.1 -.9,.8 -1.4,1.8 -.9,.8 -1,2.5 -2.4,-1.1 -2.3,8.5 -1.3,1.6 -2.8,-.5 -1.3,-1.9 -2.3,-.7 -.1,4.7 -1.4,1.7 .4,1.5 -2.1,2.2 .4,1.9 -3.7,6.3 -1,3.3 1.5,1.2 -1.5,1.9 .1,1.4 -2.3,2 -.7,-1.1 -4.3,3.1 -1.5,-1 -.6,1.4 .8,.5 -.5,.9 -5.5,2.4 -3,-1.8 -.8,1.7 -1.9,1.8 -2.3,.1 -4.4,-2.3 -.1,-1.5 -1.5,-.7 .8,-1.2 -.7,-.6 -4.9,6.6 -2.9,1 -3,3 -.4,2.2 -2.1,1.3 -.1,1.7 -1.4,1.4 -1.8,.5 -.5,1.9 -1,.4 -6.9,4.2 28.9,-3.3 .2,-1 4.6,-.5 -.3,.7 29.4,-3.5 39.4,-7.3 29.1,-6.1 -.6,-1.2 .4,-.1 .9,.9 -.1,-1.4 -.3,-1.9 1.6,1.2 .9,2.1 v -1.3 l -3.4,-5.5 v -1.2 l -.7,-.8 -1.3,.7 .5,1.4 h -.8 l -.4,-1 -.6,.9 -.9,-1.1 -2.1,-.1 -.2,.7 1.5,2.1 -1.4,-.7 -.5,-1 -.4,.8 -.8,.1 -1.5,1.7 .3,-1.6 v -1.4 l -1.5,-.7 -1.8,-.5 -.2,-1.7 -.6,-1.3 -.6,1.1 -1.7,-1 -2,.3 .2,-.9 1.5,-.2 .9,.5 1.7,-.8 .9,.4 .5,1 v .7 l 1.9,.4 .3,.9 .9,.4 .9,1.2 1.4,-1.6 h .6 l -.1,-2.1 -1.3,1 -.6,-.9 1.5,-.2 -1.2,-.9 -1.2,.6 -.1,-1.7 -1.7,.2 -2.2,-1.1 -1.8,-2.2 3.6,2.2 .9,.3 1.7,-.8 -1.7,-.9 .6,-.6 -1,-.5 .8,-.2 -.3,-.9 1.1,.9 .4,-.8 .4,1.3 1.2,.8 .6,-.5 -.5,-.6 -.1,-2.5 -1.1,-.1 -1.6,-.8 .9,-1.1 -2,-.1 -.4,-.5 -1.4,.6 -1.4,-.8 -.5,-1.2 -2.1,-1.2 -2.1,-1.8 -2.2,-1.9 3,1.3 .9,1.2 2.1,.7 2.3,2.5 .2,-1.7 .6,1.3 2.3,.5 v -4 l -.8,-1.1 1.1,.4 .1,-1.6 -3.1,-1.4 -1.6,-.2 -1.3,-.2 .3,-1.2 -1.5,-.3 -.1,-.6 h -1.8 l -.2,.8 -.7,-1 h -2.7 l -1,-.4 -.2,-1 -1.2,-.6 -.4,-1.5 -.6,-.4 -.7,1.1 -.9,.2 -.9,.7 h -1.5 l -.9,-1.3 .4,-3.1 .5,-2.4 .6,.5 z m 21.9,11.6 .9,-.1 0,-.6 -.8,.1 z m 7.5,14.2 -1,2.7 1.2,-1.3 z m -1.8,-15.3 .7,.3 -.2,1.9 -.5,-.5 -1.3,1 1,.4 -1.8,4.4 .1,8.1 1.9,3.1 .5,-1.5 .4,-2.7 -.3,-2.3 .7,-.9 -.2,-1.4 1.2,-.6 -.6,-.5 .5,-.7 .8,1.1 -.2,1.1 -.4,3.9 1.1,-2.2 .4,-3.1 .1,-3 -.3,-2 .6,-2.3 1.1,-1.8 .1,-2.2 .3,-.9 -4.6,1.6 -.7,.8 z"],"WA":["m 161.9,83.6 .7,4 -1.1,4.3 -30.3,-7.3 -2.8,1 -5.4,-.9 -1.8,-.9 -1.5,1.2 -3.3,-.4 -4.5,.5 -.9,.7 -4.2,-.4 -.8,-1.6 -1.2,-.2 -4.4,1.3 -1.6,-1.1 -2.2,.8 -.2,-1.8 -2.3,-1.2 -1.5,-.2 -1,-1.1 -3,.3 -1.2,-.8 h -1.2 l -1.2,.9 -5.5,.7 -6.6,-4.2 1.1,-5.6 -.4,-4.1 -3.2,-3.7 -3.7,.1 -.4,-1.1 .4,-1.2 -.7,-.8 -1,.1 -2.1,-1.5 -1.2,.4 -2,-.1 -.7,-1.5 -1.6,-.3 2.5,-7.5 -.7,6 .5,.5 v -2 l .8,-.2 1.1,2.3 -.5,-2.2 1.2,-4.2 1.8,.4 -1.1,-2 -1,.3 -1.5,-.4 .2,-4.2 .2,1.5 .9,.5 .6,-1.6 h 3.2 l -2.2,-1.2 -1.7,-1.9 -1.4,1.6 1.2,-3.1 -.3,-4.6 -.2,-3.6 .9,-6.1 -.5,-2 -1.4,-2.1 .1,-4 .4,-2.7 2,-2.3 -.7,-1.4 .2,-.6 .9,.1 7.8,7.6 4.7,1.9 5.1,2.5 3.2,-.1 .2,3 1,-1.6 h .7 l .6,2.7 .5,-2.6 1.4,-.2 .5,.7 -1.1,.6 .1,1.6 .7,-1.5 h 1.1 l -.4,2.6 -1.1,-.8 .4,1.4 -.1,1.5 -.8,.7 -2.5,2.9 1.2,-3.4 -1.6,.4 -.4,2.1 -3.8,2.8 -.4,1 -2.1,2.2 -.1,1 h 2.2 l 2.4,-.2 .5,-.9 -3.9,.5 v -.6 l 2.6,-2.8 1.8,-.8 1.9,-.2 1,-1.6 3,-2.3 v -1.4 h 1.1 l .1,4 h -1.5 l -.6,.8 -1.1,-.9 .3,1.1 v 1.7 l -.7,.7 -.3,-1.6 -.8,.8 .7,.6 -.9,1.1 h 1.3 l .7,-.5 .1,2 -1,1.9 -.9,1 -.1,1.8 -1,-.2 -.2,-1.4 .9,-1.1 -.8,-.5 -.8,.7 -.7,2.2 -.8,.9 -.1,-2 .8,-1.1 -.2,-1.1 -1.2,1.2 .1,2.2 -.6,.4 -2.1,-.4 -1.3,1.2 2.2,-.6 -.2,2.2 1,-1.8 .4,1.4 .5,-1 .7,1.8 h .7 l .7,-.8 .6,-.1 2,-1.9 .2,-1.2 .8,.6 .3,.9 .7,-.3 .1,-1.2 h 1.3 l .2,-2.9 -.1,-2.7 .9,.3 -.7,-2.1 1.4,-.8 .2,-2.4 2.3,-2.2 1,.1 .3,-1.4 -1.2,-1.4 -.1,-3.5 -.8,.9 .7,2.9 -.6,.1 -.6,-1.9 -.6,-.5 .3,-2.3 1.8,-.1 .3,.7 .3,-1.6 -1.6,-1.7 -.6,-1.6 -.2,2 .9,1.1 -.7,.4 -1,-.8 -1.8,1.3 1.5,.5 .2,2.4 -.3,1.8 .9,-1.3 1.4,2.3 -.4,1.9 h -1.5 v -1.2 l -1.5,-1.2 .5,-3 -1.9,-2.6 2.7,-3 .6,-4.1 h .9 l 1.4,3.2 v -2.6 l 1.2,.3 v -3.3 l -.9,-.8 -1.2,2.5 -1,-3 1.3,-.1 -1.5,-4.9 1.9,-.6 25.4,7.5 31.7,8 23.6,5.5 z m -78.7,-39.4 h .5 l .1,.8 -.5,.3 .1,.6 -.7,.4 -.2,-.9 .5,-.4 z m 5,-4.3 -1.2,1.9 -.1,.8 .4,.2 .5,-.6 1.1,.1 z m -.4,-21.6 .5,.6 1.3,-.3 .2,-1 1.2,-1.8 -1,-.4 -.7,1.6 -.1,-1.6 -1.1,.2 -.7,1.4 z m 3.2,-5.5 .7,1.5 -.9,.2 -.8,.4 -.2,-2.4 z m -2.7,-1.6 -1.1,-.2 .5,1.4 z m -1,2.5 .8,.4 -.4,1.1 1.7,-.5 -.2,-2.2 -.9,-.2 z m -2.7,-.4 .3,2.7 1.6,1.3 .6,-1.9 -1.1,-2.2 z m 1.9,-1.1 -1.1,-1 -.9,.1 1.8,1.5 z m 3.2,-7 h -1.2 v .8 l 1.2,.6 z m -.9,32.5 .4,-2.7 h -1.1 l -.2,1.9 z"],"WV":["m 723.4,297.5 -.8,1.2 1.5,.7 .1,1.5 4.4,2.3 2.3,-.1 1.9,-1.8 .8,-1.7 3,1.8 5.5,-2.4 .5,-.9 -.8,-.5 .6,-1.4 1.5,1 4.3,-3.1 .7,1.1 2.3,-2 -.1,-1.4 1.5,-1.9 -1.5,-1.2 1,-3.3 3.7,-6.3 -.4,-1.9 2.1,-2.2 -.4,-1.5 1.4,-1.7 .1,-4.7 2.3,.7 1.3,1.9 2.8,.5 1.3,-1.6 2.3,-8.5 2.4,1.1 1,-2.5 .9,-.8 1.4,-1.8 .9,-.8 .5,-2.1 1.2,-.8 -.1,-2.9 .8,-2.3 -.9,-1.6 .2,-.9 10,5.2 .5,-2.3 .4,-1.6 .4,-.7 -.9,-.4 .2,-1.6 -1,-.5 -.2,-.7 h -.7 l -.8,-1.2 .2,-1 -2.6,.4 -2.2,-1.6 -1.4,.3 -.9,1.4 h -1.3 l -1.7,2.9 -3.3,.4 -1.9,-1 -2.6,3.8 -2.2,-.3 -3.1,3.9 -.9,1.6 -1.8,1.6 -1.7,-11.4 -17.4,2.9 -3.2,-19.7 -2.2,1.2 1.4,2.1 -.1,2.2 .6,2 -1.1,3.4 -.1,5.4 -1,3.6 .5,1.1 -.4,2.2 -1.1,.5 -2,3.3 -1.8,2 h -.6 l -1.8,1.7 -1.3,-1.2 -1.5,1.8 -.3,1.2 h -1.3 l -1.3,2.2 .1,2.1 -1,.5 1.4,1.1 v 1.9 l -1,.2 -.7,.8 -1,.5 -.6,-2.1 -1.6,-.5 -1,2.3 -.3,2.2 -1.1,1.3 1.3,3.6 -1.5,.8 -.4,3.5 h -1.5 l -3.2,1.4 -.1,1.1 .6,1 -.6,3.6 1.9,1.6 .8,1.1 1,.6 -.1,.9 4.4,5.6 h 1.4 l 1.5,1.8 1.2,.3 1.4,-.1 z"],"WI":["m 611,144 -2.9,.8 .2,2.3 -2.4,3.4 -.2,3.1 .6,.7 .8,-.7 .5,-1.6 2,-1.1 1.6,-4.2 3.5,-1.1 .8,-3.3 .7,-.9 .4,-2.1 1.8,-1.1 v -1.5 l 1,-.9 1.4,.1 v 2 l -1,.1 .5,1.2 -.7,2.2 -.6,.1 -1.2,4.5 -.7,.5 -2.8,7.2 -.3,4.2 .6,2 .1,1.3 -2.4,1.9 .3,1.9 -.9,3.1 .3,1.6 .4,3.7 -1.1,4.1 -1.5,5 1,1.5 -.3,.3 .8,1.7 -.5,1.1 1.1,.9 v 2.7 l 1.3,1.5 -.4,3 .3,4 -45.9,2.8 -1.3,-2.8 -3.3,-.7 -2.7,-1.5 -2,-5.5 .1,-2.5 1.6,-3.3 -.6,-1.1 -2.1,-1.6 -.2,-2.6 -1.1,-4.5 -.2,-3 -2.2,-3 -2.8,-.7 -5.2,-3.6 -.6,-3.3 -6.3,-3.1 -.2,-1.3 h -3.3 l -2.2,-2.6 -2,-1.3 .7,-5.1 -.9,-1.6 .5,-5.4 1,-1.8 -.3,-2.7 -1.2,-1.3 -1.8,-.3 v -1.7 l 2.8,-5.8 5.9,-3.9 -.4,-13 .9,.4 .6,-.5 .1,-1.1 .9,-.6 1.4,1.2 .7,-.1 h 2.6 l 6.8,-2.6 .3,-1 h 1.2 l .7,-1.2 .4,.8 1.8,-.9 1.8,-1.7 .3,.5 1,-1 2.2,1.6 -.8,1.6 -1.2,1.4 .5,1.5 -1.4,1.6 .4,.9 2.3,-1.1 v -1.4 l 3.3,1.9 1.9,.7 1.9,.7 3,3.8 17,3.8 1.4,1 4,.8 .7,.5 2.8,-.2 4.9,.8 1.4,1.5 -1,1 .8,.8 3.8,.7 1.2,1.2 .1,4.4 -1.3,2.8 2,.1 1,-.8 .9,.8 -1.1,3.1 1,1.6 1.2,.3 z m -49.5,-37.3 -.5,.1 -1.5,1.6 .2,.5 1.5,-.6 v -.6 l .9,-.3 z m 1.6,-1.1 -1,.3 -.2,.7 .9,-.1 z m -1.3,-1.6 -.2,.9 h 1.7 l .6,-.4 .1,-1 z m 2.8,-3 -.3,1.9 1.2,-.5 .1,-1.4 z m 58.3,31.9 -2,.3 -.4,1.3 1.3,1.7 z"],"WY":["m 355.3,143.7 -51,-5.3 -57.3,-7.9 -2,10.7 -8.5,54.8 -3.3,21.9 32.1,4.8 44.9,5.7 37.5,3.4 3.7,-44.2 z"],"DC":["m 803.5,252 -2.6,-1.8 -1,1.7 .5,.4 .4,.1 .6,.5 .3,.7 -.1,.5 .2,.5 z"]};</script>
+<script>
+"use strict";
+
+/* ---------------- helpers ---------------- */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (n) => Number(n).toLocaleString("en-US");
+const money = (n) => "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const truthy = (v) => v === true || v === 1 || v === "1" || v === "TRUE" || v === "true";
+const DAY = 86400000;
+
+// raw state values arrive as codes ("NY"), names ("Florida"), and caps ("FLORIDA")
+const STATE_NAMES = {AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming",DC:"Washington DC",PR:"Puerto Rico"};
+const STATE_CODE_BY_NAME = Object.fromEntries(
+  Object.entries(STATE_NAMES).map(([code, name]) => [name.toUpperCase(), code]));
+function normState(v) {
+  const s = String(v || "").trim().toUpperCase();
+  if (s.length <= 2) return s;
+  return STATE_CODE_BY_NAME[s] || s;
+}
+
+/* ---------------- crypto (config decryption) ---------------- */
+const b64buf = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+async function decryptConfig(encBlob, password) {
+  const enc = new TextEncoder();
+  const baseKey = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveKey"]);
+  const aesKey = await crypto.subtle.deriveKey(
+    { name: "PBKDF2", salt: b64buf(encBlob.salt), iterations: 310000, hash: "SHA-256" },
+    baseKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64buf(encBlob.iv) }, aesKey, b64buf(encBlob.data));
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+/* ---------------- data fetch ---------------- */
+async function fetchXano(cfg) {
+  const headers = { Accept: "application/json" };
+  if (cfg.apiKey) headers.Authorization = "Bearer " + cfg.apiKey;
+  const events = [];
+  let page = 1;
+  for (;;) {
+    const u = new URL(cfg.apiUrl);
+    if (page > 1) u.searchParams.set("page", String(page));
+    const res = await fetch(u, { headers });
+    if (!res.ok) throw new Error("Xano responded " + res.status);
+    const body = await res.json();
+    if (Array.isArray(body)) { events.push(...body); break; }
+    const items = body && (body.items || body.result || body.data);
+    if (Array.isArray(items)) {
+      events.push(...items);
+      const next = body.nextPage ?? body.next_page ?? null;
+      if (!next || next === page || page > 500) break;
+      page = next;
+    } else break;
+  }
+  return events;
+}
+
+// group identity is encoded in the page path: /s/<group> (card groups),
+// /p/<partner> (partner pages), "/" = direct site
+function parseGroup(sourcePath) {
+  const p = String(sourcePath || "").trim();
+  let m = p.match(/^\/s\/([^/?#]+)/);
+  if (m) return m[1] === "vip" ? "VIP" : m[1].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  m = p.match(/^\/p\/([^/?#]+)/);
+  if (m) return m[1].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) + " (partner)";
+  if (p === "/" || p === "") return "Direct site";
+  return p;
+}
+
+function normalize(raw) {
+  let t = raw.search_timestamp || raw.created_at;
+  t = typeof t === "number" ? t : Date.parse(t);
+  let pharm = raw.result_pharmacies;
+  if (typeof pharm === "string") { try { pharm = JSON.parse(pharm); } catch { pharm = []; } }
+  if (!Array.isArray(pharm)) pharm = [];
+  return {
+    t,
+    session: raw.session_id || "",
+    drug: (raw.drug_name || "").trim(),
+    dosage: (raw.dosage || "").trim().replace(/^(null\s*)+$/i, ""),
+    qty: raw.quantity,
+    city: (raw.city || "").trim(),
+    state: normState(raw.state),
+    group: parseGroup(raw.source_path),
+    results: Number(raw.result_count) || 0,
+    topPrice: parseFloat(raw.top_price) || null,
+    selectedName: (raw.selected_pharmacy_name || "").trim(),
+    hasFeatured: truthy(raw.has_featured),
+    printed: truthy(raw.printed),
+    printedName: (raw.printed_pharmacy_name || "").trim(),
+    printedFeatured: truthy(raw.printed_is_featured),
+    device: (raw.device_type || "unknown").toLowerCase(),
+    browser: raw.browser || "",
+    prices: pharm.map((p) => Number(p.price)).filter((p) => p > 0),
+  };
+}
+
+/* ---------------- aggregation ---------------- */
+// Cross-filter dimensions. Every panel is scoped by ALL active filters
+// EXCEPT its own dimension, so you can always switch within a panel
+// (click Estradiol → the map shows where Estradiol is searched, the
+// drug list still shows all drugs for pivoting).
+const DIMS = ["state", "drug", "group", "device"];
+
+function aggregate(all, rangeDays, filters) {
+  const anchor = all.length ? Math.max(...all.map((e) => e.t)) : Date.now();
+  const cutoff = rangeDays ? anchor - rangeDays * DAY : null;
+  const evRange = cutoff ? all.filter((e) => e.t >= cutoff) : all.slice();
+  evRange.sort((a, b) => a.t - b.t);
+
+  const match = (e, except) => DIMS.every((d) => d === except || !filters[d] || e[d] === filters[d]);
+  const ev = evRange.filter((e) => match(e, null));
+  const evForState = evRange.filter((e) => match(e, "state"));
+  const evForDrug = evRange.filter((e) => match(e, "drug"));
+  const evForGroup = evRange.filter((e) => match(e, "group"));
+  const evForDevice = evRange.filter((e) => match(e, "device"));
+
+  const countBy = (list, key) => {
+    const m = new Map();
+    for (const e of list) { const k = e[key]; if (k) m.set(k, (m.get(k) || 0) + 1); }
+    return m;
+  };
+  const states = countBy(evForState, "state");
+  const drugs = countBy(evForDrug, "drug");
+  const devices = countBy(evForDevice, "device");
+  const groups = new Map();
+  for (const e of evForGroup) {
+    const g = groups.get(e.group) || { count: 0, printed: 0 };
+    g.count++; if (e.printed) g.printed++;
+    groups.set(e.group, g);
+  }
+
+  const sessions = new Set(ev.map((e) => e.session));
+  let hasFeatured = 0, printed = 0, printedFeatured = 0;
+  for (const e of ev) {
+    if (e.hasFeatured) hasFeatured++;
+    if (e.printed) { printed++; if (e.printedFeatured) printedFeatured++; }
+  }
+
+  // buckets on LOCAL calendar days (weekly if window > 90 days)
+  const dayStart = (t) => { const d = new Date(t); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+  const first = ev.length ? ev[0].t : anchor;
+  const startD = dayStart(first), endD = dayStart(anchor);
+  const days = [];
+  for (let c = new Date(startD); c.getTime() <= endD; c.setDate(c.getDate() + 1)) days.push(c.getTime());
+  const weekly = days.length > 90;
+  const buckets = new Map();
+  if (weekly) {
+    for (let i = 0; i < days.length; i += 7) buckets.set(days[i], 0);
+    for (const e of ev) {
+      const w = Math.min(Math.floor((dayStart(e.t) - startD) / (7 * DAY)), Math.floor((days.length - 1) / 7));
+      const key = days[w * 7];
+      buckets.set(key, (buckets.get(key) || 0) + 1);
+    }
+  } else {
+    for (const d of days) buckets.set(d, 0);
+    for (const e of ev) {
+      const key = dayStart(e.t);
+      buckets.set(key, (buckets.get(key) || 0) + 1);
+    }
+  }
+
+  // best price spread in window
+  let spread = null;
+  for (const e of ev) {
+    if (e.prices.length < 3) continue;
+    const lo = Math.min(...e.prices), hi = Math.max(...e.prices);
+    if (lo < 0.5) continue;
+    const ratio = hi / lo;
+    if (!spread || ratio > spread.ratio) spread = { drug: e.drug, qty: e.qty, city: e.city, state: e.state, lo, hi, ratio };
+  }
+
+  const top = (m, n) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
+
+  return {
+    ev, evForState, anchor, first, filters, usState: filters.state,
+    total: ev.length,
+    sessions: sessions.size,
+    uniqueDrugs: new Set(ev.filter((e) => e.drug).map((e) => e.drug)).size,
+    uniqueStates: new Set(ev.filter((e) => e.state).map((e) => e.state)).size,
+    uniqueCities: new Set(ev.filter((e) => e.city).map((e) => e.city + "|" + e.state)).size,
+    perSession: sessions.size ? ev.length / sessions.size : 0,
+    hasFeatured, printed, printedFeatured,
+    topDrugs: top(drugs, 10),
+    topStates: top(states, 8),
+    groups: [...groups.entries()].sort((a, b) => b[1].count - a[1].count),
+    devices: top(devices, 4),
+    trend: [...buckets.entries()], weekly,
+    spread,
+    recent: ev.slice(-20).reverse(),
+  };
+}
+
+/* ---------------- rendering ---------------- */
+const RANGES = [["7D", 7], ["30D", 30], ["90D", 90], ["ALL", null]];
+let state = { events: [], range: 30, mode: "live", lastSync: null,
+  filters: { state: null, drug: null, group: null, device: null } };
+
+function renderStats(a) {
+  const items = [
+    [fmt(a.total), "Searches"],
+    [fmt(a.sessions), "Sessions"],
+    [fmt(a.uniqueDrugs), "Unique drugs"],
+    a.usState ? [esc(a.usState), "State"] : [fmt(a.uniqueStates), "States"],
+    [fmt(a.uniqueCities), "Cities"],
+    [a.perSession.toFixed(1), "Searches / session"],
+  ];
+  $("stats").innerHTML = items.map(([v, k]) =>
+    `<div class="stat"><div class="v num">${v}</div><div class="k kicker">${k}</div></div>`).join("");
+}
+
+function renderTrend(a) {
+  $("trend-total").textContent = fmt(a.total) + " searches";
+  const fmtD = (t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  $("trend-range").textContent = a.total ? `${fmtD(a.first)} – ${fmtD(a.anchor)}${a.weekly ? " · weekly" : ""}` : "no data";
+
+  const W = 640, H = 190, padL = 30, padB = 22, padT = 8;
+  const data = a.trend;
+  const max = Math.max(1, ...data.map(([, c]) => c));
+  const iw = (W - padL) / Math.max(1, data.length);
+  const bw = Math.max(2, Math.min(26, iw * 0.62));
+  const y = (c) => padT + (H - padB - padT) * (1 - c / max);
+
+  let bars = "", labels = "";
+  const labelEvery = Math.ceil(data.length / 7);
+  data.forEach(([b, c], i) => {
+    const x = padL + i * iw + (iw - bw) / 2;
+    const h = (H - padB - padT) * (c / max);
+    bars += `<rect x="${x.toFixed(1)}" y="${y(c).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(h, c > 0 ? 2 : 0).toFixed(1)}" rx="2" fill="${i === data.length - 1 ? "var(--accent)" : "var(--secondary)"}" opacity="${i === data.length - 1 ? 1 : 0.85}"><title>${esc(new Date(b).toLocaleDateString("en-US", { month: "short", day: "numeric" }))}: ${c} searches</title></rect>`;
+    if (i % labelEvery === 0) {
+      labels += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(new Date(b).toLocaleDateString("en-US", { month: "short", day: "numeric" }))}</text>`;
+    }
+  });
+
+  const grid = [0.25, 0.5, 0.75, 1].map((f) => {
+    const gy = y(max * f);
+    return `<line x1="${padL}" y1="${gy}" x2="${W}" y2="${gy}" stroke="var(--hair)" stroke-dasharray="2 4" stroke-width="1"/><text x="0" y="${gy + 3.5}">${Math.round(max * f)}</text>`;
+  }).join("");
+
+  $("trend").innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">${grid}${bars}${labels}</svg>`;
+}
+
+function renderFunnel(a) {
+  const rows = [
+    ["Searches run", a.total, a.total, "var(--tertiary)"],
+    ["Featured pharmacy in results", a.hasFeatured, a.total, "var(--secondary)"],
+    ["Card printed", a.printed, a.total, "var(--accent)"],
+  ];
+  const html = rows.map(([name, v, base, color]) => {
+    const pct = base ? (v / base) * 100 : 0;
+    return `<div class="funnel-row">
+      <div class="lbl"><span class="name">${name}</span>
+        <span><span class="val num">${fmt(v)}</span><span class="pct num">${pct.toFixed(1)}%</span></span></div>
+      <div class="funnel-bar"><i style="width:${pct.toFixed(1)}%;background:${color}"></i></div>
+    </div>`;
+  }).join("");
+  const note = a.printed
+    ? `<b>${fmt(a.printedFeatured)}</b> of the ${fmt(a.printed)} printed cards went to a featured pharmacy`
+    : `No cards printed in this window yet`;
+  $("funnel").innerHTML = html + `<div class="funnel-note">${note}</div>`;
+}
+
+function renderBars(el, entries, nameFn, dim) {
+  const max = Math.max(1, ...entries.map(([, c]) => c));
+  el.innerHTML = entries.map(([k, c]) =>
+    `<div class="bar-row${dim && state.filters[dim] === k ? " on" : ""}"${dim ? ` data-dim="${dim}" data-val="${esc(k)}"` : ""}><span class="name" title="${esc(nameFn(k))}">${esc(nameFn(k))}</span>
+     <span class="track"><i style="width:${((c / max) * 100).toFixed(1)}%"></i></span>
+     <span class="n num">${fmt(c)}</span></div>`).join("") ||
+    `<span style="color:var(--ink-mute);font-size:13px">No data in this window</span>`;
+}
+
+/* choropleth: white→deep-teal ramp, sqrt scale so low-volume states stay visible */
+function heatColor(count, max) {
+  if (!count) return "#EDF2F7";
+  const t = Math.sqrt(count / max);
+  const mix = (a, b) => Math.round(a + (b - a) * t);
+  return `rgb(${mix(226, 10)},${mix(236, 76)},${mix(243, 112)})`;
+}
+
+function renderMap(a) {
+  const byState = new Map();
+  for (const e of a.evForState) if (e.state) byState.set(e.state, (byState.get(e.state) || 0) + 1);
+  const max = Math.max(1, ...byState.values());
+  const paths = Object.entries(window.US_PATHS || {}).map(([code, ds]) => {
+    const c = byState.get(code) || 0;
+    const sel = state.filters.state === code ? ' class="sel"' : "";
+    const title = `<title>${esc(STATE_NAMES[code] || code)}: ${fmt(c)} searches</title>`;
+    return ds.map((d) => `<path data-dim="state" data-val="${code}" d="${d}" fill="${heatColor(c, max)}"${sel}>${title}</path>`).join("");
+  }).join("");
+  $("usmap").innerHTML = `<svg viewBox="0 0 959 593" role="img" aria-label="Searches by state">${paths}</svg>`;
+}
+
+function renderDrill(a) {
+  const el = $("drill");
+  if (!state.filters.state) {
+    const rows = a.topStates.map(([code, c]) =>
+      `<button type="button" data-dim="state" data-val="${code}"><span>${esc(STATE_NAMES[code] || code)}</span><span class="n num">${fmt(c)}</span></button>`).join("");
+    el.innerHTML = `<div class="drill-head"><span class="name">United States</span></div>
+      <div class="mini-stats">
+        <div class="ms"><div class="v num">${fmt(a.total)}</div><div class="k">Searches</div></div>
+        <div class="ms"><div class="v num">${fmt(a.sessions)}</div><div class="k">People</div></div>
+        <div class="ms"><div class="v num">${fmt(a.uniqueStates)}</div><div class="k">States</div></div>
+        <div class="ms"><div class="v num">${fmt(a.printed)}</div><div class="k">Printed</div></div>
+      </div>
+      <div class="sub">Top states — tap to drill in</div>
+      <div class="state-list">${rows || `<span style="color:var(--ink-mute);font-size:13px">No data in this window</span>`}</div>`;
+    return;
+  }
+  const code = state.filters.state;
+  const ev = a.ev; // aggregate() already scoped everything to the active filters
+  const sessions = new Set(ev.map((e) => e.session)).size;
+  const cities = new Map(), drugs = new Map();
+  let printed = 0;
+  for (const e of ev) {
+    if (e.city) cities.set(e.city, (cities.get(e.city) || 0) + 1);
+    if (e.drug) drugs.set(e.drug, (drugs.get(e.drug) || 0) + 1);
+    if (e.printed) printed++;
+  }
+  const top = (m, n) => [...m.entries()].sort((x, y) => y[1] - x[1]).slice(0, n);
+  const barList = (entries, dim) => {
+    const mx = Math.max(1, ...entries.map(([, c]) => c));
+    return entries.map(([k, c]) =>
+      `<div class="bar-row${dim && state.filters[dim] === k ? " on" : ""}"${dim ? ` data-dim="${dim}" data-val="${esc(k)}"` : ""}><span class="name" title="${esc(k)}">${esc(k)}</span>
+       <span class="track"><i style="width:${((c / mx) * 100).toFixed(1)}%"></i></span>
+       <span class="n num">${fmt(c)}</span></div>`).join("") ||
+      `<span style="color:var(--ink-mute);font-size:13px">None in this window</span>`;
+  };
+  el.innerHTML = `<div class="drill-head"><span class="name">${esc(STATE_NAMES[code] || code)}</span>
+      <button class="iconbtn" type="button" data-dim="state" data-val="">&#8592; ALL STATES</button></div>
+    <div class="mini-stats">
+      <div class="ms"><div class="v num">${fmt(ev.length)}</div><div class="k">Searches</div></div>
+      <div class="ms"><div class="v num">${fmt(sessions)}</div><div class="k">People</div></div>
+      <div class="ms"><div class="v num">${fmt(cities.size)}</div><div class="k">Cities</div></div>
+      <div class="ms"><div class="v num">${fmt(printed)}</div><div class="k">Printed</div></div>
+    </div>
+    <div class="sub">Top drugs</div><div class="bars">${barList(top(drugs, 5), "drug")}</div>
+    <div class="sub">Top cities</div><div class="bars">${barList(top(cities, 5))}</div>`;
+}
+
+function renderGroups(a) {
+  const total = a.groups.reduce((s, [, g]) => s + g.count, 0) || 1;
+  const shades = ["var(--secondary)", "var(--tertiary)", "var(--primary)", "var(--accent)", "var(--hair-bright)"];
+  const MAX = 5;
+  let entries = a.groups;
+  if (entries.length > MAX) {
+    const rest = entries.slice(MAX - 1);
+    entries = entries.slice(0, MAX - 1).concat([["__other__", {
+      count: rest.reduce((s, [, g]) => s + g.count, 0),
+      printed: rest.reduce((s, [, g]) => s + g.printed, 0),
+      label: `Other (${rest.length})`,
+    }]]);
+  }
+  $("groups").innerHTML = entries.map(([name, g], i) => {
+    const pct = (g.count / total) * 100;
+    const real = name !== "__other__";
+    const on = real && state.filters.group === name;
+    return `<div class="funnel-row${on ? " on" : ""}"${real ? ` data-dim="group" data-val="${esc(name)}"` : ""}>
+      <div class="lbl"><span class="name">${esc(g.label || name)}</span>
+        <span><span class="val num">${fmt(g.count)}</span><span class="pct num">${pct.toFixed(1)}% · ${fmt(g.printed)} printed</span></span></div>
+      <div class="funnel-bar"><i style="width:${Math.max(pct, 1).toFixed(1)}%;background:${shades[i % shades.length]}"></i></div>
+    </div>`;
+  }).join("") || `<span style="color:var(--ink-mute);font-size:13px">No data in this window</span>`;
+}
+
+function renderDevices(a) {
+  const total = a.devices.reduce((s, [, c]) => s + c, 0) || 1;
+  const colors = { desktop: "var(--primary)", mobile: "var(--tertiary)", tablet: "var(--accent)" };
+  const track = a.devices.map(([d, c]) =>
+    `<i style="width:${((c / total) * 100).toFixed(1)}%;background:${colors[d] || "var(--ink-mute)"}"></i>`).join("");
+  const rows = a.devices.map(([d, c]) =>
+    `<div class="row${state.filters.device === d ? " on" : ""}" data-dim="device" data-val="${esc(d)}"><span class="l" style="text-transform:capitalize">${esc(d)}</span>
+     <span class="r num">${fmt(c)} · ${((c / total) * 100).toFixed(0)}%</span></div>`).join("");
+  $("devices").innerHTML = `<div class="split"><div class="split-track">${track}</div>${rows}</div>`;
+}
+
+function renderSpread(a) {
+  if (!a.spread) { $("spread").innerHTML = `<span style="color:var(--ink-mute);font-size:13px">No multi-pharmacy results in this window</span>`; return; }
+  const s = a.spread;
+  $("spread").innerHTML = `
+    <div class="drug">${esc(s.drug)}</div>
+    <div class="where">Qty ${esc(s.qty)} · ${esc(s.city)}, ${esc(s.state)}</div>
+    <div class="prices"><span class="lo num">${money(s.lo)}</span><span class="hi num">${money(s.hi)}</span><span class="x num">${s.ratio.toFixed(1)}× spread</span></div>
+    <div class="cap">Same drug, same town — the card found it ${s.ratio.toFixed(1)}× cheaper than the highest local price.</div>`;
+}
+
+function renderRecent(a) {
+  const rows = a.recent.map((e) => {
+    const when = new Date(e.t).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    const outcome = e.printed
+      ? `<span class="tag yes">PRINTED</span>${e.printedName ? `<span class="dose">${esc(e.printedName)}</span>` : ""}`
+      : `<span class="tag no">—</span>`;
+    return `<tr>
+      <td class="num">${esc(when)}</td>
+      <td class="drug" data-dim="drug" data-val="${esc(e.drug)}">${esc(e.drug)}${e.dosage ? `<span class="dose">${esc(e.dosage)}</span>` : ""}</td>
+      <td class="r num">${esc(e.qty ?? "")}</td>
+      <td>${esc(e.city)}${e.city && e.state ? ", " : ""}${esc(e.state)}</td>
+      <td data-dim="group" data-val="${esc(e.group)}">${esc(e.group)}</td>
+      <td class="r num">${e.results}</td>
+      <td>${e.hasFeatured ? `<span class="tag feat">FEATURED</span>` : `<span class="tag no">—</span>`}</td>
+      <td class="r num">${e.topPrice != null ? money(e.topPrice) : "—"}</td>
+      <td class="pharm">${e.selectedName ? esc(e.selectedName) : `<span class="tag no">—</span>`}</td>
+      <td>${e.device ? `<span style="text-transform:capitalize">${esc(e.device)}</span>` : ""}</td>
+      <td>${outcome}</td>
+    </tr>`;
+  }).join("");
+  $("recent").innerHTML = `<table>
+    <thead><tr><th>Time</th><th>Drug</th><th class="r">Qty</th><th>Location</th><th>Group</th><th class="r">Results</th><th>Featured</th><th class="r">Best price</th><th>Selected pharmacy</th><th>Device</th><th>Outcome</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="11" style="color:var(--ink-mute)">No searches in this window</td></tr>`}</tbody></table>`;
+}
+
+const FILTER_LABELS = { state: (v) => STATE_NAMES[v] || v, drug: (v) => v, group: (v) => v, device: (v) => v };
+
+function renderAll() {
+  const f = state.filters;
+  const a = aggregate(state.events, state.range, f);
+  const active = DIMS.filter((d) => f[d]);
+  $("filter-chips").innerHTML = active.map((d) =>
+    `<button class="badge-filter" type="button" data-dim="${d}" data-val="${esc(f[d])}">${esc(FILTER_LABELS[d](f[d])).toUpperCase()} <span class="x">&#215;</span></button>`).join("") +
+    (active.length ? `<button class="badge-filter reset" type="button" id="reset-filters">RESET FILTERS</button>` : "");
+  renderStats(a);
+  renderTrend(a);
+  renderFunnel(a);
+  renderGroups(a);
+  renderMap(a);
+  renderDrill(a);
+  renderBars($("top-drugs"), a.topDrugs, (k) => k, "drug");
+  renderDevices(a);
+  renderSpread(a);
+  renderRecent(a);
+  const fd = (t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  $("foot-window").textContent = a.total ? `Window: ${fd(a.first)} – ${fd(a.anchor)}` : "";
+  const gen = new Date().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+  $("print-meta").textContent =
+    `LIVE SEARCH REPORT · GENERATED ${gen.toUpperCase()}` +
+    (a.total ? ` · WINDOW ${fd(a.first).toUpperCase()} – ${fd(a.anchor).toUpperCase()}` : "") +
+    DIMS.filter((d) => f[d]).map((d) => ` · ${d.toUpperCase()}: ${FILTER_LABELS[d](f[d]).toUpperCase()}`).join("") +
+    (state.mode === "sample" ? " · SAMPLE DATA" : "");
+}
+
+function renderRangeButtons() {
+  $("range").innerHTML = RANGES.map(([lbl, days]) =>
+    `<button type="button" data-days="${days ?? ""}" class="${days === state.range ? "on" : ""}">${lbl}</button>`).join("");
+}
+
+function stamp(ok, msg) {
+  $("sync-dot").classList.toggle("err", !ok);
+  $("sync-stamp").textContent = msg;
+}
+
+/* ---------------- sync ---------------- */
+let cfg = null;
+
+async function sync() {
+  if (state.mode === "sample") return;
+  stamp(true, "SYNCING…");
+  try {
+    const raw = await fetchXano(cfg);
+    state.events = raw.map(normalize).filter((e) => Number.isFinite(e.t));
+    state.lastSync = new Date();
+    $("notice").style.display = "none";
+    stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
+    renderAll();
+  } catch (err) {
+    stamp(false, "SYNC FAILED");
+    const n = $("notice");
+    n.style.display = "block";
+    n.textContent = "Could not reach Xano (" + err.message + "). Showing last loaded data. Check the endpoint, API key, and Xano CORS settings.";
+  }
+}
+
+/* ---------------- boot ---------------- */
+async function unlock(password) {
+  const blob = window.__ENC_CONFIG;
+  cfg = await decryptConfig(blob, password); // throws on wrong password
+  sessionStorage.setItem("mrx-cfg", JSON.stringify(cfg));
+  enterApp("live");
+  await sync();
+  setInterval(sync, 5 * 60 * 1000);
+}
+
+function enterApp(mode) {
+  state.mode = mode;
+  $("gate").hidden = true;
+  $("app").style.display = "block";
+  $("sample-badge").hidden = mode !== "sample";
+  $("lock-btn").hidden = mode !== "live";
+  if (mode === "sample") {
+    $("foot-src").textContent = "Source: bundled sample export (not live)";
+    stamp(true, "STATIC SAMPLE");
+  }
+  renderRangeButtons();
+}
+
+async function boot() {
+  $("range").addEventListener("click", (e) => {
+    const btn = e.target.closest("button");
+    if (!btn) return;
+    state.range = btn.dataset.days === "" ? null : Number(btn.dataset.days);
+    renderRangeButtons();
+    renderAll();
+  });
+  $("refresh-btn").addEventListener("click", () => state.mode === "live" ? sync() : renderAll());
+  $("pdf-btn").addEventListener("click", () => window.print());
+  // one delegated handler for every cross-filter dimension: map states,
+  // drug bars, group rows, device rows, table cells, and the toolbar chips
+  // (a chip carries its own dim+val, so clicking it toggles the filter off)
+  $("app").addEventListener("click", (e) => {
+    if (e.target.closest("#reset-filters")) {
+      for (const d of DIMS) state.filters[d] = null;
+      history.replaceState(null, "", location.pathname);
+      renderAll();
+      return;
+    }
+    const t = e.target.closest("[data-dim]");
+    if (!t) return;
+    const dim = t.dataset.dim, val = t.dataset.val || null;
+    state.filters[dim] = val === state.filters[dim] ? null : val;
+    if (dim === "state") history.replaceState(null, "", state.filters.state ? "#" + state.filters.state : location.pathname);
+    renderAll();
+  });
+  const hashState = (location.hash || "").replace("#", "").toUpperCase();
+  if (STATE_NAMES[hashState]) state.filters.state = hashState;
+  $("lock-btn").addEventListener("click", () => { sessionStorage.removeItem("mrx-cfg"); location.reload(); });
+
+  // 1) live mode if config.enc.json is deployed
+  let encBlob = null;
+  try {
+    const res = await fetch("config.enc.json", { cache: "no-store" });
+    if (res.ok) encBlob = await res.json();
+  } catch { /* not deployed */ }
+
+  if (encBlob) {
+    window.__ENC_CONFIG = encBlob;
+    const cached = sessionStorage.getItem("mrx-cfg");
+    if (cached) {
+      cfg = JSON.parse(cached);
+      enterApp("live");
+      await sync();
+      setInterval(sync, 5 * 60 * 1000);
+      return;
+    }
+    $("gate").hidden = false;
+    $("gate-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const btn = $("gate-btn");
+      btn.disabled = true; btn.textContent = "…"; $("gate-err").textContent = "";
+      try {
+        await unlock($("gate-pw").value);
+      } catch {
+        $("gate-err").textContent = "That password didn't unlock the report.";
+        btn.disabled = false; btn.textContent = "Unlock";
+        $("gate-pw").select();
+      }
+    });
+    return;
+  }
+
+  // 2) preview mode from bundled sample
+  try {
+    const res = await fetch("sample-data.json", { cache: "no-store" });
+    if (res.ok) {
+      const raw = await res.json();
+      state.events = raw.map(normalize).filter((e) => Number.isFinite(e.t));
+      enterApp("sample");
+      renderAll();
+      return;
+    }
+  } catch { /* fall through */ }
+
+  // 3) nothing available — setup instructions
+  $("setup").style.display = "block";
+}
+
+boot();
+</script>
+</body>
+</html>
