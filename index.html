@@ -1364,6 +1364,7 @@ function udimLabel(dim, v) {
 function utilFilterReset() {
   util.f = { groups: null, pharmacies: null, months: null, states: null, brands: null };
   util.psearch = {};
+  util.chipsOpen = new Set();
 }
 
 // pass check, optionally ignoring one dimension (for slicer counts)
@@ -1454,16 +1455,33 @@ function renderUtilSlicers(p) {
         return `<label${hide}><input type="checkbox" data-udim="${dim}" data-idx="${i}"${active && active.has(i) ? " checked" : ""}> ${esc(clip(l, 44))}<span class="cnt num">${fmt(counts.get(i) || 0)}</span></label>`;
       }).join("");
   }
-  // active-filter chips
+  // active-filter chips — condensed by default: 3+ selections in one dimension
+  // roll up into a single "N <DIM> ×" chip that expands on click
+  const chipLabel = (dim, i) => {
+    if (dim === "pharmacies" && p.pharmMeta && p.pharmMeta[i])
+      return `${p.pharmMeta[i].city}, ${p.pharmMeta[i].st} (…${p.pharmMeta[i].npi4})`;
+    return udimLabel(dim, p.dims[dim][i]);
+  };
   const chips = [];
+  let any = false;
   for (const dim in USLICER_DIMS) {
-    if (util.f[dim]) for (const i of util.f[dim]) {
-      const l = dim === "pharmacies" ? p.dims.pharmacies[i] : udimLabel(dim, p.dims[dim][i]);
-      chips.push(`<button class="badge-filter" type="button" data-uchip="${dim}" data-idx="${i}">${esc(clip(l, 26)).toUpperCase()} <span class="x">&#215;</span></button>`);
+    const sel = util.f[dim];
+    if (!sel) continue;
+    any = true;
+    const items = [...sel];
+    const expanded = util.chipsOpen && util.chipsOpen.has(dim);
+    if (items.length > 2 && !expanded) {
+      chips.push(`<button class="badge-filter" type="button" data-uexpand="${dim}" title="Show the ${items.length} selected">` +
+        `${items.length} ${USLICER_LABELS[dim].toUpperCase()} &#9656; <span class="x" data-uchipclear="${dim}" title="Clear">&#215;</span></button>`);
+    } else {
+      if (items.length > 2)
+        chips.push(`<button class="badge-filter reset" type="button" data-ucollapse="${dim}">${USLICER_LABELS[dim].toUpperCase()} &#9662; COLLAPSE</button>`);
+      for (const i of items)
+        chips.push(`<button class="badge-filter" type="button" data-uchip="${dim}" data-idx="${i}">${esc(clip(chipLabel(dim, i), 26)).toUpperCase()} <span class="x">&#215;</span></button>`);
     }
   }
   $("util-chips").innerHTML = chips.join("") +
-    (chips.length ? `<button class="badge-filter reset" type="button" data-uchip="__reset">RESET</button>` : "");
+    (any ? `<button class="badge-filter reset" type="button" data-uchip="__reset">RESET</button>` : "");
 }
 
 /* --- pharmacy locations: bar list + map pins --- */
@@ -1692,6 +1710,12 @@ async function boot() {
       pop.hidden = !pop.hidden;
       return;
     }
+    const xClear = e.target.closest("[data-uchipclear]");
+    if (xClear) { util.f[xClear.dataset.uchipclear] = null; renderUtil(); return; }
+    const ex = e.target.closest("[data-uexpand]");
+    if (ex) { util.chipsOpen.add(ex.dataset.uexpand); renderUtil(); return; }
+    const col = e.target.closest("[data-ucollapse]");
+    if (col) { util.chipsOpen.delete(col.dataset.ucollapse); renderUtil(); return; }
     const chip = e.target.closest("[data-uchip]");
     if (chip) {
       const dim = chip.dataset.uchip;
