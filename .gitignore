@@ -1,3 +1,5 @@
 tools/node_modules/
 # plaintext utilization store stays local; only the encrypted utilization.enc.json is published
 utilization.json
+tools/*.local.cmd
+tools/watcher.log
