@@ -303,6 +303,61 @@
     .stat:nth-child(n+3) { border-top: 1px solid var(--hair); }
     .bar-row { grid-template-columns: 100px 1fr 36px; }
   }
+
+  /* ---------- Tabs ---------- */
+  .tabs { display: flex; align-items: center; border-bottom: 1px solid var(--hair); margin-bottom: 26px; }
+  .tabs button {
+    background: none; border: none; border-bottom: 2px solid transparent; margin-bottom: -1px;
+    color: var(--ink-mute); font-family: var(--mono); font-size: 12px; font-weight: 600;
+    letter-spacing: 0.1em; text-transform: uppercase; padding: 11px 2px; margin-right: 28px; cursor: pointer;
+    transition: color 150ms ease-out, border-color 150ms ease-out;
+  }
+  .tabs button:hover { color: var(--ink-soft); }
+  .tabs button.on { color: var(--primary); border-bottom-color: var(--accent); }
+
+  /* ---------- Utilization tab ---------- */
+  #view-utilization[hidden] { display: none; }
+  .util-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
+  .util-head .t { font-size: 21px; font-weight: 700; letter-spacing: -0.015em; }
+  .util-head .t em { color: var(--tertiary); font-style: italic; font-weight: 600; }
+  .util-head .sub { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); letter-spacing: 0.05em; margin-top: 5px; }
+  .util-period { display: flex; align-items: center; gap: 9px; }
+  .util-period select {
+    font-family: var(--mono); font-size: 12px; color: var(--ink-soft); background: var(--card-solid);
+    border: 1px solid var(--hair); border-radius: 8px; padding: 7px 10px; cursor: pointer; outline: none;
+  }
+  .util-period select:focus { border-color: var(--secondary); }
+
+  .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  .kpi { border-left: 3px solid var(--secondary); padding: 1px 0 1px 12px; }
+  .kpi .v { font-size: 25px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.05; }
+  .kpi .k { margin-top: 5px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-mute); }
+  .kpi.paid { border-color: var(--primary); }
+  .kpi.reversed { border-color: var(--accent); }
+  .kpi.collected { border-color: var(--secondary); }
+  .kpi.pct { border-color: var(--tertiary); }
+
+  .donut-wrap { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
+  .donut-wrap svg { flex: 0 0 auto; }
+  .donut-legend { display: flex; flex-direction: column; gap: 13px; }
+  .donut-legend .li { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink-soft); }
+  .donut-legend .sw { width: 11px; height: 11px; border-radius: 3px; flex: 0 0 auto; }
+  .donut-legend .li b { color: var(--ink); font-weight: 600; }
+  .donut-legend .li .p { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); margin-left: 2px; }
+
+  #pharm-chart { overflow-x: auto; padding-bottom: 4px; }
+  #pharm-chart svg { display: block; }
+  #pharm-chart .bar { fill: var(--secondary); transition: fill 120ms ease-out; }
+  #pharm-chart .bar:hover { fill: var(--primary); }
+  #pharm-chart .val { font-family: var(--mono); fill: var(--ink-soft); }
+  #pharm-chart .cat { font-family: var(--mono); fill: var(--ink-mute); }
+  #pharm-chart .axis { stroke: var(--hair); stroke-width: 1; }
+  #pharm-chart .axlbl { font-family: var(--mono); fill: var(--ink-mute); font-size: 10px; }
+
+  @media print {
+    .tabs { display: none !important; }
+    #view-utilization .grid { display: block; }
+  }
 </style>
 </head>
 <body>
@@ -337,10 +392,11 @@
   <header class="top">
     <div class="brand">
       <div class="logo" aria-label="MyRxCard"><span>My</span><span class="rx">Rx</span><span>Card</span></div>
-      <h1>Search performance</h1>
+      <h1 id="app-title">Search performance</h1>
     </div>
     <div class="controls">
       <span class="badge-sample" id="sample-badge" hidden>SAMPLE DATA</span>
+      <span id="search-only" style="display:contents">
       <span id="filter-chips" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span>
       <div class="slicer" id="group-slicer">
         <button class="iconbtn" id="group-btn" type="button">GROUPS &#9662;</button>
@@ -361,6 +417,7 @@
         <span style="color:var(--ink-mute)">&#8211;</span>
         <input type="date" id="date-to" aria-label="To date">
       </span>
+      </span>
       <div class="sync">
         <span class="dot" id="sync-dot"></span>
         <span class="stamp" id="sync-stamp">—</span>
@@ -371,10 +428,16 @@
     </div>
   </header>
 
+  <nav class="tabs" id="tabs">
+    <button type="button" data-tab="search" class="on">Website Search Records</button>
+    <button type="button" data-tab="util">Utilization</button>
+  </nav>
+
   <div class="print-meta" id="print-meta"></div>
 
   <div id="notice"></div>
 
+ <div id="view-search">
   <div class="stats" id="stats"></div>
 
   <div class="grid">
@@ -428,6 +491,50 @@
       <div class="table-wrap" id="recent"></div>
     </div>
   </div>
+ </div><!-- /view-search -->
+
+ <div id="view-utilization" hidden>
+    <div class="util-head">
+      <div>
+        <div class="t">Performance summary <span id="util-client"></span></div>
+        <div class="sub" id="util-window"></div>
+      </div>
+      <div class="util-period">
+        <span class="kicker">Quarter</span>
+        <select id="util-select" aria-label="Reporting period"></select>
+      </div>
+    </div>
+
+    <div id="util-empty" class="panel" hidden>
+      No utilization report yet. Drop a quarterly claims workbook
+      (<code>MyRx … Claims … .xlsx</code>) into the <b>Avalon Reports</b> folder and it will appear here.
+    </div>
+
+    <div id="util-body" class="grid">
+      <div class="panel span6">
+        <div class="kicker">Dollars</div>
+        <div class="kpi-row" id="kpi-money"></div>
+        <div class="donut-wrap">
+          <div id="donut-money"></div>
+          <div class="donut-legend" id="legend-money"></div>
+        </div>
+      </div>
+
+      <div class="panel span6">
+        <div class="kicker">Claims</div>
+        <div class="kpi-row" id="kpi-claims"></div>
+        <div class="donut-wrap">
+          <div id="donut-claims"></div>
+          <div class="donut-legend" id="legend-claims"></div>
+        </div>
+      </div>
+
+      <div class="panel span12">
+        <div class="kicker">Collected $ by pharmacy</div>
+        <div id="pharm-chart"></div>
+      </div>
+    </div>
+ </div><!-- /view-utilization -->
 
   <footer>
     <span id="foot-src">Source: search_events via Xano</span>
@@ -663,7 +770,7 @@ function aggregate(all, period, filters) {
 /* ---------------- rendering ---------------- */
 const PERIOD_LABELS = { MTD: "Month to date", QTD: "Quarter to date", YTD: "Year to date",
   LM: "Last month", LQ: "Last quarter", LY: "Last year", ALL: "All time", CUSTOM: "Custom range" };
-let state = { events: [], period: { type: "QTD", from: null, to: null }, mode: "live", lastSync: null,
+let state = { events: [], period: { type: "QTD", from: null, to: null }, mode: "live", lastSync: null, tab: "search",
   filters: { state: null, drug: null, group: null, device: null } }; // group: null | array of names
 
 function renderStats(a) {
@@ -948,6 +1055,7 @@ function stamp(ok, msg) {
 
 /* ---------------- sync ---------------- */
 let cfg = null;
+let gatePw = null; // working gate passphrase (session only), used to decrypt utilization.enc.json
 
 async function sync() {
   if (state.mode === "sample") return;
@@ -967,19 +1075,195 @@ async function sync() {
   }
 }
 
+/* ---------------- utilization tab ---------------- */
+// Reads utilization.json (published by tools/watch-utilization.mjs when a
+// quarterly claims .xlsx is dropped into the Avalon Reports folder).
+let util = { loaded: false, data: null, period: null };
+
+const COL_COLLECTED = "#0A4C70"; // brand navy  (--primary)
+const COL_REVERSED  = "#E9AE2E"; // brand gold  (--accent)
+
+const money0 = (n) => "$" + Math.round(n).toLocaleString("en-US");
+const int0   = (n) => Math.round(n).toLocaleString("en-US");
+const pctInt = (f) => Math.round(f * 100) + "%";
+const pct2   = (f) => (f * 100).toFixed(2) + "%";
+function shortMoney(n) {
+  n = Math.round(n);
+  if (Math.abs(n) >= 1e6) return "$" + (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+  if (Math.abs(n) >= 1e3) return "$" + Math.round(n / 1e3) + "K";
+  return "$" + n;
+}
+const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+
+async function loadUtil() {
+  util.data = null;
+  util.error = null;
+  // 1) encrypted store (published by the watcher) — decrypt with the gate passphrase
+  try {
+    const res = await fetch("utilization.enc.json", { cache: "no-store" });
+    if (res.ok) {
+      const blob = await res.json();
+      if (gatePw) {
+        try { util.data = await decryptConfig(blob, gatePw); }
+        catch { util.error = "Could not decrypt the utilization report with this session's password."; }
+      } else {
+        util.error = "Utilization is encrypted — unlock the report to view it.";
+      }
+    }
+  } catch { /* not deployed, fall through */ }
+  // 2) plain store fallback (local/preview, or if you chose not to encrypt)
+  if (!util.data && !util.error) {
+    try {
+      const res = await fetch("utilization.json", { cache: "no-store" });
+      if (res.ok) util.data = await res.json();
+    } catch { /* leave null */ }
+  }
+  util.loaded = true;
+}
+
+function kpi(cls, v, k) {
+  return `<div class="kpi ${cls}"><div class="v num">${v}</div><div class="k">${k}</div></div>`;
+}
+
+// Two-segment donut. segs: [{v,color}]. Total is their sum.
+function donutSVG(segs, size) {
+  const r = size / 2, ir = r * 0.60, cx = r, cy = r;
+  const total = segs.reduce((a, s) => a + s.v, 0) || 1;
+  let a = -Math.PI / 2, paths = "";
+  for (const s of segs) {
+    const a2 = a + (s.v / total) * Math.PI * 2;
+    const large = a2 - a > Math.PI ? 1 : 0;
+    const x1 = cx + r * Math.cos(a), y1 = cy + r * Math.sin(a);
+    const x2 = cx + r * Math.cos(a2), y2 = cy + r * Math.sin(a2);
+    const xi2 = cx + ir * Math.cos(a2), yi2 = cy + ir * Math.sin(a2);
+    const xi1 = cx + ir * Math.cos(a), yi1 = cy + ir * Math.sin(a);
+    paths += `<path d="M${x1.toFixed(2)} ${y1.toFixed(2)} A${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)} L${xi2.toFixed(2)} ${yi2.toFixed(2)} A${ir} ${ir} 0 ${large} 0 ${xi1.toFixed(2)} ${yi1.toFixed(2)} Z" fill="${s.color}"/>`;
+    a = a2;
+  }
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">${paths}</svg>`;
+}
+
+function legendHTML(items) {
+  return items.map((it) =>
+    `<div class="li"><span class="sw" style="background:${it.color}"></span>` +
+    `<span><b>${it.label}</b> ${it.val} <span class="p">${it.pct}</span></span></div>`).join("");
+}
+
+function pharmChartSVG(pharmacies) {
+  const data = pharmacies.filter((p) => p.collected > 0);
+  if (!data.length) return `<div style="color:var(--ink-mute);padding:16px 0">No collected dollars in this period.</div>`;
+  const bw = 24, gap = 9, padL = 46, padR = 12, padTop = 22, padBot = 104, h = 300;
+  const n = data.length;
+  const w = padL + padR + n * bw + (n - 1) * gap;
+  const chartH = h - padTop - padBot;
+  const max = Math.max(...data.map((p) => p.collected), 1);
+  const baseY = padTop + chartH;
+  let s = "";
+  // y-axis: baseline + max gridline
+  s += `<line class="axis" x1="${padL}" y1="${baseY}" x2="${w - padR}" y2="${baseY}"/>`;
+  s += `<line class="axis" x1="${padL}" y1="${padTop}" x2="${w - padR}" y2="${padTop}" style="stroke-dasharray:2 3"/>`;
+  s += `<text class="axlbl" x="${padL - 6}" y="${padTop + 3}" text-anchor="end">${shortMoney(max)}</text>`;
+  s += `<text class="axlbl" x="${padL - 6}" y="${baseY + 3}" text-anchor="end">$0</text>`;
+  data.forEach((p, i) => {
+    const bh = Math.max(2, chartH * (p.collected / max));
+    const x = padL + i * (bw + gap), y = baseY - bh;
+    s += `<rect class="bar" x="${x}" y="${y.toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="1.5">` +
+         `<title>${esc(p.name)} · ${money0(p.collected)}</title></rect>`;
+    if (p.collected / max > 0.045)
+      s += `<text class="val" x="${x + bw / 2}" y="${(y - 5).toFixed(1)}" text-anchor="middle" font-size="9.5">${shortMoney(p.collected)}</text>`;
+    const cx = x + bw / 2, cy = baseY + 9;
+    s += `<text class="cat" x="${cx}" y="${cy}" text-anchor="end" font-size="9" transform="rotate(-55 ${cx} ${cy})">${esc(clip(p.name, 20))}</text>`;
+  });
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${s}</svg>`;
+}
+
+function renderUtil() {
+  const d = util.data;
+  const has = d && d.periods && Object.keys(d.periods).length;
+  $("util-empty").hidden = !!has;
+  $("util-body").style.display = has ? "" : "none";
+  if (!has) {
+    $("util-empty").innerHTML = util.error
+      ? esc(util.error)
+      : "No utilization report yet. Drop a quarterly claims workbook " +
+        "(<code>MyRx … Claims … .xlsx</code>) into the <b>Avalon Reports</b> folder and it will appear here.";
+    $("util-select").innerHTML = ""; $("util-client").textContent = ""; $("util-window").textContent = "";
+    return;
+  }
+
+  const keys = Object.keys(d.periods).sort().reverse();
+  if (!util.period || !d.periods[util.period]) util.period = d.latest || keys[0];
+  $("util-select").innerHTML = keys.map((k) =>
+    `<option value="${esc(k)}"${k === util.period ? " selected" : ""}>${esc(d.periods[k].periodLabel || k)}</option>`).join("");
+
+  const p = d.periods[util.period], m = p.money, c = p.claims;
+  $("util-client").innerHTML = "— <em>" + esc(p.client || "") + "</em>";
+  const gen = d.generatedAt ? new Date(d.generatedAt) : null;
+  $("util-window").textContent =
+    (p.periodLabel || "").toUpperCase() +
+    (p.rowCount ? ` · ${int0(p.rowCount)} CLAIM LINES` : "") +
+    (gen ? ` · UPDATED ${gen.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }).toUpperCase()}` : "");
+
+  $("kpi-money").innerHTML =
+    kpi("paid", money0(m.paid), "Paid $") + kpi("reversed", money0(m.reversed), "Reversed $") +
+    kpi("collected", money0(m.collected), "Collected $") + kpi("pct", pctInt(m.reversedPct), "Reversed % $");
+  $("kpi-claims").innerHTML =
+    kpi("paid", int0(c.paid), "Paid Claims") + kpi("reversed", int0(c.reversed), "Reversed Claims") +
+    kpi("collected", int0(c.collected), "Collected Claims") + kpi("pct", pctInt(c.reversedPct), "Reversed % Claims");
+
+  // donuts share of Paid: Collected vs Reversed
+  const mColl = m.paid ? m.collected / m.paid : 0, mRev = m.paid ? m.reversed / m.paid : 0;
+  const cColl = c.paid ? c.collected / c.paid : 0, cRev = c.paid ? c.reversed / c.paid : 0;
+  $("donut-money").innerHTML = donutSVG([{ v: m.collected, color: COL_COLLECTED }, { v: m.reversed, color: COL_REVERSED }], 170);
+  $("legend-money").innerHTML = legendHTML([
+    { label: "Collected $", val: money0(m.collected), pct: pct2(mColl), color: COL_COLLECTED },
+    { label: "Reversed $", val: money0(m.reversed), pct: pct2(mRev), color: COL_REVERSED },
+  ]);
+  $("donut-claims").innerHTML = donutSVG([{ v: c.collected, color: COL_COLLECTED }, { v: c.reversed, color: COL_REVERSED }], 170);
+  $("legend-claims").innerHTML = legendHTML([
+    { label: "Collected Claims", val: int0(c.collected), pct: pct2(cColl), color: COL_COLLECTED },
+    { label: "Reversed Claims", val: int0(c.reversed), pct: pct2(cRev), color: COL_REVERSED },
+  ]);
+
+  $("pharm-chart").innerHTML = pharmChartSVG(p.pharmacies || []);
+}
+
+async function setTab(name) {
+  state.tab = name;
+  $("view-search").hidden = name !== "search";
+  $("view-utilization").hidden = name !== "util";
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
+  $("search-only").style.display = name === "search" ? "contents" : "none";
+  $("app-title").textContent = name === "search" ? "Search performance" : "Utilization";
+  if (name === "util") {
+    if (!util.loaded) { stamp(true, "LOADING…"); await loadUtil(); }
+    renderUtil();
+    const g = util.data && util.data.generatedAt;
+    stamp(true, g ? "UTILIZATION · " + new Date(g).toLocaleDateString("en-US") : "UTILIZATION");
+  } else if (state.mode === "live" && state.lastSync) {
+    stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
+  } else if (state.mode === "sample") {
+    stamp(true, "STATIC SAMPLE");
+  }
+}
+
 /* ---------------- boot ---------------- */
 async function unlock(password) {
   const blob = window.__ENC_CONFIG;
   // forgive the common phone-keyboard mangles: stray whitespace and
   // autocapitalization. Tries as-typed first, throws only if all fail.
   const tries = [...new Set([password, password.trim(), password.trim().toLowerCase()])];
-  let lastErr;
+  let lastErr, okPw = null;
   for (const pw of tries) {
-    try { cfg = await decryptConfig(blob, pw); lastErr = null; break; }
+    try { cfg = await decryptConfig(blob, pw); lastErr = null; okPw = pw; break; }
     catch (e) { lastErr = e; }
   }
   if (lastErr) throw lastErr;
+  // keep the working passphrase for this session so the Utilization tab can
+  // decrypt utilization.enc.json too (same store as the already-decrypted cfg)
+  gatePw = okPw;
   sessionStorage.setItem("mrx-cfg", JSON.stringify(cfg));
+  sessionStorage.setItem("mrx-pw", okPw);
   enterApp("live");
   await sync();
   setInterval(sync, 5 * 60 * 1000);
@@ -1022,8 +1306,16 @@ async function boot() {
     if (cb.dataset.group === "") { state.filters.group = null; renderAll(); }
     else toggleGroup(cb.dataset.group);
   });
-  $("refresh-btn").addEventListener("click", () => state.mode === "live" ? sync() : renderAll());
+  $("refresh-btn").addEventListener("click", async () => {
+    if (state.tab === "util") { await loadUtil(); renderUtil(); return; }
+    state.mode === "live" ? sync() : renderAll();
+  });
   $("pdf-btn").addEventListener("click", () => window.print());
+  $("tabs").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-tab]");
+    if (b) setTab(b.dataset.tab);
+  });
+  $("util-select").addEventListener("change", (e) => { util.period = e.target.value; renderUtil(); });
   // one delegated handler for every cross-filter dimension: map states,
   // drug bars, group rows, device rows, table cells, and the toolbar chips
   // (a chip carries its own dim+val, so clicking it toggles the filter off)
@@ -1046,7 +1338,7 @@ async function boot() {
   if (STATE_NAMES[hashState]) state.filters.state = hashState;
   const qp = (new URLSearchParams(location.search).get("period") || "").toUpperCase();
   if (PERIOD_LABELS[qp]) { state.period.type = qp; $("period-select").value = qp; }
-  $("lock-btn").addEventListener("click", () => { sessionStorage.removeItem("mrx-cfg"); location.reload(); });
+  $("lock-btn").addEventListener("click", () => { sessionStorage.removeItem("mrx-cfg"); sessionStorage.removeItem("mrx-pw"); location.reload(); });
 
   // 1) live mode if config.enc.json is deployed
   let encBlob = null;
@@ -1060,6 +1352,7 @@ async function boot() {
     const cached = sessionStorage.getItem("mrx-cfg");
     if (cached) {
       cfg = JSON.parse(cached);
+      gatePw = sessionStorage.getItem("mrx-pw");
       enterApp("live");
       await sync();
       setInterval(sync, 5 * 60 * 1000);

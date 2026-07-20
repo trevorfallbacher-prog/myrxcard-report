@@ -1,0 +1,15 @@
+{
+  "name": "myrxcard-utilization-tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Watches the Avalon Reports folder for quarterly claims .xlsx files, aggregates them, and publishes utilization.json to the report site.",
+  "scripts": {
+    "watch": "node watch-utilization.mjs",
+    "build": "node build-utilization.mjs"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "xlsx": "^0.18.5"
+  }
+}
