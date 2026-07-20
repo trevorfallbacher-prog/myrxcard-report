@@ -338,8 +338,12 @@
   .uc-tile .k { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 8px; color: #BFD6E4; }
   .uc-table { flex: 1; min-width: 260px; max-height: 340px; overflow-y: auto; }
   @media (max-width: 700px) { .bars-wide .bar-row { grid-template-columns: 130px 1fr 64px; } }
-  /* utilization slicers: scrollable pops with sticky search */
-  #util-slicers .pop { max-height: 350px; overflow-y: auto; min-width: 260px; }
+  /* utilization slicers: scrollable pops with sticky search, anchored under their button */
+  #util-slicers .pop {
+    max-height: 350px; overflow-y: auto; min-width: 240px; max-width: min(400px, 84vw);
+    left: 0; right: auto;
+  }
+  #util-slicers .pop label { white-space: nowrap; }
   .popsearch {
     position: sticky; top: 0; z-index: 1; width: 100%; box-sizing: border-box;
     background: var(--card); border: 1px solid var(--hair); border-radius: 7px;
@@ -1425,7 +1429,20 @@ function renderUtilSlicers(p) {
         : (counts.get(b) || 0) - (counts.get(a) || 0));
     const label = (i) => dim === "pharmacies" ? pharmFullLabel(p, i) : udimLabel(dim, p.dims[dim][i]);
     const search = (util.psearch && util.psearch[dim] || "").toLowerCase();
-    el.querySelector(".pop").innerHTML =
+    const pop = el.querySelector(".pop");
+    if (!pop.hidden && pop.children.length) {
+      // pop is open: update checkboxes/counts in place so the menu, its scroll
+      // position, and the search text survive re-renders mid-selection
+      for (const inp of pop.querySelectorAll("input[data-udim]")) {
+        if (inp.dataset.idx === "") { inp.checked = !active; continue; }
+        const i = Number(inp.dataset.idx);
+        inp.checked = !!(active && active.has(i));
+        const cnt = inp.parentElement.querySelector(".cnt");
+        if (cnt) cnt.textContent = fmt(counts.get(i) || 0);
+      }
+      continue;
+    }
+    pop.innerHTML =
       (p.dims[dim].length > 15 ? `<input class="popsearch" type="text" data-usearch="${dim}" placeholder="Search ${USLICER_LABELS[dim].toLowerCase()}…" value="${esc(util.psearch[dim] || "")}">` : "") +
       `<label class="allrow"><input type="checkbox" data-udim="${dim}" data-idx=""${active ? "" : " checked"}> All ${USLICER_LABELS[dim].toLowerCase()}</label>` +
       order.map((i) => {
@@ -1717,14 +1734,13 @@ async function boot() {
       util.f[dim].has(i) ? util.f[dim].delete(i) : util.f[dim].add(i);
       if (!util.f[dim].size) util.f[dim] = null;
     }
-    const openDim = cb.closest("[data-uslicer]").dataset.uslicer;
-    renderUtil();
-    // keep the pop open for multi-select
-    const el = document.querySelector(`[data-uslicer="${openDim}"] .pop`);
-    if (el) el.hidden = false;
+    renderUtil(); // open pops are updated in place, so the menu stays open
   });
   document.addEventListener("click", (e) => {
-    if (!e.target.closest("#util-slicers .slicer")) for (const pop of document.querySelectorAll("#util-slicers .pop")) pop.hidden = true;
+    // use the dispatch-time path: survives nodes detached by mid-click re-renders
+    const path = e.composedPath ? e.composedPath() : [e.target];
+    if (path.some((n) => n.nodeType === 1 && n.matches && n.matches("#util-slicers .slicer"))) return;
+    for (const pop of document.querySelectorAll("#util-slicers .pop")) pop.hidden = true;
   });
   // one delegated handler for every cross-filter dimension: map states,
   // drug bars, group rows, device rows, table cells, and the toolbar chips
