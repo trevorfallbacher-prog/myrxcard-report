@@ -356,7 +356,7 @@
         <option value="ALL">All time</option>
         <option value="CUSTOM">Custom range&#8230;</option>
       </select>
-      <span class="daterange" id="custom-range" hidden>
+      <span class="daterange" id="custom-range">
         <input type="date" id="date-from" aria-label="From date">
         <span style="color:var(--ink-mute)">&#8211;</span>
         <input type="date" id="date-to" aria-label="To date">
@@ -890,6 +890,17 @@ function renderAll() {
     `<button class="badge-filter" type="button" data-dim="${d}" data-val="${esc(v)}">${esc(FILTER_LABELS[d](v)).toUpperCase()} <span class="x">&#215;</span></button>`).join("") +
     (chips.length ? `<button class="badge-filter reset" type="button" id="reset-filters">RESET FILTERS</button>` : "");
   renderGroupSlicer(a);
+  // date inputs always mirror the active period's effective dates
+  const iso = (t) => new Date(t).toLocaleDateString("sv-SE");
+  const [pf, pt] = periodBounds(state.period);
+  const dataMin = state.events.length ? Math.min(...state.events.map((e) => e.t)) : Date.now();
+  if (state.period.type === "CUSTOM") {
+    $("date-from").value = state.period.from || "";
+    $("date-to").value = state.period.to || "";
+  } else {
+    $("date-from").value = iso(Number.isFinite(pf) ? pf : dataMin);
+    $("date-to").value = iso(Math.min(Number.isFinite(pt) ? pt - DAY : Date.now(), Date.now()));
+  }
   renderStats(a);
   renderTrend(a);
   renderFunnel(a);
@@ -988,22 +999,14 @@ function enterApp(mode) {
 
 async function boot() {
   $("period-select").addEventListener("change", () => {
-    state.period.type = $("period-select").value;
-    const custom = state.period.type === "CUSTOM";
-    $("custom-range").hidden = !custom;
-    if (custom && !state.period.from && state.events.length) {
-      // prefill with the data's own span so Custom starts meaningful
-      const iso = (t) => new Date(t).toLocaleDateString("sv-SE");
-      state.period.from = iso(Math.min(...state.events.map((e) => e.t)));
-      state.period.to = iso(Math.max(...state.events.map((e) => e.t)));
-      $("date-from").value = state.period.from;
-      $("date-to").value = state.period.to;
-    }
+    state.period = { type: $("period-select").value, from: null, to: null };
     renderAll();
   });
+  // editing either date switches to a custom range (the inputs always
+  // display the active period's effective dates)
   for (const id of ["date-from", "date-to"]) $(id).addEventListener("change", () => {
-    state.period.from = $("date-from").value || null;
-    state.period.to = $("date-to").value || null;
+    state.period = { type: "CUSTOM", from: $("date-from").value || null, to: $("date-to").value || null };
+    $("period-select").value = "CUSTOM";
     renderAll();
   });
   $("group-btn").addEventListener("click", (e) => {
@@ -1042,7 +1045,7 @@ async function boot() {
   const hashState = (location.hash || "").replace("#", "").toUpperCase();
   if (STATE_NAMES[hashState]) state.filters.state = hashState;
   const qp = (new URLSearchParams(location.search).get("period") || "").toUpperCase();
-  if (PERIOD_LABELS[qp]) { state.period.type = qp; $("period-select").value = qp; $("custom-range").hidden = qp !== "CUSTOM"; }
+  if (PERIOD_LABELS[qp]) { state.period.type = qp; $("period-select").value = qp; }
   $("lock-btn").addEventListener("click", () => { sessionStorage.removeItem("mrx-cfg"); location.reload(); });
 
   // 1) live mode if config.enc.json is deployed
