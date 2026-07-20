@@ -40,9 +40,16 @@ function titleize(s) {
 
 export function aggregateWorkbook(filePath) {
   const wb = XLSX.read(readFileSync(filePath), { type: "buffer", cellDates: false, raw: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { defval: null });
-  return aggregateRows(rows, filePath);
+  // Some exports carry extra partial sheets (e.g. a single-month preview) next
+  // to the full extract — use the sheet with the most claim rows.
+  let best = null, bestRows = null;
+  for (const name of wb.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: null });
+    if (!best || rows.length > bestRows.length) { best = name; bestRows = rows; }
+  }
+  if (wb.SheetNames.length > 1)
+    console.log(`  (workbook has ${wb.SheetNames.length} sheets — using largest: "${best}", ${bestRows.length} rows)`);
+  return aggregateRows(bestRows, filePath);
 }
 
 export function aggregateRows(rows, sourceLabel = "") {
@@ -59,6 +66,21 @@ export function aggregateRows(rows, sourceLabel = "") {
   let minKey = null, maxKey = null;   // process-date span (yyyymm)
   let group = "", carrier = "";
 
+  // Slicer cube: facts keyed by (month, client group, state, pharmacy, brand,
+  // therapeutic class, drug, paid-at-U&C flag), each holding paid$/reversed$/
+  // paid claims/reversed claims. Dimension values are interned into arrays and
+  // facts store indexes, keeping the JSON small (~9k rows per quarter).
+  const dims = { months: [], groups: [], states: [], pharmacies: [], brands: [], classes: [], drugs: [] };
+  const dimIdx = { months: new Map(), groups: new Map(), states: new Map(), pharmacies: new Map(), brands: new Map(), classes: new Map(), drugs: new Map() };
+  // key defaults to the label; pharmacies pass name+NPI as key so distinct
+  // locations sharing a name stay separate bars (matching the Power BI axis)
+  const intern = (dim, label, key = label) => {
+    let i = dimIdx[dim].get(key);
+    if (i === undefined) { i = dims[dim].length; dims[dim].push(label); dimIdx[dim].set(key, i); }
+    return i;
+  };
+  const factMap = new Map(); // "m|g|s|p|b" -> [paid$, rev$, paidN, revN]
+
   for (const r of clean) {
     const type = norm(r.ClaimType).toUpperCase();
     const gross = num(r.PlanGrossAmount);
@@ -72,12 +94,28 @@ export function aggregateRows(rows, sourceLabel = "") {
       if (maxKey === null || k > maxKey) maxKey = k;
     }
 
+    if (type !== "P" && type !== "R") continue; // skip blanks / unknown types
+
     if (type === "P") { paidMoney += gross; paidClaims += 1; }
-    else if (type === "R") { reversedMoney += gross; reversedClaims += 1; }
-    else continue; // skip blanks / unknown types
+    else { reversedMoney += gross; reversedClaims += 1; }
 
     const pharm = norm(r.PharmacyName) || "—";
-    byPharm.set(pharm, (byPharm.get(pharm) || 0) + gross);
+    const pharmKey = `${pharm}|${norm(r.NPI)}`;
+    byPharm.set(pharmKey, (byPharm.get(pharmKey) || 0) + gross);
+
+    const mi = intern("months", pd ? `${pd.y}-${String(pd.m).padStart(2, "0")}` : "—");
+    const gi = intern("groups", titleize(norm(r.GroupName)) || "—");
+    const si = intern("states", norm(r.PharmacyState).toUpperCase() || "—");
+    const pi = intern("pharmacies", titleize(pharm), pharmKey);
+    const bi = intern("brands", norm(r.BrandCode).toUpperCase() || "—");
+    const ci = intern("classes", titleize(norm(r.TherapeuticClass).replace(/\*/g, "").trim()) || "—");
+    const di = intern("drugs", norm(r.DrugName) || "—");
+    const uc = num(r.CostBasis) === 4 ? 1 : 0; // NCPDP basis-of-cost 04 = Usual & Customary
+    const fk = `${mi}|${gi}|${si}|${pi}|${bi}|${ci}|${di}|${uc}`;
+    let f = factMap.get(fk);
+    if (!f) { f = [mi, gi, si, pi, bi, ci, di, uc, 0, 0, 0, 0]; factMap.set(fk, f); }
+    if (type === "P") { f[8] += gross; f[10] += 1; }
+    else { f[9] += gross; f[11] += 1; } // reversal gross is negative; keep sign
   }
 
   const reversedMoneyAbs = Math.abs(reversedMoney);
@@ -85,7 +123,7 @@ export function aggregateRows(rows, sourceLabel = "") {
   const collectedClaims = paidClaims - reversedClaims;
 
   const pharmacies = [...byPharm.entries()]
-    .map(([name, collected]) => ({ name: titleize(name), collected: Math.round(collected * 100) / 100 }))
+    .map(([key, collected]) => ({ name: titleize(key.split("|")[0]), collected: Math.round(collected * 100) / 100 }))
     .sort((a, b) => b.collected - a.collected);
 
   // Period label + key from the process-date span.
@@ -98,8 +136,11 @@ export function aggregateRows(rows, sourceLabel = "") {
     periodLabel = startY === endY
       ? `${MONTHS[startM]}–${MONTHS[endM]} ${endY}`
       : `${MONTHS[startM]} ${startY} – ${MONTHS[endM]} ${endY}`;
-    const q = Math.floor((endM - 1) / 3) + 1;
-    periodKey = `${endY}-Q${q}`;
+    const qStart = Math.floor((startM - 1) / 3) + 1;
+    const qEnd = Math.floor((endM - 1) / 3) + 1;
+    // one quarter -> "2026-Q2"; longer spans -> year key ("2025" or "2025-2026")
+    if (startY === endY && qStart === qEnd) periodKey = `${endY}-Q${qEnd}`;
+    else periodKey = startY === endY ? String(endY) : `${startY}-${endY}`;
   }
 
   const r2 = (n) => Math.round(n * 100) / 100;
@@ -124,5 +165,9 @@ export function aggregateRows(rows, sourceLabel = "") {
       reversedPct: paidClaims ? r4(reversedClaims / paidClaims) : 0,
     },
     pharmacies,
+    dims,
+    // [monthIdx, groupIdx, stateIdx, pharmacyIdx, brandIdx, classIdx, drugIdx,
+    //  paidAtUC flag, paid$, reversed$ (negative), paidClaims, reversedClaims]
+    facts: [...factMap.values()].map((f) => [f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], r2(f[8]), r2(f[9]), f[10], f[11]]),
   };
 }

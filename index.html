@@ -322,6 +322,22 @@
   .util-head .t em { color: var(--tertiary); font-style: italic; font-weight: 600; }
   .util-head .sub { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); letter-spacing: 0.05em; margin-top: 5px; }
   .util-period { display: flex; align-items: center; gap: 9px; }
+  .util-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  .util-controls .slicer button.on { border-color: var(--secondary); color: var(--secondary); font-weight: 600; }
+  #pharm-chart .bar.sel { fill: var(--accent); }
+  #pharm-chart .bar { cursor: pointer; }
+  .kicker .hint { text-transform: none; letter-spacing: 0.02em; color: var(--ink-mute); font-weight: 400; }
+  .bars-wide .bar-row { grid-template-columns: 220px 1fr 74px; }
+  .bars-wide .bar-row .track i.rev { background: var(--accent); }
+  .uc-wrap { display: flex; gap: 24px; align-items: stretch; flex-wrap: wrap; }
+  .uc-tile {
+    flex: 0 0 220px; display: flex; flex-direction: column; justify-content: center; align-items: center;
+    background: var(--primary); border-radius: 12px; padding: 26px 20px; color: #F2F8FF;
+  }
+  .uc-tile .v { font-size: 38px; font-weight: 700; letter-spacing: -0.02em; }
+  .uc-tile .k { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 8px; color: #BFD6E4; }
+  .uc-table { flex: 1; min-width: 260px; max-height: 340px; overflow-y: auto; }
+  @media (max-width: 700px) { .bars-wide .bar-row { grid-template-columns: 130px 1fr 64px; } }
   .util-period select {
     font-family: var(--mono); font-size: 12px; color: var(--ink-soft); background: var(--card-solid);
     border: 1px solid var(--hair); border-radius: 8px; padding: 7px 10px; cursor: pointer; outline: none;
@@ -499,9 +515,28 @@
         <div class="t">Performance summary <span id="util-client"></span></div>
         <div class="sub" id="util-window"></div>
       </div>
-      <div class="util-period">
-        <span class="kicker">Quarter</span>
-        <select id="util-select" aria-label="Reporting period"></select>
+      <div class="util-controls" id="util-slicers">
+        <span id="util-chips" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span>
+        <div class="slicer" data-uslicer="groups">
+          <button class="iconbtn" type="button">CLIENTS &#9662;</button>
+          <div class="pop" hidden></div>
+        </div>
+        <div class="slicer" data-uslicer="months">
+          <button class="iconbtn" type="button">MONTHS &#9662;</button>
+          <div class="pop" hidden></div>
+        </div>
+        <div class="slicer" data-uslicer="states">
+          <button class="iconbtn" type="button">STATES &#9662;</button>
+          <div class="pop" hidden></div>
+        </div>
+        <div class="slicer" data-uslicer="brands">
+          <button class="iconbtn" type="button">BRAND &#9662;</button>
+          <div class="pop" hidden></div>
+        </div>
+        <div class="util-period">
+          <span class="kicker">Quarter</span>
+          <select id="util-select" aria-label="Reporting period"></select>
+        </div>
       </div>
     </div>
 
@@ -530,8 +565,34 @@
       </div>
 
       <div class="panel span12">
-        <div class="kicker">Collected $ by pharmacy</div>
+        <div class="kicker">Collected $ by pharmacy <span class="hint">· tap a bar to filter</span></div>
         <div id="pharm-chart"></div>
+      </div>
+
+      <div class="panel span6">
+        <div class="kicker">Collected $ by therapeutic class</div>
+        <div class="bars bars-wide" id="util-classes"></div>
+      </div>
+
+      <div class="panel span6">
+        <div class="kicker">Reversed claims by drug</div>
+        <div class="bars bars-wide" id="util-revdrugs"></div>
+      </div>
+
+      <div class="panel span12">
+        <div class="kicker">Paid at usual &amp; customary</div>
+        <div class="uc-wrap">
+          <div class="uc-tile">
+            <div class="v num" id="uc-count"></div>
+            <div class="k">Claims paid at U&amp;C</div>
+          </div>
+          <div class="table-wrap uc-table">
+            <table>
+              <thead><tr><th>Top 20 drugs paid at U&amp;C</th><th class="r">Claims</th></tr></thead>
+              <tbody id="uc-drugs"></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
  </div><!-- /view-utilization -->
@@ -1149,9 +1210,8 @@ function legendHTML(items) {
     `<span><b>${it.label}</b> ${it.val} <span class="p">${it.pct}</span></span></div>`).join("");
 }
 
-function pharmChartSVG(pharmacies) {
-  const data = pharmacies.filter((p) => p.collected > 0);
-  if (!data.length) return `<div style="color:var(--ink-mute);padding:16px 0">No collected dollars in this period.</div>`;
+function pharmChartSVG(data, selIdx) {
+  if (!data.length) return `<div style="color:var(--ink-mute);padding:16px 0">Nothing collected under the current filters.</div>`;
   const bw = 24, gap = 9, padL = 46, padR = 12, padTop = 22, padBot = 104, h = 300;
   const n = data.length;
   const w = padL + padR + n * bw + (n - 1) * gap;
@@ -1167,7 +1227,7 @@ function pharmChartSVG(pharmacies) {
   data.forEach((p, i) => {
     const bh = Math.max(2, chartH * (p.collected / max));
     const x = padL + i * (bw + gap), y = baseY - bh;
-    s += `<rect class="bar" x="${x}" y="${y.toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="1.5">` +
+    s += `<rect class="bar${p.pi === selIdx ? " sel" : ""}" data-pi="${p.pi}" x="${x}" y="${y.toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="1.5">` +
          `<title>${esc(p.name)} · ${money0(p.collected)}</title></rect>`;
     if (p.collected / max > 0.045)
       s += `<text class="val" x="${x + bw / 2}" y="${(y - 5).toFixed(1)}" text-anchor="middle" font-size="9.5">${shortMoney(p.collected)}</text>`;
@@ -1175,6 +1235,104 @@ function pharmChartSVG(pharmacies) {
     s += `<text class="cat" x="${cx}" y="${cy}" text-anchor="end" font-size="9" transform="rotate(-55 ${cx} ${cy})">${esc(clip(p.name, 20))}</text>`;
   });
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${s}</svg>`;
+}
+
+/* --- slicer filtering over the fact cube --- */
+// fact: [mi, gi, si, pi, bi, ci, di, uc, paid$, rev$ (neg), paidN, revN]
+const USLICER_DIMS = { groups: 1, months: 0, states: 2, brands: 4 };
+const USLICER_LABELS = { groups: "Clients", months: "Months", states: "States", brands: "Brand" };
+const BRAND_NAMES = { G: "Generic", B: "Brand", T: "Branded generic", "—": "Other" };
+const monthLabel = (m) => {
+  const [y, mo] = String(m).split("-");
+  return mo ? new Date(+y, +mo - 1, 1).toLocaleDateString("en-US", { month: "short", year: "numeric" }) : m;
+};
+function udimLabel(dim, v) {
+  if (dim === "months") return monthLabel(v);
+  if (dim === "brands") return BRAND_NAMES[v] || v;
+  return v;
+}
+
+function utilFilterReset() {
+  util.f = { groups: null, months: null, states: null, brands: null, pharm: null };
+}
+
+// pass check, optionally ignoring one dimension (for slicer counts)
+function factPass(f, skipDim) {
+  const F = util.f;
+  for (const dim in USLICER_DIMS) {
+    if (dim === skipDim) continue;
+    if (F[dim] && !F[dim].has(f[USLICER_DIMS[dim]])) return false;
+  }
+  if (skipDim !== "pharm" && F.pharm != null && F.pharm !== f[3]) return false;
+  return true;
+}
+
+function utilAgg(p) {
+  let paid = 0, rev = 0, pn = 0, rn = 0, ucN = 0;
+  const byPharm = new Map(), byClass = new Map(), byDrugRev = new Map(), byDrugUC = new Map();
+  for (const f of p.facts) {
+    if (!factPass(f)) continue;
+    paid += f[8]; rev += f[9]; pn += f[10]; rn += f[11];
+    byPharm.set(f[3], (byPharm.get(f[3]) || 0) + f[8] + f[9]);
+    byClass.set(f[5], (byClass.get(f[5]) || 0) + f[8] + f[9]);
+    if (f[11]) byDrugRev.set(f[6], (byDrugRev.get(f[6]) || 0) + f[11]);
+    // U&C = net claim count (paid − reversed), matching Power BI's Sum of ClaimCount
+    if (f[7]) { ucN += f[10] - f[11]; byDrugUC.set(f[6], (byDrugUC.get(f[6]) || 0) + f[10] - f[11]); }
+  }
+  const revAbs = Math.abs(rev);
+  const top = (map, names, n) => [...map.entries()]
+    .map(([i, v]) => ({ i, name: names[i], v }))
+    .sort((a, b) => b.v - a.v).slice(0, n);
+  return {
+    money: { paid, reversed: revAbs, collected: paid + rev, reversedPct: paid ? revAbs / paid : 0 },
+    claims: { paid: pn, reversed: rn, collected: pn - rn, reversedPct: pn ? rn / pn : 0 },
+    pharmacies: [...byPharm.entries()].map(([i, v]) => ({ pi: i, name: p.dims.pharmacies[i], collected: v }))
+      .filter((x) => x.collected > 0).sort((a, b) => b.collected - a.collected),
+    classes: top(byClass, p.dims.classes, 13).filter((x) => x.v > 0),
+    revDrugs: top(byDrugRev, p.dims.drugs, 13),
+    ucCount: ucN,
+    ucDrugs: top(byDrugUC, p.dims.drugs, 20),
+  };
+}
+
+function renderUtilSlicers(p) {
+  const wrap = $("util-slicers");
+  for (const el of wrap.querySelectorAll("[data-uslicer]")) {
+    const dim = el.dataset.uslicer;
+    const col = USLICER_DIMS[dim];
+    const active = util.f[dim];
+    el.querySelector("button").classList.toggle("on", !!active);
+    // counts per value under all *other* active filters
+    const counts = new Map();
+    for (const f of p.facts) if (factPass(f, dim)) counts.set(f[col], (counts.get(f[col]) || 0) + f[10] + f[11]);
+    const order = p.dims[dim === "months" ? "months" : dim].map((v, i) => i)
+      .sort((a, b) => dim === "months"
+        ? String(p.dims.months[a]).localeCompare(String(p.dims.months[b]))
+        : (counts.get(b) || 0) - (counts.get(a) || 0));
+    el.querySelector(".pop").innerHTML =
+      `<label class="allrow"><input type="checkbox" data-udim="${dim}" data-idx=""${active ? "" : " checked"}> All ${USLICER_LABELS[dim].toLowerCase()}</label>` +
+      order.map((i) =>
+        `<label><input type="checkbox" data-udim="${dim}" data-idx="${i}"${active && active.has(i) ? " checked" : ""}> ${esc(udimLabel(dim, p.dims[dim][i]))}<span class="cnt num">${fmt(counts.get(i) || 0)}</span></label>`).join("");
+  }
+  // active-filter chips
+  const chips = [];
+  for (const dim in USLICER_DIMS) {
+    if (util.f[dim]) for (const i of util.f[dim])
+      chips.push(`<button class="badge-filter" type="button" data-uchip="${dim}" data-idx="${i}">${esc(udimLabel(dim, p.dims[dim][i])).toUpperCase()} <span class="x">&#215;</span></button>`);
+  }
+  if (util.f.pharm != null)
+    chips.push(`<button class="badge-filter" type="button" data-uchip="pharm">${esc(clip(p.dims.pharmacies[util.f.pharm], 24)).toUpperCase()} <span class="x">&#215;</span></button>`);
+  $("util-chips").innerHTML = chips.join("") +
+    (chips.length ? `<button class="badge-filter reset" type="button" data-uchip="__reset">RESET</button>` : "");
+}
+
+function hbars(el, entries, fmtVal, revStyle) {
+  if (!entries.length) { el.innerHTML = `<div style="color:var(--ink-mute)">Nothing under the current filters.</div>`; return; }
+  const max = Math.max(...entries.map((e) => e.v), 1);
+  el.innerHTML = entries.map((e) =>
+    `<div class="bar-row" title="${esc(e.name)}"><span class="name">${esc(e.name)}</span>` +
+    `<span class="track"><i${revStyle ? ' class="rev"' : ""} style="width:${(100 * e.v / max).toFixed(1)}%"></i></span>` +
+    `<span class="n num">${fmtVal(e.v)}</span></div>`).join("");
 }
 
 function renderUtil() {
@@ -1192,17 +1350,29 @@ function renderUtil() {
   }
 
   const keys = Object.keys(d.periods).sort().reverse();
-  if (!util.period || !d.periods[util.period]) util.period = d.latest || keys[0];
+  if (!util.period || !d.periods[util.period]) { util.period = d.latest || keys[0]; utilFilterReset(); }
   $("util-select").innerHTML = keys.map((k) =>
     `<option value="${esc(k)}"${k === util.period ? " selected" : ""}>${esc(d.periods[k].periodLabel || k)}</option>`).join("");
 
-  const p = d.periods[util.period], m = p.money, c = p.claims;
+  const p = d.periods[util.period];
+  if (!util.f) utilFilterReset();
+  const hasCube = Array.isArray(p.facts) && p.dims;
+  for (const el of $("util-slicers").querySelectorAll("[data-uslicer]")) el.style.display = hasCube ? "" : "none";
+
+  // aggregate under active slicers (or fall back to the stored rollups for old stores)
+  const a = hasCube ? utilAgg(p) : { money: p.money, claims: p.claims,
+    pharmacies: (p.pharmacies || []).map((x, i) => ({ pi: i, ...x })).filter((x) => x.collected > 0),
+    classes: [], revDrugs: [], ucCount: null, ucDrugs: [] };
+  const m = a.money, c = a.claims;
+
   $("util-client").innerHTML = "— <em>" + esc(p.client || "") + "</em>";
   const gen = d.generatedAt ? new Date(d.generatedAt) : null;
   $("util-window").textContent =
     (p.periodLabel || "").toUpperCase() +
     (p.rowCount ? ` · ${int0(p.rowCount)} CLAIM LINES` : "") +
     (gen ? ` · UPDATED ${gen.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }).toUpperCase()}` : "");
+
+  if (hasCube) renderUtilSlicers(p);
 
   $("kpi-money").innerHTML =
     kpi("paid", money0(m.paid), "Paid $") + kpi("reversed", money0(m.reversed), "Reversed $") +
@@ -1214,18 +1384,26 @@ function renderUtil() {
   // donuts share of Paid: Collected vs Reversed
   const mColl = m.paid ? m.collected / m.paid : 0, mRev = m.paid ? m.reversed / m.paid : 0;
   const cColl = c.paid ? c.collected / c.paid : 0, cRev = c.paid ? c.reversed / c.paid : 0;
-  $("donut-money").innerHTML = donutSVG([{ v: m.collected, color: COL_COLLECTED }, { v: m.reversed, color: COL_REVERSED }], 170);
+  $("donut-money").innerHTML = donutSVG([{ v: Math.max(m.collected, 0), color: COL_COLLECTED }, { v: m.reversed, color: COL_REVERSED }], 170);
   $("legend-money").innerHTML = legendHTML([
     { label: "Collected $", val: money0(m.collected), pct: pct2(mColl), color: COL_COLLECTED },
     { label: "Reversed $", val: money0(m.reversed), pct: pct2(mRev), color: COL_REVERSED },
   ]);
-  $("donut-claims").innerHTML = donutSVG([{ v: c.collected, color: COL_COLLECTED }, { v: c.reversed, color: COL_REVERSED }], 170);
+  $("donut-claims").innerHTML = donutSVG([{ v: Math.max(c.collected, 0), color: COL_COLLECTED }, { v: c.reversed, color: COL_REVERSED }], 170);
   $("legend-claims").innerHTML = legendHTML([
     { label: "Collected Claims", val: int0(c.collected), pct: pct2(cColl), color: COL_COLLECTED },
     { label: "Reversed Claims", val: int0(c.reversed), pct: pct2(cRev), color: COL_REVERSED },
   ]);
 
-  $("pharm-chart").innerHTML = pharmChartSVG(p.pharmacies || []);
+  $("pharm-chart").innerHTML = pharmChartSVG(a.pharmacies, util.f ? util.f.pharm : null);
+
+  // drug-level visuals (need the cube)
+  hbars($("util-classes"), a.classes.map((x) => ({ name: x.name, v: x.v })), shortMoney, false);
+  hbars($("util-revdrugs"), a.revDrugs.map((x) => ({ name: x.name, v: x.v })), fmt, true);
+  $("uc-count").textContent = a.ucCount == null ? "—" : fmt(a.ucCount);
+  $("uc-drugs").innerHTML = a.ucDrugs.length
+    ? a.ucDrugs.map((x) => `<tr><td class="drug">${esc(x.name)}</td><td class="r num">${fmt(x.v)}</td></tr>`).join("")
+    : `<tr><td colspan="2" style="color:var(--ink-mute)">No U&amp;C claims under the current filters.</td></tr>`;
 }
 
 async function setTab(name) {
@@ -1315,7 +1493,57 @@ async function boot() {
     const b = e.target.closest("button[data-tab]");
     if (b) setTab(b.dataset.tab);
   });
-  $("util-select").addEventListener("change", (e) => { util.period = e.target.value; renderUtil(); });
+  $("util-select").addEventListener("change", (e) => { util.period = e.target.value; utilFilterReset(); renderUtil(); });
+  // utilization slicers: button toggles pop; checkbox changes update filters;
+  // chips clear one filter; pharmacy bars cross-filter on click
+  $("view-utilization").addEventListener("click", (e) => {
+    const sbtn = e.target.closest("[data-uslicer] > button");
+    if (sbtn) {
+      e.stopPropagation();
+      const pop = sbtn.parentElement.querySelector(".pop");
+      for (const other of document.querySelectorAll("#util-slicers .pop")) if (other !== pop) other.hidden = true;
+      pop.hidden = !pop.hidden;
+      return;
+    }
+    const chip = e.target.closest("[data-uchip]");
+    if (chip) {
+      const dim = chip.dataset.uchip;
+      if (dim === "__reset") utilFilterReset();
+      else if (dim === "pharm") util.f.pharm = null;
+      else {
+        util.f[dim].delete(Number(chip.dataset.idx));
+        if (!util.f[dim].size) util.f[dim] = null;
+      }
+      renderUtil();
+      return;
+    }
+    const bar = e.target.closest("#pharm-chart .bar");
+    if (bar) {
+      const pi = Number(bar.dataset.pi);
+      util.f.pharm = util.f.pharm === pi ? null : pi;
+      renderUtil();
+    }
+  });
+  $("util-slicers").addEventListener("change", (e) => {
+    const cb = e.target.closest("input[data-udim]");
+    if (!cb) return;
+    const dim = cb.dataset.udim, idx = cb.dataset.idx;
+    if (idx === "") util.f[dim] = null; // "All"
+    else {
+      if (!util.f[dim]) util.f[dim] = new Set();
+      const i = Number(idx);
+      util.f[dim].has(i) ? util.f[dim].delete(i) : util.f[dim].add(i);
+      if (!util.f[dim].size) util.f[dim] = null;
+    }
+    const openDim = cb.closest("[data-uslicer]").dataset.uslicer;
+    renderUtil();
+    // keep the pop open for multi-select
+    const el = document.querySelector(`[data-uslicer="${openDim}"] .pop`);
+    if (el) el.hidden = false;
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#util-slicers .slicer")) for (const pop of document.querySelectorAll("#util-slicers .pop")) pop.hidden = true;
+  });
   // one delegated handler for every cross-filter dimension: map states,
   // drug bars, group rows, device rows, table cells, and the toolbar chips
   // (a chip carries its own dim+val, so clicking it toggles the filter off)
