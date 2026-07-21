@@ -506,8 +506,9 @@
   #util-trend .cat { font-family: var(--mono); fill: var(--ink-mute); }
   #util-trend .axis { stroke: var(--hair); stroke-width: 1; }
   #util-trend .axlbl { font-family: var(--mono); fill: var(--ink-mute); font-size: 10px; }
-  #util-trend .avgline { stroke: var(--danger); stroke-width: 1.5; stroke-dasharray: 6 5; }
-  #util-trend .avglbl { fill: var(--danger); font-size: 10px; font-weight: 600; }
+  #util-trend .avgline, #trend .avgline { stroke: var(--danger); stroke-width: 1.5; stroke-dasharray: 6 5; }
+  #util-trend .avglbl, #trend .avglbl { fill: var(--danger); font-size: 10px; font-weight: 600; }
+  .donut-legend .sw.avg-sw { height: 0; width: 15px; border-radius: 0; background: transparent; border-top: 2.5px dashed var(--danger); }
   .trend-legend { flex-direction: row; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
   /* date-range button + TailAdmin v2 calendar popup */
   .datebtn { display: inline-flex; align-items: center; gap: 8px; font-family: var(--sans); font-weight: 500; font-size: 12.5px; letter-spacing: 0; }
@@ -1352,7 +1353,10 @@ function renderStats(a, prev) {
 function renderTrend(a) {
   $("trend-total").textContent = fmt(a.total) + " searches";
   const fmtD = (t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  $("trend-range").textContent = a.total ? `${fmtD(a.first)} – ${fmtD(a.anchor)}` : "no data";
+  const trendAvg = a.trend.length > 1 ? a.total / a.trend.length : 0;
+  $("trend-range").textContent = a.total
+    ? `${fmtD(a.first)} – ${fmtD(a.anchor)}${trendAvg > 0 ? ` · AVG ${fmt(Math.round(trendAvg))}/${{ D: "day", W: "wk", M: "mo", Y: "yr" }[a.trendGran] || "wk"}` : ""}`
+    : "no data";
 
   // column chart bucketed by the selected granularity, TailAdmin rounded tops
   const G_NAME = { D: "day", W: "week", M: "month", Y: "year" };
@@ -1389,7 +1393,13 @@ function renderTrend(a) {
     return `<line x1="${padL}" y1="${gy}" x2="${W}" y2="${gy}" stroke="var(--hair)" stroke-dasharray="2 4" stroke-width="1"/><text x="0" y="${gy + 3.5}">${Math.round(max * f)}</text>`;
   }).join("");
 
-  $("trend").innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="--base:${baseY}px">${grid}${bars}${labels}</svg>`;
+  let avgMark = "";
+  if (trendAvg > 0) {
+    const yA = y(Math.min(trendAvg, max));
+    avgMark = `<line class="avgline" x1="${padL}" y1="${yA.toFixed(1)}" x2="${W - 4}" y2="${yA.toFixed(1)}" data-tip="Average per ${({ D: "day", W: "week", M: "month", Y: "year" })[a.trendGran] || "week"}: ${fmt(Math.round(trendAvg))} searches"/>` +
+      `<text class="avglbl" x="${W - 4}" y="${(yA - 6).toFixed(1)}" text-anchor="end">AVG ${fmt(Math.round(trendAvg))}</text>`;
+  }
+  $("trend").innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="--base:${baseY}px">${grid}${bars}${avgMark}${labels}</svg>`;
 }
 
 function renderFunnel(a) {
@@ -2628,7 +2638,10 @@ function renderUtilTrend(p, hasCube) {
   $("util-trend").innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="--base:${baseY}px">${s}</svg>`;
   $("util-trend-legend").innerHTML = series.map((sr) =>
     `<div class="li"><span class="sw" style="background:${sr.color}"></span>` +
-    `<span><b>${esc(sr.name)}</b> <span class="p">${fmtV(sr.vals.reduce((a, b) => a + b, 0))}</span></span></div>`).join("");
+    `<span><b>${esc(sr.name)}</b> <span class="p">${fmtV(sr.vals.reduce((a, b) => a + b, 0))}</span></span></div>`).join("") +
+    (avg > 0 && n > 1
+      ? `<div class="li"><span class="sw avg-sw"></span><span><b>Monthly average</b> <span class="p num">${fmtFull(avg)}</span></span></div>`
+      : "");
 }
 
 // Fact-level export of the current view — every cube row (date × client ×
