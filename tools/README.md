@@ -36,9 +36,19 @@ Leave it running. It watches
 `C:\Users\trevo\iCloudDrive\Desktop\Avalon Reports`.
 Drop a quarterly workbook in there and it will:
 
-1. parse it and aggregate the P (paid) / R (reversed) claim lines,
-2. merge that quarter into `../utilization.json` (keyed by quarter, e.g. `2026-Q2`),
-3. `git commit` + `git push` so the site updates in ~1 minute.
+1. resolve drug strengths for any new NDCs from the FDA NDC directory
+   (cached in `data/ndc-strength.json`; offline-safe — names just show
+   without strengths until a later run),
+2. parse and aggregate the P (paid) / R (reversed) claim lines, stamping each
+   fact with its `ProcessDate` day and the pharmacy's street address,
+3. merge that quarter into `../utilization.json` (keyed by quarter, e.g. `2026-Q2`),
+4. `git commit` + `git push` so the site updates in ~1 minute.
+
+The site merges **all** stored periods into one continuous dataset at load, so
+a full-year file and quarterly files combine (overlapping months prefer the
+newest file). Weekly/daily drill-down and custom date ranges only cover files
+processed after day-stamping was added (2026-07-21) — re-drop older workbooks
+to upgrade them.
 
 Options:
 
@@ -57,8 +67,10 @@ set REPORT_PW=your-report-passphrase
 node build-utilization.mjs "C:\path\Q1 file.xlsx" "C:\path\Q2 file.xlsx" --push
 ```
 
-Each file becomes/updates a quarter in the period dropdown; `--push` publishes
-the encrypted `utilization.enc.json`. (Publishing is refused without `REPORT_PW`.)
+Each file becomes/updates a stored period; the site merges every period into
+one continuous timeline (the Yearly/Quarterly/Monthly/Weekly/Daily timeframe
+spans all of them). `--push` publishes the encrypted `utilization.enc.json`.
+(Publishing is refused without `REPORT_PW`.)
 
 ## The aggregation (what the numbers mean)
 

@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>myrxcard · Live Search Report</title>
+<title>MyRxCard · Performance Reports</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23006693'/%3E%3Ctext x='50' y='69' font-family='Arial,Helvetica,sans-serif' font-size='52' font-weight='bold' fill='white' text-anchor='middle'%3ERx%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -457,8 +458,8 @@
   html.dark [data-uslicer="brands"] > button { background: #33250E; border-color: #6B570F; color: #E9C558; }
   html.dark #tf-btn, html.dark #stf-btn { background: #0E2C3A; border-color: #26586E; color: #7CC4E4; }
   /* EXPORT CSV mirrors EXPORT PDF */
-  #util-csv-btn { background: var(--primary); border-color: var(--primary); color: #F2F8FF; }
-  #util-csv-btn:hover { background: var(--secondary); border-color: var(--secondary); color: #FFFFFF; }
+  #util-csv-btn, #search-csv-btn { background: var(--primary); border-color: var(--primary); color: #F2F8FF; }
+  #util-csv-btn:hover, #search-csv-btn:hover { background: var(--secondary); border-color: var(--secondary); color: #FFFFFF; }
   /* active-filter chips live on their own row under the slicer buttons */
   #util-chips, #filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 18px; }
   #util-chips:empty, #filter-chips:empty { display: none; }
@@ -780,6 +781,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
         <span id="date-btn-label">&#8212;</span>
       </button>
+      <button class="iconbtn" id="search-csv-btn" type="button" title="Download the current filtered searches as CSV">EXPORT CSV</button>
       <span class="daterange" id="custom-range" style="display:none">
         <input type="date" id="date-from" aria-label="From date">
         <span style="color:var(--ink-mute)">&#8211;</span>
@@ -1601,6 +1603,29 @@ function renderRecent(a) {
 }
 
 const FILTER_LABELS = { state: (v) => STATE_NAMES[v] || v, drug: (v) => v, group: (v) => v, device: (v) => v };
+
+// Search-tab export: every event behind the current filtered view, one row
+// per search, matching what the charts are showing.
+function downloadSearchCsv() {
+  const f = state.filters;
+  const a = aggregate(state.events, state.period, f, state.ranges);
+  const rows = [["Timestamp", "State", "City", "Drug", "Dosage", "Qty", "Group", "Device", "Browser", "Session",
+    "Results", "TopPrice", "MinPrice", "MaxPrice", "HasFeatured", "Printed", "PrintedPharmacy"]];
+  for (const e of a.ev) {
+    rows.push([new Date(e.t).toISOString(), e.state, e.city, e.drug, e.dosage, e.qty ?? "", e.group, e.device,
+      e.browser, e.session, e.results, e.topPrice ?? "",
+      e.prices.length ? Math.min(...e.prices) : "", e.prices.length ? Math.max(...e.prices) : "",
+      e.hasFeatured ? "Y" : "", e.printed ? "Y" : "", e.printedName]);
+  }
+  const q = (s) => { s = String(s ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const filtered = (state.ranges && state.ranges.length) || state.period.type !== "ALL" || DIMS.some((d) => (f[d] || []).length);
+  const blob = new Blob([String.fromCharCode(0xFEFF) + rows.map((r) => r.map(q).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `myrxcard-searches${filtered ? "-filtered" : ""}.csv`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
 
 function renderAll() {
   const f = state.filters;
@@ -3059,6 +3084,7 @@ async function boot() {
     if (!e.target.closest("#sidebar")) $("sidebar").classList.remove("open");
   });
   $("util-csv-btn").addEventListener("click", downloadUtilCsv);
+  $("search-csv-btn").addEventListener("click", downloadSearchCsv);
   // timeframe: granularity select resets the drill-down list; entries toggle
   // through the checkbox pop (handled with the other slicer changes below)
   $("util-gran").addEventListener("change", (e) => {
