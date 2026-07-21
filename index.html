@@ -83,7 +83,8 @@
   }
   .brand .kicker { color: var(--tertiary); margin-bottom: 4px; }
   .brand h1 { font-size: 26px; font-weight: 700; letter-spacing: -0.015em; }
-  .controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .controls-stack { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+  .controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-end; }
   .periodsel {
     background: var(--card); border: 1px solid var(--hair); border-radius: 8px;
     color: var(--ink); font-family: var(--mono); font-size: 12px; letter-spacing: 0.04em;
@@ -124,6 +125,13 @@
     letter-spacing: 0.06em; cursor: pointer; transition: border-color 150ms ease-out, color 150ms ease-out;
   }
   .iconbtn:hover { border-color: var(--hair-bright); color: var(--ink); }
+  /* header controls: each gets its own color so they read at a glance */
+  #state-btn { background: #EAF3F9; border-color: #A9CBDE; color: var(--secondary); }
+  #state-btn:hover { border-color: var(--secondary); }
+  #group-btn { background: #FBF3DC; border-color: #E3C878; color: #8A6410; }
+  #group-btn:hover { border-color: var(--accent); }
+  #pdf-btn { background: var(--primary); border-color: var(--primary); color: #F2F8FF; }
+  #pdf-btn:hover { background: var(--secondary); border-color: var(--secondary); color: #FFFFFF; }
 
   .badge-sample {
     font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em;
@@ -273,7 +281,7 @@
     @page { margin: 12mm; }
     html, body { background: #fff !important; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .controls, footer, #notice { display: none !important; }
+    .controls-stack, footer, #notice { display: none !important; }
     #app { padding: 0; max-width: none; }
     header.top { margin-bottom: 14px; }
     .print-meta { display: block; }
@@ -442,6 +450,11 @@
       <div class="logo" aria-label="MyRxCard"><span>My</span><span class="rx">Rx</span><span>Card</span></div>
       <h1 id="app-title">Search performance</h1>
     </div>
+    <div class="controls-stack">
+    <div class="sync">
+      <span class="dot" id="sync-dot"></span>
+      <span class="stamp" id="sync-stamp">—</span>
+    </div>
     <div class="controls">
       <span class="badge-sample" id="sample-badge" hidden>SAMPLE DATA</span>
       <span id="search-only" style="display:contents">
@@ -469,13 +482,8 @@
         <input type="date" id="date-to" aria-label="To date">
       </span>
       </span>
-      <div class="sync">
-        <span class="dot" id="sync-dot"></span>
-        <span class="stamp" id="sync-stamp">—</span>
-      </div>
       <button class="iconbtn" id="pdf-btn" type="button">EXPORT PDF</button>
-      <button class="iconbtn" id="refresh-btn" type="button">REFRESH</button>
-      <button class="iconbtn" id="lock-btn" type="button" hidden>LOCK</button>
+    </div>
     </div>
   </header>
 
@@ -1697,7 +1705,6 @@ function enterApp(mode) {
   $("gate").hidden = true;
   $("app").style.display = "block";
   $("sample-badge").hidden = mode !== "sample";
-  $("lock-btn").hidden = mode !== "live";
   if (mode === "sample") {
     $("foot-src").textContent = "Source: bundled sample export (not live)";
     stamp(true, "STATIC SAMPLE");
@@ -1755,10 +1762,6 @@ async function boot() {
     if (!cb) return;
     if (cb.dataset.state === "") { state.filters.state = null; history.replaceState(null, "", location.pathname); renderAll(); }
     else toggleState(cb.dataset.state);
-  });
-  $("refresh-btn").addEventListener("click", async () => {
-    if (state.tab === "util") { await loadUtil(); renderUtil(); return; }
-    state.mode === "live" ? sync() : renderAll();
   });
   $("pdf-btn").addEventListener("click", () => window.print());
   $("tabs").addEventListener("click", (e) => {
@@ -1870,7 +1873,6 @@ async function boot() {
   if (STATE_NAMES[hashState]) state.filters.state = [hashState];
   const qp = (new URLSearchParams(location.search).get("period") || "").toUpperCase();
   if (PERIOD_LABELS[qp]) { state.period.type = qp; $("period-select").value = qp; }
-  $("lock-btn").addEventListener("click", () => { sessionStorage.removeItem("mrx-cfg"); sessionStorage.removeItem("mrx-pw"); location.reload(); });
 
   // 1) live mode if config.enc.json is deployed
   let encBlob = null;
