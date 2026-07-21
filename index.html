@@ -971,7 +971,7 @@
       </div>
 
       <div class="panel span12" id="xover-panel">
-        <div class="kicker">Search &#8594; claim crossover <span class="hint">· heuristic: a claim for the same drug + strength + state within 30 days of a website search (strength enforced when both sides carry one) — no patient-level link</span></div>
+        <div class="kicker">Search &#8594; claim crossover <span class="hint">· heuristic: a claim for the same drug + strength in the searched ZIP-3 region within 30 days of the search — no patient-level link</span></div>
         <div id="xover"></div>
       </div>
 
@@ -1105,6 +1105,7 @@ function normalize(raw) {
     dosage: (raw.dosage || "").trim().replace(/^(null\s*)+$/i, ""),
     qty: raw.quantity,
     city: (raw.city || "").trim(),
+    zip: String(raw.zip || raw.ip_zip || "").replace(/\D/g, "").slice(0, 5),
     state: normState(raw.state),
     group: parseGroup(raw.source_path),
     results: Number(raw.result_count) || 0,
@@ -2837,17 +2838,24 @@ function renderCrossover(p, hasCube) {
   panel.style.display = "";
   const base = (s) => String(s).split(" · ")[0].trim().toUpperCase();
   // claim days per key under the current filters (net-paid facts only).
-  // Two indexes: strength-specific (DRUG|mg|STATE) and generic (DRUG|STATE);
-  // hasStrength tracks drugs whose claims carry a parseable strength, so a
-  // dosage-bearing search is held to the stricter strength match.
+  // Keys layer strictness: strength (mg) when both sides parse one, and
+  // geography as ZIP-3 region (searched zip vs pharmacy zip — "60515 or
+  // nearby", not the whole state) with state as the fallback.
   const claims = new Map(), hasStrength = new Set();
   const put = (key, day) => { if (!claims.has(key)) claims.set(key, new Set()); claims.get(key).add(day); };
   for (const f of p.facts) {
     if (!f[12] || f[10] <= f[11] || !factPass(f)) continue;
     const b = base(p.dims.drugs[f[6]]), st = p.dims.states[f[2]];
-    put(b + "|" + st, f[12]);
+    const meta = (p.pharmMeta || [])[f[3]] || {};
+    const z3 = meta.zip ? String(meta.zip).slice(0, 3) : null;
     const mg = primStrength(p.dims.drugs[f[6]].split(" · ")[1]);
-    if (mg != null) { hasStrength.add(b); put(b + "|" + mg + "|" + st, f[12]); }
+    put(b + "|ST:" + st, f[12]);
+    if (z3) put(b + "|Z:" + z3, f[12]);
+    if (mg != null) {
+      hasStrength.add(b);
+      put(b + "|S:" + mg + "|ST:" + st, f[12]);
+      if (z3) put(b + "|S:" + mg + "|Z:" + z3, f[12]);
+    }
   }
   let considered = 0, matchedN = 0;
   const gaps = [], byDrug = new Map();
@@ -2861,10 +2869,10 @@ function renderCrossover(p, hasCube) {
     if (!rec) { rec = { s: 0, m: 0 }; byDrug.set(b, rec); }
     rec.s++;
     const mg = primStrength(e.dosage);
-    // strength enforced when both sides carry one; name-level otherwise
-    const days = (mg != null && hasStrength.has(b))
-      ? claims.get(b + "|" + mg + "|" + e.state)
-      : claims.get(b + "|" + e.state);
+    const strict = mg != null && hasStrength.has(b);
+    // geography: ZIP-3 region when the search has a zip, else state
+    const geo = e.zip ? "|Z:" + e.zip.slice(0, 3) : "|ST:" + e.state;
+    const days = strict ? claims.get(b + "|S:" + mg + geo) : claims.get(b + geo);
     if (!days) continue;
     for (let k = 0; k <= 30; k++) {
       if (days.has(dateToYmd(addDays(ymdToDate(sd), k)))) { matchedN++; rec.m++; gaps.push(k); break; }
