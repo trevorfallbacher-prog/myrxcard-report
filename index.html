@@ -393,8 +393,10 @@
   .geo-map { flex: 1; min-width: 320px; }
   .geo-map svg { width: 100%; height: auto; display: block; border-radius: 10px; }
   .geo-map .ocean { fill: #DDEBF5; }
-  .geo-map .st { fill: #C6D8E6; stroke: #FDFEFF; stroke-width: 1.1; }
-  .geo-map .pin { fill: var(--primary); fill-opacity: 0.78; stroke: #fff; stroke-width: 1; cursor: pointer; transition: fill 120ms ease-out; }
+  .geo-map .st { fill: #C6D8E6; stroke: #FDFEFF; stroke-width: 1.1; vector-effect: non-scaling-stroke; }
+  .geo-map .pin { fill: var(--primary); fill-opacity: 0.78; stroke: #fff; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: pointer; transition: fill 120ms ease-out; }
+  .geo-list .gmap { color: var(--ink-mute); text-decoration: none; margin-left: 5px; font-size: 12px; }
+  .geo-list .gmap:hover { color: var(--secondary); }
   .geo-map .pin:hover { fill: var(--secondary); fill-opacity: 0.95; }
   .geo-map .pin.sel { fill: var(--accent); fill-opacity: 0.95; }
   @media (max-width: 900px) { .geo-wrap { flex-direction: column; } .geo-list { flex-basis: auto; max-height: 300px; } }
@@ -1633,8 +1635,12 @@ function renderUtilGeo(p, agg) {
   $("util-locations").innerHTML = locs.map((x) => {
     const m = p.pharmMeta[x.pi] || {};
     const lbl = `${m.city || "—"}, ${m.st || "—"} (…${m.npi4 || "?"})`;
+    // exact-address Google Maps link when the store carries one, name+city otherwise
+    const query = [x.name, m.addr, m.city, m.st, m.zip].filter(Boolean).join(", ");
+    const gmap = `<a class="gmap" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}"` +
+      ` target="_blank" rel="noopener" title="Open in Google Maps${m.addr ? ` — ${esc(m.addr)}` : ""}">&#8599;</a>`;
     return `<div class="bar-row${sel && sel.has(x.pi) ? " on" : ""}" data-pi="${x.pi}" title="${esc(x.name)} · ${money0(x.collected)}">` +
-      `<span class="name">${esc(lbl)}</span>` +
+      `<span class="name">${esc(lbl)}${gmap}</span>` +
       `<span class="track"><i style="width:${(100 * x.collected / max).toFixed(1)}%"></i></span>` +
       `<span class="n num">${shortMoney(x.collected)}</span></div>`;
   }).join("") || `<div style="color:var(--ink-mute)">Nothing under the current filters.</div>`;
@@ -1653,17 +1659,35 @@ function renderUtilGeo(p, agg) {
   }
   const base = Object.values(window.US_PATHS).flat().map((d) => `<path class="st" d="${d}"/>`).join("");
   const maxV = Math.max(...[...clusters.values()].map((c) => c.v), 1);
+  // zoom the viewBox to the active pins' bounding box (padded, with a floor so
+  // one city doesn't zoom past all context); pin radii scale down to match
+  let vb = "0 0 959 593", rScale = 1;
+  if (clusters.size) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const c of clusters.values()) {
+      const cx = c.x / c.members.length, cy = c.y / c.members.length;
+      x0 = Math.min(x0, cx); y0 = Math.min(y0, cy);
+      x1 = Math.max(x1, cx); y1 = Math.max(y1, cy);
+    }
+    const pad = 45, minW = 240, minH = minW * 593 / 959;
+    x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+    if (x1 - x0 < minW) { const c = (x0 + x1) / 2; x0 = c - minW / 2; x1 = c + minW / 2; }
+    if (y1 - y0 < minH) { const c = (y0 + y1) / 2; y0 = c - minH / 2; y1 = c + minH / 2; }
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0); x1 = Math.min(959, x1); y1 = Math.min(593, y1);
+    vb = `${x0.toFixed(0)} ${y0.toFixed(0)} ${(x1 - x0).toFixed(0)} ${(y1 - y0).toFixed(0)}`;
+    rScale = Math.max((x1 - x0) / 959, (y1 - y0) / 593);
+  }
   const pins = [...clusters.values()].sort((a, b) => b.v - a.v).map((c) => {
     const cx = c.x / c.members.length, cy = c.y / c.members.length;
-    const r = 4 + 11 * Math.sqrt(c.v / maxV);
+    const r = (4 + 11 * Math.sqrt(c.v / maxV)) * rScale;
     const isSel = sel && c.members.some((pi) => sel.has(pi));
     const topName = p.dims.pharmacies[c.members[0]];
     const title = c.members.length === 1
       ? `${topName} · ${money0(c.v)}`
       : `${c.members.length} locations · ${money0(c.v)} · incl. ${topName}`;
-    return `<circle class="pin${isSel ? " sel" : ""}" data-pis="${c.members.join(",")}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(1)}"><title>${esc(title)}</title></circle>`;
+    return `<circle class="pin${isSel ? " sel" : ""}" data-pis="${c.members.join(",")}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(2)}"><title>${esc(title)}</title></circle>`;
   }).join("");
-  $("util-map").innerHTML = `<svg viewBox="0 0 959 593" role="img" aria-label="Pharmacy locations">` +
+  $("util-map").innerHTML = `<svg viewBox="${vb}" role="img" aria-label="Pharmacy locations">` +
     `<rect class="ocean" x="0" y="0" width="959" height="593"/>${base}${pins}</svg>`;
 }
 
@@ -1754,14 +1778,14 @@ function downloadUtilCsv() {
   if (!Array.isArray(p.facts)) { alert("This period was stored without row-level data — re-run the watcher to rebuild it."); return; }
   const q = (s) => { s = String(s ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const r2 = (v) => Math.round(v * 100) / 100;
-  const rows = [["Month", "Client", "Pharmacy", "PharmacyCity", "PharmacyState", "NPILast4", "PharmacyGroup",
+  const rows = [["Month", "Client", "Pharmacy", "PharmacyAddress", "PharmacyCity", "PharmacyState", "PharmacyZip", "NPILast4", "PharmacyGroup",
     "Brand", "TherapeuticClass", "Drug", "PaidAtUC", "PaidDollars", "ReversedDollars", "CollectedDollars",
     "PaidClaims", "ReversedClaims", "CollectedClaims"]];
   for (const f of p.facts) {
     const meta = (p.pharmMeta && p.pharmMeta[f[3]]) || {};
     rows.push([
-      p.dims.months[f[0]], p.dims.groups[f[1]], p.dims.pharmacies[f[3]], meta.city || "", p.dims.states[f[2]],
-      meta.npi4 || "", pharmChain(p, f[3]) || "", BRAND_NAMES[p.dims.brands[f[4]]] || p.dims.brands[f[4]],
+      p.dims.months[f[0]], p.dims.groups[f[1]], p.dims.pharmacies[f[3]], meta.addr || "", meta.city || "", p.dims.states[f[2]],
+      meta.zip || "", meta.npi4 || "", pharmChain(p, f[3]) || "", BRAND_NAMES[p.dims.brands[f[4]]] || p.dims.brands[f[4]],
       p.dims.classes[f[5]], p.dims.drugs[f[6]], f[7] ? "Y" : "",
       r2(f[8]), r2(-f[9]), r2(f[8] + f[9]), f[10], f[11], f[10] - f[11],
     ]);
@@ -1964,6 +1988,7 @@ async function boot() {
   // utilization slicers: button toggles pop; checkbox changes update filters;
   // chips clear one filter; pharmacy bars cross-filter on click
   $("view-utilization").addEventListener("click", (e) => {
+    if (e.target.closest("a")) return; // maps links open in a new tab, don't also filter
     const sbtn = e.target.closest("[data-uslicer] > button");
     if (sbtn) {
       e.stopPropagation();

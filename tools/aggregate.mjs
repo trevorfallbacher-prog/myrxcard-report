@@ -126,6 +126,8 @@ export function aggregateRows(rows, sourceLabel = "") {
         city: titleize(norm(r.PharmacyCity)),
         st: norm(r.PharmacyState).toUpperCase(),
         npi4: npi.slice(-4),
+        addr: titleize(norm(r.PharmacyAddress)),
+        zip: norm(r.PharmacyZip).slice(0, 5),
         ll: zipLatLon(r.PharmacyZip),
       });
     }
