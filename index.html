@@ -283,6 +283,7 @@
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .controls-stack, footer, #notice, .stack-controls, #util-csv-btn, #tip { display: none !important; }
     * { animation: none !important; transition: none !important; }
+    .grid > .panel, .stats { opacity: 1 !important; }
     #app { padding: 0; max-width: none; }
     header.top { margin-bottom: 14px; }
     .print-meta { display: block; }
@@ -405,24 +406,28 @@
   @keyframes pinPop { from { opacity: 0; transform: scale(0); } }
   @keyframes sweepIn { from { opacity: 0; transform: rotate(-70deg) scale(0.8); } }
   @keyframes softFade { from { opacity: 0; } }
-  .grid > .panel { animation: panelIn 0.55s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
-  .stats .stat { animation: panelIn 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: calc(var(--i, 0) * 55ms); }
-  .kpi { animation: fadeSlide 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
-  .bar-row { animation: fadeSlide 0.45s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: min(calc(var(--i, 0) * 35ms), 500ms); }
-  .bar-row .track i { animation: growX 0.65s cubic-bezier(0.25, 0.9, 0.3, 1) backwards; animation-delay: min(calc(var(--i, 0) * 35ms + 140ms), 640ms); }
-  .state-list button { animation: fadeSlide 0.4s backwards; animation-delay: min(calc(var(--i, 0) * 30ms), 400ms); }
-  #pharm-chart rect.bar, #util-trend rect {
+  /* reveal-on-scroll: panels hold invisible until they enter the viewport
+     (IntersectionObserver adds .vis), then play their entrance — so the data
+     choreography always happens where the user is actually looking */
+  .grid > .panel, .stats { opacity: 0; }
+  .grid > .panel.vis, .stats.vis { opacity: 1; animation: panelIn 0.55s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; }
+  .stats.vis .stat { animation: panelIn 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: calc(var(--i, 0) * 55ms); }
+  .vis .kpi { animation: fadeSlide 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
+  .vis .bar-row { animation: fadeSlide 0.45s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: min(calc(var(--i, 0) * 35ms), 500ms); }
+  .vis .bar-row .track i { animation: growX 0.65s cubic-bezier(0.25, 0.9, 0.3, 1) backwards; animation-delay: min(calc(var(--i, 0) * 35ms + 140ms), 640ms); }
+  .vis .state-list button { animation: fadeSlide 0.4s backwards; animation-delay: min(calc(var(--i, 0) * 30ms), 400ms); }
+  .vis #pharm-chart rect.bar, .vis #util-trend rect {
     /* scale about the chart baseline (--base set on the svg) so stacked
        segments rise as one column instead of floating apart */
     transform-box: view-box; transform-origin: center var(--base, bottom);
     animation: riseY 0.55s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
     animation-delay: min(calc(var(--i, 0) * 12ms), 480ms);
   }
-  #pharm-chart text.val, #util-trend text.val { animation: softFade 0.45s backwards; animation-delay: min(calc(var(--i, 0) * 12ms + 320ms), 820ms); }
-  .donut-wrap svg { animation: sweepIn 0.7s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; }
-  .donut-legend .li { animation: fadeSlide 0.5s backwards; animation-delay: calc(180ms + var(--i, 0) * 110ms); }
-  .geo-map .pin { animation: pinPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; animation-delay: min(calc(var(--i, 0) * 45ms), 650ms); }
-  .uc-table tbody tr, #recent tbody tr { animation: fadeSlide 0.4s backwards; animation-delay: min(calc(var(--i, 0) * 22ms), 450ms); }
+  .vis #pharm-chart text.val, .vis #util-trend text.val { animation: softFade 0.45s backwards; animation-delay: min(calc(var(--i, 0) * 12ms + 320ms), 820ms); }
+  .vis .donut-wrap svg { animation: sweepIn 0.7s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; }
+  .vis .donut-legend .li { animation: fadeSlide 0.5s backwards; animation-delay: calc(180ms + var(--i, 0) * 110ms); }
+  .vis .geo-map .pin { animation: pinPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; animation-delay: min(calc(var(--i, 0) * 45ms), 650ms); }
+  .vis .uc-table tbody tr, .vis #recent tbody tr { animation: fadeSlide 0.4s backwards; animation-delay: min(calc(var(--i, 0) * 22ms), 450ms); }
   .badge-filter { animation: popIn 0.25s ease-out backwards; }
   .pop:not([hidden]) { animation: popIn 0.18s cubic-bezier(0.2, 0.8, 0.25, 1); }
   #tip { animation: popIn 0.15s ease-out; }
@@ -1255,7 +1260,7 @@ function renderAll() {
   for (const sel of ["#stats", "#top-drugs", "#drill", "#groups", "#recent tbody"])
     setStagger(sel);
   setStagger(".state-list");
-  for (const el of document.querySelectorAll("#stats .v")) countUp(el);
+  if ($("stats").classList.contains("vis")) for (const el of document.querySelectorAll("#stats .v")) countUp(el);
   const fd = (t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   $("foot-window").textContent = a.total ? `Window: ${fd(a.first)} – ${fd(a.anchor)}` : "";
   const gen = new Date().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
@@ -1939,6 +1944,32 @@ function hbars(el, entries, fmtVal, revStyle) {
 }
 
 /* --- motion helpers --- */
+// reveal-on-scroll: a panel gets .vis (and its numbers roll up) the first
+// time it enters the viewport; panels revealed together stagger slightly
+let revealIO = null;
+function initReveals() {
+  if (!("IntersectionObserver" in window)) { // ancient browser: show everything
+    for (const el of document.querySelectorAll(".grid > .panel, .stats")) el.classList.add("vis");
+    return;
+  }
+  revealIO = new IntersectionObserver((entries) => {
+    let batch = 0;
+    for (const en of entries) {
+      if (!en.isIntersecting) continue;
+      revealIO.unobserve(en.target);
+      en.target.style.animationDelay = (batch++ * 80) + "ms";
+      en.target.classList.add("vis");
+      for (const v of en.target.querySelectorAll(".v")) countUp(v);
+    }
+  }, { rootMargin: "0px 0px -8% 0px", threshold: 0.1 });
+  observeReveals();
+}
+function observeReveals() {
+  if (!revealIO) return;
+  for (const el of document.querySelectorAll(".grid > .panel, .stats"))
+    if (!el.classList.contains("vis")) revealIO.observe(el);
+}
+
 // give each child its sibling index so the CSS stagger delays can key off it
 function setStagger(sel) {
   for (const parent of document.querySelectorAll(sel))
@@ -2151,8 +2182,8 @@ function renderUtil() {
   for (const sel of ["#kpi-money", "#kpi-claims", "#legend-money", "#legend-claims", "#util-trend-legend",
     "#pharm-chart svg", "#util-trend svg", "#util-locations", "#util-classes", "#util-revdrugs", "#uc-drugs"])
     setStagger(sel);
-  for (const el of document.querySelectorAll("#kpi-money .v, #kpi-claims .v")) countUp(el);
-  countUp($("uc-count"));
+  for (const el of document.querySelectorAll("#kpi-money .v, #kpi-claims .v, #uc-count"))
+    if (el.closest(".vis")) countUp(el); // below-fold numbers roll up at reveal instead
 }
 
 async function setTab(name) {
@@ -2160,12 +2191,13 @@ async function setTab(name) {
   state.tab = name;
   $("view-search").hidden = name !== "search";
   $("view-utilization").hidden = name !== "util";
-  if (switching) { // replay the panel entrance choreography for the new view
+  if (switching) { // re-arm the reveal-on-scroll pass for the incoming view
     const view = $(name === "search" ? "view-search" : "view-utilization");
-    const els = view.querySelectorAll(".grid > .panel, .stats .stat");
-    for (const el of els) el.style.animation = "none";
-    void view.offsetWidth;
-    for (const el of els) el.style.animation = "";
+    for (const el of view.querySelectorAll(".grid > .panel, .stats")) {
+      el.classList.remove("vis");
+      el.style.animationDelay = "";
+    }
+    observeReveals();
   }
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   $("search-only").style.display = name === "search" ? "contents" : "none";
@@ -2299,7 +2331,7 @@ async function boot() {
   });
   document.addEventListener("mousemove", (e) => { if (tipOn) moveTip(e); });
   document.addEventListener("mouseleave", () => { tipEl.style.display = "none"; tipOn = false; });
-  setStagger(".grid"); // panels keep their entrance order across tab switches
+  initReveals(); // panels reveal (and numbers roll) as they scroll into view
   $("tabs").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-tab]");
     if (b) setTab(b.dataset.tab);
