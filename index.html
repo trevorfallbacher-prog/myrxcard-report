@@ -971,7 +971,7 @@
       </div>
 
       <div class="panel span12" id="xover-panel">
-        <div class="kicker">Search &#8594; claim crossover <span class="hint">· heuristic: a claim for the same drug + state within 30 days of a website search — no patient-level link</span></div>
+        <div class="kicker">Search &#8594; claim crossover <span class="hint">· heuristic: a claim for the same drug + strength + state within 30 days of a website search (strength enforced when both sides carry one) — no patient-level link</span></div>
         <div id="xover"></div>
       </div>
 
@@ -2819,6 +2819,16 @@ function utilViewDesc(p) {
 /* --- search → claim crossover: for each website search, did a claim for the
        same drug in the same state process within 30 days? Correlational only
        (no patient identity in either dataset) — labeled as such in the UI. --- */
+// primary strength in mg from a label like "300 MG", "125 MCG", ".5 mg/g cream"
+function primStrength(s) {
+  const m = String(s || "").toLowerCase().match(/(\d*\.?\d+)\s*(mg|mcg|g|gm)\b/);
+  if (!m) return null;
+  let v = parseFloat(m[1]);
+  if (m[2] === "mcg") v /= 1000;
+  else if (m[2] === "g" || m[2] === "gm") v *= 1000;
+  return v;
+}
+
 function renderCrossover(p, hasCube) {
   const panel = $("xover-panel");
   const dom = hasCube ? utilDayDomain(p) : null;
@@ -2826,13 +2836,18 @@ function renderCrossover(p, hasCube) {
   if (!dom || !evs.length) { panel.style.display = "none"; return; }
   panel.style.display = "";
   const base = (s) => String(s).split(" · ")[0].trim().toUpperCase();
-  // claim days per DRUG|STATE under the current filters (net-paid facts only)
-  const claims = new Map();
+  // claim days per key under the current filters (net-paid facts only).
+  // Two indexes: strength-specific (DRUG|mg|STATE) and generic (DRUG|STATE);
+  // hasStrength tracks drugs whose claims carry a parseable strength, so a
+  // dosage-bearing search is held to the stricter strength match.
+  const claims = new Map(), hasStrength = new Set();
+  const put = (key, day) => { if (!claims.has(key)) claims.set(key, new Set()); claims.get(key).add(day); };
   for (const f of p.facts) {
     if (!f[12] || f[10] <= f[11] || !factPass(f)) continue;
-    const key = base(p.dims.drugs[f[6]]) + "|" + p.dims.states[f[2]];
-    if (!claims.has(key)) claims.set(key, new Set());
-    claims.get(key).add(f[12]);
+    const b = base(p.dims.drugs[f[6]]), st = p.dims.states[f[2]];
+    put(b + "|" + st, f[12]);
+    const mg = primStrength(p.dims.drugs[f[6]].split(" · ")[1]);
+    if (mg != null) { hasStrength.add(b); put(b + "|" + mg + "|" + st, f[12]); }
   }
   let considered = 0, matchedN = 0;
   const gaps = [], byDrug = new Map();
@@ -2845,7 +2860,11 @@ function renderCrossover(p, hasCube) {
     let rec = byDrug.get(b);
     if (!rec) { rec = { s: 0, m: 0 }; byDrug.set(b, rec); }
     rec.s++;
-    const days = claims.get(b + "|" + e.state);
+    const mg = primStrength(e.dosage);
+    // strength enforced when both sides carry one; name-level otherwise
+    const days = (mg != null && hasStrength.has(b))
+      ? claims.get(b + "|" + mg + "|" + e.state)
+      : claims.get(b + "|" + e.state);
     if (!days) continue;
     for (let k = 0; k <= 30; k++) {
       if (days.has(dateToYmd(addDays(ymdToDate(sd), k)))) { matchedN++; rec.m++; gaps.push(k); break; }
