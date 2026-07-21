@@ -616,8 +616,6 @@
   .geo-list .gmap:hover { color: var(--secondary); }
   .geo-map .pin:hover { fill: var(--secondary); fill-opacity: 0.95; }
   .geo-map .pin.sel { fill: var(--accent); fill-opacity: 0.95; }
-  .geo-map .pin.dim { fill-opacity: 0.3; }
-  .geo-list .bar-row.dimrow { opacity: 0.5; }
   @media (max-width: 900px) { .geo-wrap { flex-direction: column; } .geo-list { flex-basis: auto; max-height: 300px; } }
   .util-period select {
     font-family: var(--mono); font-size: 12px; color: var(--ink-soft); background: var(--card-solid);
@@ -650,11 +648,6 @@
   #pharm-chart .bar:hover { fill: var(--primary); }
   #pharm-chart .barrev { fill: var(--accent); }
   #pharm-chart .barrev:hover { fill: var(--accent-bright); }
-  /* checkbox-style selection: unselected bars grey out but stay in place */
-  #pharm-chart .bar.dim { fill: var(--hair-bright); }
-  #pharm-chart .barrev.dim { fill: var(--hair); }
-  #pharm-chart .bar.dim:hover { fill: var(--ink-mute); }
-  #pharm-chart text.val.dim { opacity: 0.45; }
   #pharm-chart .val { font-family: var(--mono); fill: var(--ink-soft); }
   #pharm-chart .cat { font-family: var(--mono); fill: var(--ink-mute); }
   #pharm-chart .axis { stroke: var(--hair); stroke-width: 1; }
@@ -1707,8 +1700,7 @@ function pharmChartSVG(data, selSet) {
     const rh = chartH * (rev / max);
     const x = padL + i * (bw + gap);
     const yC = baseY - ch, yR = yC - rh;
-    const anySel = selSet && selSet.size;
-    const sel = anySel ? (selSet.has(p.pi) ? " sel" : " dim") : "";
+    const sel = selSet && selSet.has(p.pi) ? " sel" : "";
     const title = `<title>${esc(p.name)} · collected ${money0(coll)} · reversed ${money0(rev)}</title>`;
     if (rh > 0.4) { // reversed rides on top and carries the rounded cap
       if (ch > 0)
@@ -1718,7 +1710,7 @@ function pharmChartSVG(data, selSet) {
       s += `<path class="bar${sel}" data-pi="${p.pi}" d="${colPath(x, yC, bw, ch, 3.5)}">${title}</path>`;
     }
     if (coll / max > 0.045)
-      s += `<text class="val${sel === " dim" ? " dim" : ""}" x="${x + bw / 2}" y="${(yR - 5).toFixed(1)}" text-anchor="middle" font-size="9.5">${shortMoney(coll)}</text>`;
+      s += `<text class="val" x="${x + bw / 2}" y="${(yR - 5).toFixed(1)}" text-anchor="middle" font-size="9.5">${shortMoney(coll)}</text>`;
     const cx = x + bw / 2, cy = baseY + 9;
     s += `<text class="cat" x="${cx}" y="${cy}" text-anchor="end" font-size="9" transform="rotate(-55 ${cx} ${cy})">${esc(clip(p.name, 20))}</text>`;
   });
@@ -2016,14 +2008,10 @@ function utilAgg(p) {
   let paid = 0, rev = 0, pn = 0, rn = 0, ucN = 0;
   const byPharm = new Map(), byPharmRev = new Map(), byClass = new Map(), byDrugRev = new Map(), byDrugUC = new Map();
   for (const f of p.facts) {
-    // pharmacy chart/map/list ignore the pharmacy selection itself, so every
-    // location stays visible and selection works like checkboxes (selected
-    // bars stay colored, the rest grey out)
-    if (!factPass(f, "pharmacies")) continue;
+    if (!factPass(f)) continue;
+    paid += f[8]; rev += f[9]; pn += f[10]; rn += f[11];
     byPharm.set(f[3], (byPharm.get(f[3]) || 0) + f[8] + f[9]);
     if (f[9]) byPharmRev.set(f[3], (byPharmRev.get(f[3]) || 0) - f[9]);
-    if (util.f.pharmacies && !util.f.pharmacies.has(f[3])) continue;
-    paid += f[8]; rev += f[9]; pn += f[10]; rn += f[11];
     byClass.set(f[5], (byClass.get(f[5]) || 0) + f[8] + f[9]);
     if (f[11]) byDrugRev.set(f[6], (byDrugRev.get(f[6]) || 0) + f[11]);
     // U&C = net claim count (paid − reversed), matching Power BI's Sum of ClaimCount
@@ -2177,7 +2165,7 @@ function renderUtilGeo(p, agg) {
     const query = [x.name, m.addr, m.city, m.st, m.zip].filter(Boolean).join(", ");
     const gmap = `<a class="gmap" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}"` +
       ` target="_blank" rel="noopener" title="Open in Google Maps${m.addr ? ` — ${esc(m.addr)}` : ""}">&#8599;</a>`;
-    return `<div class="bar-row${sel && sel.size ? (sel.has(x.pi) ? " on" : " dimrow") : ""}" data-pi="${x.pi}" title="${esc(x.name)} · ${money0(x.collected)}">` +
+    return `<div class="bar-row${sel && sel.has(x.pi) ? " on" : ""}" data-pi="${x.pi}" title="${esc(x.name)} · ${money0(x.collected)}">` +
       `<span class="name">${esc(lbl)}${gmap}</span>` +
       `<span class="track"><i style="width:${(100 * x.collected / max).toFixed(1)}%"></i></span>` +
       `<span class="n num">${shortMoney(x.collected)}</span></div>`;
@@ -2219,12 +2207,11 @@ function renderUtilGeo(p, agg) {
     const cx = c.x / c.members.length, cy = c.y / c.members.length;
     const r = (4 + 11 * Math.sqrt(c.v / maxV)) * rScale;
     const isSel = sel && c.members.some((pi) => sel.has(pi));
-    const pinDim = sel && sel.size && !isSel ? " dim" : "";
     const topName = p.dims.pharmacies[c.members[0]];
     const title = c.members.length === 1
       ? `${topName} · ${money0(c.v)}`
       : `${c.members.length} locations · ${money0(c.v)} · incl. ${topName}`;
-    return `<circle class="pin${isSel ? " sel" : ""}${pinDim}" style="--i:${idx}" data-pis="${c.members.join(",")}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(2)}"><title>${esc(title)}</title></circle>`;
+    return `<circle class="pin${isSel ? " sel" : ""}" style="--i:${idx}" data-pis="${c.members.join(",")}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(2)}"><title>${esc(title)}</title></circle>`;
   }).join("");
   $("util-map").innerHTML = `<svg viewBox="${vb}" role="img" aria-label="Pharmacy locations">` +
     `<rect class="ocean" x="0" y="0" width="959" height="593"/>${base}${pins}</svg>`;
