@@ -127,8 +127,7 @@
     padding: 22px 16px 70px; overflow-y: auto;
     transition: transform 0.25s ease-out, background 0.2s, border-color 0.2s;
   }
-  .side-logo { padding: 2px 10px 14px; }
-  .side-logo .logo { margin-bottom: 0; }
+  .side-logo { padding: 4px 10px 14px; }
   .side-sec { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; color: var(--ink-mute); margin: 16px 10px 8px; }
   #side-nav { display: flex; flex-direction: column; gap: 4px; }
   #side-nav button {
@@ -359,8 +358,11 @@
   .state-list .n { font-family: var(--mono); font-size: 12px; }
 
   /* MyRxCard wordmark */
-  .logo { display: flex; align-items: center; font-size: 19px; font-weight: 800; letter-spacing: -0.01em; color: var(--ink); margin-bottom: 6px; }
-  .logo .rx { background: #16688F; color: #fff; border-radius: 7px; padding: 0 6px; margin: 0 3px; font-weight: 700; } /* brand-fixed: never themed */
+  /* official MyRxCard logo (inlined SVG sprite): chip + Rx stay brand-fixed;
+     wordmarks ride currentColor so they invert cleanly in dark mode */
+  .logo-svg { height: 30px; width: auto; display: block; color: #000; }
+  html.dark .logo-svg { color: #E9F2F9; }
+  .gate-panel .logo-svg { height: 34px; margin-bottom: 14px; }
 
   /* ---------- Print / PDF export ---------- */
   .print-meta {
@@ -377,6 +379,12 @@
     header.top { position: static !important; box-shadow: none !important; padding: 0 0 10px !important; }
     * { animation: none !important; transition: none !important; }
     .grid > .panel, .stats { opacity: 1 !important; }
+    /* the trend line is drawn by an animation (dashoffset 1 = hidden), so with
+       animations off it must be forced fully drawn — and printed high-contrast */
+    #trend path.tline { stroke-dasharray: none !important; stroke-dashoffset: 0 !important; stroke: #0A4C70 !important; }
+    #trend path.tarea { opacity: 1 !important; }
+    #tgrad stop:first-child { stop-opacity: 0.35 !important; }
+    #trend circle.tdot { opacity: 1 !important; }
     /* always print the light theme regardless of the on-screen mode */
     html.dark {
       --bg: #FFFFFF; --bg-base: #FFFFFF; --card: #FFFFFF; --card-solid: #EEF4FB;
@@ -590,6 +598,8 @@
   .geo-list .gmap:hover { color: var(--secondary); }
   .geo-map .pin:hover { fill: var(--secondary); fill-opacity: 0.95; }
   .geo-map .pin.sel { fill: var(--accent); fill-opacity: 0.95; }
+  .geo-map .pin.dim { fill-opacity: 0.3; }
+  .geo-list .bar-row.dimrow { opacity: 0.5; }
   @media (max-width: 900px) { .geo-wrap { flex-direction: column; } .geo-list { flex-basis: auto; max-height: 300px; } }
   .util-period select {
     font-family: var(--mono); font-size: 12px; color: var(--ink-soft); background: var(--card-solid);
@@ -622,6 +632,11 @@
   #pharm-chart .bar:hover { fill: var(--primary); }
   #pharm-chart .barrev { fill: var(--accent); }
   #pharm-chart .barrev:hover { fill: var(--accent-bright); }
+  /* checkbox-style selection: unselected bars grey out but stay in place */
+  #pharm-chart .bar.dim { fill: var(--hair-bright); }
+  #pharm-chart .barrev.dim { fill: var(--hair); }
+  #pharm-chart .bar.dim:hover { fill: var(--ink-mute); }
+  #pharm-chart text.val.dim { opacity: 0.45; }
   #pharm-chart .val { font-family: var(--mono); fill: var(--ink-soft); }
   #pharm-chart .cat { font-family: var(--mono); fill: var(--ink-mute); }
   #pharm-chart .axis { stroke: var(--hair); stroke-width: 1; }
@@ -635,9 +650,11 @@
 </head>
 <body>
 
+<svg style="display:none" aria-hidden="true"><symbol id="mrx-logo" viewBox="0 0 572 136"><rect fill="#006693" x="165.9" y="3.8" width="145.6" height="129.2" rx="30.4" ry="30.4"/><path fill="currentColor" d="M42.6,92.9l-21.3-43.6-6.1,51.7c-.5,3.3-2.8,5.7-6.9,5.7s-5.5-3.5-5.2-6.8L11.3,31.8c.3-3.1,2.7-5.8,5.8-5.8h.8c2.5,0,5,1,6.3,3.9l25.5,53.3,25.5-53.3c1.4-2.9,3.8-3.9,6.3-3.9h.8c3.1,0,5.4,2.7,5.8,5.8l8.3,68.1c.3,3.3-1.5,6.8-5.2,6.8s-6.5-2.3-6.9-5.7l-6.1-51.7-21.3,43.6c-1.2,2.4-3.3,5.1-7.2,5.1s-6-2.7-7.2-5.1Z"/><path fill="currentColor" d="M123.5,128.8c-1.3,3-4.3,4.6-7.4,3.8s-4.8-4.5-3.7-7.5l8.8-21.6-18.3-44.2c-1.3-3,.6-6.7,3.7-7.5,3.1-.8,6.1.8,7.4,3.8l13.6,33.5,13.7-33.5c1.3-3,4.3-4.6,7.4-3.8,3.1.8,5,4.5,3.7,7.5l-28.8,69.4Z"/><path fill="#fff" d="M236,96.8c1.8,2.5,1.6,7-1.4,8.9-2.7,1.6-6.5,1.2-8.4-1.6l-18.1-27.2h-9v23.5c0,3.3-2.8,6.2-6.3,6.2s-5.9-2.9-5.9-6.2V33.3c0-4.2,2.8-6.7,6.5-6.7h24.5c17.1,0,24.2,12.6,24.2,25.3s-5.9,23-20.5,24.6l14.5,20.4ZM199.1,37.9v27.8h17.8c8.9,0,12.5-7,12.5-13.8s-3.5-14-12-14h-18.2Z"/><path fill="#fff" d="M257.4,104.2c-1.8,2.5-5.2,3.1-8,1.6-2.7-1.5-3.1-5.2-1.4-7.7l15.6-21.5-11.8-16.3c-1.7-2.5-1.2-6.1,1.5-7.8,2.8-1.7,6.2-1,8.1,1.6l9,12.9,9-12.9c1.8-2.7,5.3-3.3,8.1-1.6,2.7,1.7,3.2,5.3,1.5,7.8l-11.8,16.3,15.6,21.5c1.7,2.5,1.3,6.2-1.4,7.7-2.8,1.5-6.1.9-8-1.6l-13-17.9-13,17.9Z"/><path fill="currentColor" d="M366.2,25.7c10.5,0,18.8,3.8,26.1,9.5,2.3,1.8,3.5,5.8.6,9-2.3,2.5-6.3,1.8-8.7.3-5.1-3.3-9.6-7-18-7-15.8,0-27.9,13-27.9,29.1s12.1,29,27.9,29,12.9-3.7,18-7c2.3-1.5,6.3-2.2,8.7.3,2.9,3.2,1.7,7.2-.6,9-7.3,5.7-15.6,9.5-26.1,9.5-22.5,0-40.1-18.1-40.1-40.7s17.6-40.8,40.1-40.8Z"/><path fill="currentColor" d="M445.5,98.3c-3.6,5.9-11.4,8.9-18.1,8.9-14.5,0-27.3-11-27.3-28.1s12.8-28,27.3-28,14.4,2.7,18.1,8.8v-2.2c0-3.2,2.5-6,5.8-6s6.1,2.8,6.1,6v43c0,3.2-2.7,6-6.1,6s-5.8-2.8-5.8-6v-2.3ZM428.8,95.7c8.8,0,16.6-6.1,16.6-16.7s-8.5-16.4-16.6-16.4-16.5,6.5-16.5,16.4,7.5,16.7,16.5,16.7Z"/><path fill="currentColor" d="M482.3,86.7v14c0,3.2-2.7,6-6.1,6s-5.8-2.8-5.8-6v-43c0-3.2,2.5-6,5.8-6s6.1,2.8,6.1,6v6.9c2.8-9.6,8.1-13.5,14.8-13.5s3.5.1,5.1.5c3,.7,5,3.7,4.3,6.8-1,5.2-6.2,3.9-9.7,3.9-10.2,0-14.4,10.2-14.4,24.5Z"/><path fill="currentColor" d="M553.1,28.3c0-3.2,2.7-6,6.1-6s5.8,2.8,5.8,6v72.3c0,3.2-2.5,6-5.8,6s-6.1-2.8-6.1-6v-2.4c-3.3,5.8-10.7,9-18,9-14.5,0-27-11.1-27-28s12.2-28.1,26.9-28.1,14.8,3,18.1,8.9v-31.6ZM536.5,62.6c-9,0-16.3,6.5-16.3,16.4s7.3,16.7,16.3,16.7,16.5-6.2,16.5-16.7-8.4-16.4-16.5-16.4Z"/></symbol></svg>
+
 <div id="gate" hidden>
   <div class="gate-panel">
-    <div class="logo" aria-label="MyRxCard"><span>My</span><span class="rx">Rx</span><span>Card</span></div>
+    <svg class="logo-svg" viewBox="0 0 572 136" role="img" aria-label="MyRxCard"><use href="#mrx-logo"/></svg>
     <h1>Search performance</h1>
     <p>Enter the report password to unlock live data.</p>
     <form id="gate-form">
@@ -664,7 +681,7 @@
 <div id="app">
   <aside id="sidebar">
     <div class="side-logo">
-      <div class="logo" aria-label="MyRxCard"><span>My</span><span class="rx">Rx</span><span>Card</span></div>
+      <svg class="logo-svg" viewBox="0 0 572 136" role="img" aria-label="MyRxCard"><use href="#mrx-logo"/></svg>
     </div>
     <div class="side-sec">MENU</div>
     <nav id="side-nav">
@@ -821,6 +838,7 @@
         <div class="util-period">
           <span class="kicker">Timeframe</span>
           <select id="util-gran" aria-label="Report granularity">
+            <option value="Y">Yearly</option>
             <option value="Q" selected>Quarterly</option>
             <option value="M">Monthly</option>
             <option value="W">Weekly</option>
@@ -1674,7 +1692,8 @@ function pharmChartSVG(data, selSet) {
     const rh = chartH * (rev / max);
     const x = padL + i * (bw + gap);
     const yC = baseY - ch, yR = yC - rh;
-    const sel = selSet && selSet.has(p.pi) ? " sel" : "";
+    const anySel = selSet && selSet.size;
+    const sel = anySel ? (selSet.has(p.pi) ? " sel" : " dim") : "";
     const title = `<title>${esc(p.name)} · collected ${money0(coll)} · reversed ${money0(rev)}</title>`;
     if (rh > 0.4) { // reversed rides on top and carries the rounded cap
       if (ch > 0)
@@ -1684,7 +1703,7 @@ function pharmChartSVG(data, selSet) {
       s += `<path class="bar${sel}" data-pi="${p.pi}" d="${colPath(x, yC, bw, ch, 3.5)}">${title}</path>`;
     }
     if (coll / max > 0.045)
-      s += `<text class="val" x="${x + bw / 2}" y="${(yR - 5).toFixed(1)}" text-anchor="middle" font-size="9.5">${shortMoney(coll)}</text>`;
+      s += `<text class="val${sel === " dim" ? " dim" : ""}" x="${x + bw / 2}" y="${(yR - 5).toFixed(1)}" text-anchor="middle" font-size="9.5">${shortMoney(coll)}</text>`;
     const cx = x + bw / 2, cy = baseY + 9;
     s += `<text class="cat" x="${cx}" y="${cy}" text-anchor="end" font-size="9" transform="rotate(-55 ${cx} ${cy})">${esc(clip(p.name, 20))}</text>`;
   });
@@ -1833,7 +1852,7 @@ function utilDayDomain(p) {
 /* --- timeframe drill-down: granularity select (Quarterly/Monthly/Weekly/
        Daily) + a multi-select pop of matching entries across every stored
        period. Selections resolve to month/day predicates in factPass. --- */
-const TF_NAMES = { Q: "QUARTERS", M: "MONTHS", W: "WEEKS", D: "DAYS" };
+const TF_NAMES = { Y: "YEARS", Q: "QUARTERS", M: "MONTHS", W: "WEEKS", D: "DAYS" };
 
 // entries for one granularity, newest period first (keys: "period|kind|value")
 function tfOptions(gran) {
@@ -1844,7 +1863,10 @@ function tfOptions(gran) {
     if (!p.dims) continue;
     const months = p.dims.months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
     const dom = utilDayDomain(p);
-    if (gran === "Q") {
+    if (gran === "Y") {
+      const ys = new Set(months.map((m) => m.slice(0, 4)));
+      for (const y of [...ys].reverse()) out.push({ key: `${pk}|y|${y}`, label: y });
+    } else if (gran === "Q") {
       const qs = new Map();
       for (const m of months) {
         const [y, mo] = m.split("-").map(Number), q = Math.ceil(mo / 3);
@@ -1880,7 +1902,9 @@ function applyTimeframe() {
   for (const key of sel) {
     const [pk, kind, val] = key.split("|");
     if (pk !== util.period) continue;
-    if (kind === "q") {
+    if (kind === "y") {
+      p.dims.months.forEach((m, idx) => { if (String(m).startsWith(val + "-")) months.add(idx); });
+    } else if (kind === "q") {
       const [y, q] = val.split("-").map(Number);
       for (let m = (q - 1) * 3 + 1; m <= q * 3; m++) {
         const idx = p.dims.months.indexOf(`${y}-${String(m).padStart(2, "0")}`);
@@ -1977,10 +2001,14 @@ function utilAgg(p) {
   let paid = 0, rev = 0, pn = 0, rn = 0, ucN = 0;
   const byPharm = new Map(), byPharmRev = new Map(), byClass = new Map(), byDrugRev = new Map(), byDrugUC = new Map();
   for (const f of p.facts) {
-    if (!factPass(f)) continue;
-    paid += f[8]; rev += f[9]; pn += f[10]; rn += f[11];
+    // pharmacy chart/map/list ignore the pharmacy selection itself, so every
+    // location stays visible and selection works like checkboxes (selected
+    // bars stay colored, the rest grey out)
+    if (!factPass(f, "pharmacies")) continue;
     byPharm.set(f[3], (byPharm.get(f[3]) || 0) + f[8] + f[9]);
     if (f[9]) byPharmRev.set(f[3], (byPharmRev.get(f[3]) || 0) - f[9]);
+    if (util.f.pharmacies && !util.f.pharmacies.has(f[3])) continue;
+    paid += f[8]; rev += f[9]; pn += f[10]; rn += f[11];
     byClass.set(f[5], (byClass.get(f[5]) || 0) + f[8] + f[9]);
     if (f[11]) byDrugRev.set(f[6], (byDrugRev.get(f[6]) || 0) + f[11]);
     // U&C = net claim count (paid − reversed), matching Power BI's Sum of ClaimCount
@@ -2134,7 +2162,7 @@ function renderUtilGeo(p, agg) {
     const query = [x.name, m.addr, m.city, m.st, m.zip].filter(Boolean).join(", ");
     const gmap = `<a class="gmap" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}"` +
       ` target="_blank" rel="noopener" title="Open in Google Maps${m.addr ? ` — ${esc(m.addr)}` : ""}">&#8599;</a>`;
-    return `<div class="bar-row${sel && sel.has(x.pi) ? " on" : ""}" data-pi="${x.pi}" title="${esc(x.name)} · ${money0(x.collected)}">` +
+    return `<div class="bar-row${sel && sel.size ? (sel.has(x.pi) ? " on" : " dimrow") : ""}" data-pi="${x.pi}" title="${esc(x.name)} · ${money0(x.collected)}">` +
       `<span class="name">${esc(lbl)}${gmap}</span>` +
       `<span class="track"><i style="width:${(100 * x.collected / max).toFixed(1)}%"></i></span>` +
       `<span class="n num">${shortMoney(x.collected)}</span></div>`;
@@ -2176,11 +2204,12 @@ function renderUtilGeo(p, agg) {
     const cx = c.x / c.members.length, cy = c.y / c.members.length;
     const r = (4 + 11 * Math.sqrt(c.v / maxV)) * rScale;
     const isSel = sel && c.members.some((pi) => sel.has(pi));
+    const pinDim = sel && sel.size && !isSel ? " dim" : "";
     const topName = p.dims.pharmacies[c.members[0]];
     const title = c.members.length === 1
       ? `${topName} · ${money0(c.v)}`
       : `${c.members.length} locations · ${money0(c.v)} · incl. ${topName}`;
-    return `<circle class="pin${isSel ? " sel" : ""}" style="--i:${idx}" data-pis="${c.members.join(",")}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(2)}"><title>${esc(title)}</title></circle>`;
+    return `<circle class="pin${isSel ? " sel" : ""}${pinDim}" style="--i:${idx}" data-pis="${c.members.join(",")}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(2)}"><title>${esc(title)}</title></circle>`;
   }).join("");
   $("util-map").innerHTML = `<svg viewBox="${vb}" role="img" aria-label="Pharmacy locations">` +
     `<rect class="ocean" x="0" y="0" width="959" height="593"/>${base}${pins}</svg>`;
