@@ -111,6 +111,8 @@
   .pop label .cnt { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--ink-mute); }
   .pop input[type="checkbox"] { accent-color: var(--secondary); width: 15px; height: 15px; }
   .pop .allrow { border-bottom: 1px solid var(--hair); margin-bottom: 4px; padding-bottom: 8px; }
+  #state-pop { max-height: 340px; overflow-y: auto; }
+  .state-list button.on { color: var(--secondary); font-weight: 700; }
   .sync { display: flex; align-items: center; gap: 10px; }
   .sync .stamp { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); letter-spacing: 0.04em; }
   .sync .dot { width: 7px; height: 7px; border-radius: 50%; background: #2F9C5C; box-shadow: 0 0 6px rgba(47,156,92,0.45); }
@@ -443,6 +445,10 @@
       <span class="badge-sample" id="sample-badge" hidden>SAMPLE DATA</span>
       <span id="search-only" style="display:contents">
       <span id="filter-chips" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span>
+      <div class="slicer" id="state-slicer">
+        <button class="iconbtn" id="state-btn" type="button">STATES &#9662;</button>
+        <div class="pop" id="state-pop" hidden></div>
+      </div>
       <div class="slicer" id="group-slicer">
         <button class="iconbtn" id="group-btn" type="button">GROUPS &#9662;</button>
         <div class="pop" id="group-pop" hidden></div>
@@ -774,10 +780,10 @@ function periodBounds(p) {
   }
 }
 
-// group filter is multi-select (array of names); the rest are single-value
+// group and state filters are multi-select (arrays); the rest are single-value
 const dimMatch = (filters, e, d) =>
-  d === "group"
-    ? (!filters.group || !filters.group.length || filters.group.includes(e.group))
+  d === "group" || d === "state"
+    ? (!filters[d] || !filters[d].length || filters[d].includes(e[d]))
     : (!filters[d] || e[d] === filters[d]);
 
 function aggregate(all, period, filters) {
@@ -851,7 +857,8 @@ function aggregate(all, period, filters) {
   const top = (m, n) => [...m.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
 
   return {
-    ev, evForState, anchor, first, filters, usState: filters.state,
+    ev, evForState, anchor, first, filters,
+    usState: filters.state && filters.state.length === 1 ? filters.state[0] : null,
     total: ev.length,
     sessions: sessions.size,
     uniqueDrugs: new Set(ev.filter((e) => e.drug).map((e) => e.drug)).size,
@@ -861,6 +868,7 @@ function aggregate(all, period, filters) {
     hasFeatured, printed, printedFeatured,
     topDrugs: top(drugs, 10),
     topStates: top(states, 8),
+    allStates: top(states, 99),
     groups: [...groups.entries()].sort((a, b) => b[1].count - a[1].count),
     devices: top(devices, 4),
     trend: [...buckets.entries()], weekly,
@@ -962,7 +970,7 @@ function renderMap(a) {
   const max = Math.max(1, ...byState.values());
   const paths = Object.entries(window.US_PATHS || {}).map(([code, ds]) => {
     const c = byState.get(code) || 0;
-    const sel = state.filters.state === code ? ' class="sel"' : "";
+    const sel = (state.filters.state || []).includes(code) ? ' class="sel"' : "";
     const title = `<title>${esc(STATE_NAMES[code] || code)}: ${fmt(c)} searches</title>`;
     return ds.map((d) => `<path data-dim="state" data-val="${code}" d="${d}" fill="${heatColor(c, max)}"${sel}>${title}</path>`).join("");
   }).join("");
@@ -971,21 +979,24 @@ function renderMap(a) {
 
 function renderDrill(a) {
   const el = $("drill");
-  if (!state.filters.state) {
-    const rows = a.topStates.map(([code, c]) =>
-      `<button type="button" data-dim="state" data-val="${code}"><span>${esc(STATE_NAMES[code] || code)}</span><span class="n num">${fmt(c)}</span></button>`).join("");
-    el.innerHTML = `<div class="drill-head"><span class="name">United States</span></div>
+  const selStates = state.filters.state || [];
+  if (selStates.length !== 1) {
+    // 0 selected: national view · 2+: the multi-state rollup (tap to toggle)
+    const src = selStates.length ? a.allStates.filter(([c]) => selStates.includes(c)) : a.topStates;
+    const rows = src.map(([code, c]) =>
+      `<button type="button" data-dim="state" data-val="${code}"${selStates.includes(code) ? ' class="on"' : ""}><span>${esc(STATE_NAMES[code] || code)}</span><span class="n num">${fmt(c)}</span></button>`).join("");
+    el.innerHTML = `<div class="drill-head"><span class="name">${selStates.length ? `${selStates.length} states selected` : "United States"}</span></div>
       <div class="mini-stats">
         <div class="ms"><div class="v num">${fmt(a.total)}</div><div class="k">Searches</div></div>
         <div class="ms"><div class="v num">${fmt(a.sessions)}</div><div class="k">People</div></div>
         <div class="ms"><div class="v num">${fmt(a.uniqueStates)}</div><div class="k">States</div></div>
         <div class="ms"><div class="v num">${fmt(a.printed)}</div><div class="k">Printed</div></div>
       </div>
-      <div class="sub">Top states — tap to drill in</div>
+      <div class="sub">${selStates.length ? "Selected states — tap to remove" : "Top states — tap to drill in"}</div>
       <div class="state-list">${rows || `<span style="color:var(--ink-mute);font-size:13px">No data in this window</span>`}</div>`;
     return;
   }
-  const code = state.filters.state;
+  const code = selStates[0];
   const ev = a.ev; // aggregate() already scoped everything to the active filters
   const sessions = new Set(ev.map((e) => e.session)).size;
   const cities = new Map(), drugs = new Map();
@@ -1093,12 +1104,14 @@ function renderAll() {
   const f = state.filters;
   const a = aggregate(state.events, state.period, f);
   const chips = [];
-  for (const d of ["state", "drug", "device"]) if (f[d]) chips.push([d, f[d]]);
+  for (const d of ["drug", "device"]) if (f[d]) chips.push([d, f[d]]);
+  for (const s of (f.state || [])) chips.push(["state", s]);
   for (const g of (f.group || [])) chips.push(["group", g]);
   $("filter-chips").innerHTML = chips.map(([d, v]) =>
     `<button class="badge-filter" type="button" data-dim="${d}" data-val="${esc(v)}">${esc(FILTER_LABELS[d](v)).toUpperCase()} <span class="x">&#215;</span></button>`).join("") +
     (chips.length ? `<button class="badge-filter reset" type="button" id="reset-filters">RESET FILTERS</button>` : "");
   renderGroupSlicer(a);
+  renderStateSlicer(a);
   // date inputs always mirror the active period's effective dates
   const iso = (t) => new Date(t).toLocaleDateString("sv-SE");
   const [pf, pt] = periodBounds(state.period);
@@ -1127,7 +1140,8 @@ function renderAll() {
     `LIVE SEARCH REPORT · GENERATED ${gen.toUpperCase()}` +
     (a.total ? ` · WINDOW ${fd(a.first).toUpperCase()} – ${fd(a.anchor).toUpperCase()}` : "") +
     ` · PERIOD: ${PERIOD_LABELS[state.period.type].toUpperCase()}` +
-    ["state", "drug", "device"].filter((d) => f[d]).map((d) => ` · ${d.toUpperCase()}: ${FILTER_LABELS[d](f[d]).toUpperCase()}`).join("") +
+    ["drug", "device"].filter((d) => f[d]).map((d) => ` · ${d.toUpperCase()}: ${FILTER_LABELS[d](f[d]).toUpperCase()}`).join("") +
+    ((f.state || []).length ? ` · STATES: ${f.state.join(", ")}` : "") +
     ((f.group || []).length ? ` · GROUPS: ${f.group.map((g) => g.toUpperCase()).join(", ")}` : "") +
     (state.mode === "sample" ? " · SAMPLE DATA" : "");
 }
@@ -1137,6 +1151,25 @@ function toggleGroup(name) {
   const next = cur.includes(name) ? cur.filter((g) => g !== name) : cur.concat([name]);
   state.filters.group = next.length ? next : null;
   renderAll();
+}
+
+function toggleState(code) {
+  const cur = state.filters.state || [];
+  const next = cur.includes(code) ? cur.filter((s) => s !== code) : cur.concat([code]);
+  state.filters.state = next.length ? next : null;
+  history.replaceState(null, "", next.length === 1 ? "#" + next[0] : location.pathname);
+  renderAll();
+}
+
+function renderStateSlicer(a) {
+  const sel = state.filters.state || [];
+  $("state-btn").innerHTML = `STATES${sel.length ? ` (${sel.length})` : ""} &#9662;`;
+  const rows = a.allStates.map(([code, c]) =>
+    `<label><input type="checkbox" data-state="${esc(code)}"${sel.includes(code) ? " checked" : ""}>
+     <span>${esc(STATE_NAMES[code] || code)}</span><span class="cnt num">${fmt(c)}</span></label>`).join("");
+  $("state-pop").innerHTML =
+    `<label class="allrow"><input type="checkbox" data-state=""${sel.length ? "" : " checked"}>
+     <span>All states</span></label>` + rows;
 }
 
 function renderGroupSlicer(a) {
@@ -1678,16 +1711,31 @@ async function boot() {
   });
   $("group-btn").addEventListener("click", (e) => {
     e.stopPropagation();
+    $("state-pop").hidden = true;
     $("group-pop").hidden = !$("group-pop").hidden;
   });
+  $("state-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    $("group-pop").hidden = true;
+    $("state-pop").hidden = !$("state-pop").hidden;
+  });
   document.addEventListener("click", (e) => {
-    if (!e.target.closest("#group-slicer")) $("group-pop").hidden = true;
+    const path = e.composedPath ? e.composedPath() : [e.target];
+    const inside = (id) => path.some((n) => n.nodeType === 1 && n.id === id);
+    if (!inside("group-slicer")) $("group-pop").hidden = true;
+    if (!inside("state-slicer")) $("state-pop").hidden = true;
   });
   $("group-pop").addEventListener("change", (e) => {
     const cb = e.target.closest("input[data-group]");
     if (!cb) return;
     if (cb.dataset.group === "") { state.filters.group = null; renderAll(); }
     else toggleGroup(cb.dataset.group);
+  });
+  $("state-pop").addEventListener("change", (e) => {
+    const cb = e.target.closest("input[data-state]");
+    if (!cb) return;
+    if (cb.dataset.state === "") { state.filters.state = null; history.replaceState(null, "", location.pathname); renderAll(); }
+    else toggleState(cb.dataset.state);
   });
   $("refresh-btn").addEventListener("click", async () => {
     if (state.tab === "util") { await loadUtil(); renderUtil(); return; }
@@ -1783,12 +1831,16 @@ async function boot() {
     if (!t) return;
     const dim = t.dataset.dim, val = t.dataset.val || null;
     if (dim === "group") { if (val) toggleGroup(val); return; }
+    if (dim === "state") {
+      if (val) toggleState(val);
+      else { state.filters.state = null; history.replaceState(null, "", location.pathname); renderAll(); }
+      return;
+    }
     state.filters[dim] = val === state.filters[dim] ? null : val;
-    if (dim === "state") history.replaceState(null, "", state.filters.state ? "#" + state.filters.state : location.pathname);
     renderAll();
   });
   const hashState = (location.hash || "").replace("#", "").toUpperCase();
-  if (STATE_NAMES[hashState]) state.filters.state = hashState;
+  if (STATE_NAMES[hashState]) state.filters.state = [hashState];
   const qp = (new URLSearchParams(location.search).get("period") || "").toUpperCase();
   if (PERIOD_LABELS[qp]) { state.period.type = qp; $("period-select").value = qp; }
   $("lock-btn").addEventListener("click", () => { sessionStorage.removeItem("mrx-cfg"); sessionStorage.removeItem("mrx-pw"); location.reload(); });
