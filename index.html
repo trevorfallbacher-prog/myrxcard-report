@@ -281,7 +281,7 @@
     @page { margin: 12mm; }
     html, body { background: #fff !important; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .controls-stack, footer, #notice { display: none !important; }
+    .controls-stack, footer, #notice, .stack-controls, #util-csv-btn { display: none !important; }
     #app { padding: 0; max-width: none; }
     header.top { margin-bottom: 14px; }
     .print-meta { display: block; }
@@ -364,6 +364,26 @@
     padding: 6px 9px; margin-bottom: 6px; font: inherit; font-size: 13px; color: var(--ink); outline: none;
   }
   .popsearch:focus { border-color: var(--secondary); }
+  /* pharmacy chains: one header row toggles every location beneath it */
+  .pop label.ghead { font-weight: 700; color: var(--ink); background: var(--card-solid); margin-top: 6px; }
+  .pop label.ghead .gn { color: var(--ink-mute); font-weight: 400; font-size: 11.5px; }
+  .pop label.gmember { padding-left: 26px; }
+  /* monthly stacked columns */
+  .stack-controls { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+  .segbtns { display: inline-flex; border: 1px solid var(--hair); border-radius: 8px; overflow: hidden; }
+  .segbtns button {
+    background: transparent; border: none; padding: 6px 12px; font-family: var(--mono);
+    font-size: 11.5px; letter-spacing: 0.05em; color: var(--ink-mute); cursor: pointer;
+  }
+  .segbtns button + button { border-left: 1px solid var(--hair); }
+  .segbtns button.on { background: var(--card-solid); color: var(--ink); font-weight: 600; }
+  #util-trend { overflow-x: auto; }
+  #util-trend svg { display: block; }
+  #util-trend .val { font-family: var(--mono); fill: var(--ink-soft); }
+  #util-trend .cat { font-family: var(--mono); fill: var(--ink-mute); }
+  #util-trend .axis { stroke: var(--hair); stroke-width: 1; }
+  #util-trend .axlbl { font-family: var(--mono); fill: var(--ink-mute); font-size: 10px; }
+  .trend-legend { flex-direction: row; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
   /* pharmacy locations: list + map */
   .geo-wrap { display: flex; gap: 22px; align-items: stretch; }
   .geo-list { flex: 0 0 400px; max-height: 430px; overflow-y: auto; padding-right: 6px; }
@@ -385,8 +405,8 @@
   .util-period select:focus { border-color: var(--secondary); }
 
   .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
-  .kpi { border-left: 3px solid var(--secondary); padding: 1px 0 1px 12px; }
-  .kpi .v { font-size: 25px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.05; }
+  .kpi { border-left: 3px solid var(--secondary); padding: 1px 0 1px 12px; min-width: 0; }
+  .kpi .v { font-size: 25px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.05; white-space: nowrap; }
   .kpi .k { margin-top: 5px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-mute); }
   .kpi.paid { border-color: var(--primary); }
   .kpi.reversed { border-color: var(--accent); }
@@ -584,6 +604,7 @@
           <span class="kicker">Quarter</span>
           <select id="util-select" aria-label="Reporting period"></select>
         </div>
+        <button class="iconbtn" id="util-csv-btn" type="button" title="Download this period's data as CSV">CSV &#8595;</button>
       </div>
     </div>
     <div id="util-chips"></div>
@@ -615,6 +636,22 @@
       <div class="panel span12">
         <div class="kicker">Collected $ by pharmacy <span class="hint">· tap a bar to filter</span></div>
         <div id="pharm-chart"></div>
+      </div>
+
+      <div class="panel span12" id="util-trend-panel">
+        <div class="kicker">Monthly stack <span class="hint">· one column per month, under the current filters</span></div>
+        <div class="stack-controls">
+          <div class="segbtns" data-tset="measure">
+            <button type="button" data-tval="money">DOLLARS</button>
+            <button type="button" data-tval="claims">CLAIMS</button>
+          </div>
+          <div class="segbtns" data-tset="mode">
+            <button type="button" data-tval="status">COLLECTED + REVERSED</button>
+            <button type="button" data-tval="pharm">BY PHARMACY</button>
+          </div>
+        </div>
+        <div id="util-trend"></div>
+        <div class="donut-legend trend-legend" id="util-trend-legend"></div>
       </div>
 
       <div class="panel span12" id="util-geo-panel">
@@ -1228,7 +1265,7 @@ async function sync() {
 /* ---------------- utilization tab ---------------- */
 // Reads utilization.json (published by tools/watch-utilization.mjs when a
 // quarterly claims .xlsx is dropped into the Avalon Reports folder).
-let util = { loaded: false, data: null, period: null };
+let util = { loaded: false, data: null, period: null, trend: { measure: "money", mode: "status" } };
 
 const COL_COLLECTED = "#0A4C70"; // brand navy  (--primary)
 const COL_REVERSED  = "#E9AE2E"; // brand gold  (--accent)
@@ -1330,6 +1367,24 @@ function pharmChartSVG(data, selSet) {
 // fact: [mi, gi, si, pi, bi, ci, di, uc, paid$, rev$ (neg), paidN, revN]
 const USLICER_DIMS = { groups: 1, pharmacies: 3, months: 0, states: 2, brands: 4 };
 const USLICER_LABELS = { groups: "Clients", pharmacies: "Pharmacies", months: "Months", states: "States", brands: "Brand" };
+
+// Pharmacy chains rolled up into one selectable group in the PHARMACIES slicer
+// and the monthly stack. Rules run top-to-bottom against (name, meta) and the
+// first match wins — edit here to split a collective apart later (e.g. carve a
+// new client out of Rochester, or move Swedish American into UWHC).
+const PHARM_GROUPS = [
+  ["Brookshire Brothers", (n) => /^Brookshire Brothers/i.test(n)],
+  ["Rochester Collective", (n, m) => m.city === "Rochester" && m.st === "NY"],
+  ["UW Health (UWHC)", (n) => /^UW Health/i.test(n)],
+  ["Marshfield Clinic", (n) => /^Marshfield/i.test(n)],
+  ["Sun Life", (n) => /^Sun Life/i.test(n)],
+];
+function pharmChain(p, i) {
+  const m = (p.pharmMeta && p.pharmMeta[i]) || {};
+  const n = p.dims.pharmacies[i];
+  for (const [label, test] of PHARM_GROUPS) if (test(n, m)) return label;
+  return null;
+}
 
 /* --- map: project lat/lon onto the bundled 959x593 US map --- */
 // Albers equal-area conic (lower 48: parallels 29.5/45.5, central meridian -96),
@@ -1482,6 +1537,12 @@ function renderUtilSlicers(p) {
     const label = (i) => dim === "pharmacies" ? pharmFullLabel(p, i) : udimLabel(dim, p.dims[dim][i]);
     const search = (util.psearch && util.psearch[dim] || "").toLowerCase();
     const pop = el.querySelector(".pop");
+    const chainState = (gc) => {
+      const members = gc.dataset.members.split(",").map(Number);
+      const selN = active ? members.filter((i) => active.has(i)).length : 0;
+      gc.checked = !!members.length && selN === members.length;
+      gc.indeterminate = selN > 0 && selN < members.length;
+    };
     if (!pop.hidden && pop.children.length) {
       // pop is open: update checkboxes/counts in place so the menu, its scroll
       // position, and the search text survive re-renders mid-selection
@@ -1492,16 +1553,37 @@ function renderUtilSlicers(p) {
         const cnt = inp.parentElement.querySelector(".cnt");
         if (cnt) cnt.textContent = fmt(counts.get(i) || 0);
       }
+      for (const gc of pop.querySelectorAll("input[data-uchain]")) chainState(gc);
       continue;
+    }
+    const row = (i, cls) => {
+      const l = label(i);
+      const hide = search && !l.toLowerCase().includes(search) ? ' style="display:none"' : "";
+      return `<label${cls ? ` class="${cls}"` : ""}${hide}><input type="checkbox" data-udim="${dim}" data-idx="${i}"${active && active.has(i) ? " checked" : ""}> ${esc(clip(l, 44))}<span class="cnt num">${fmt(counts.get(i) || 0)}</span></label>`;
+    };
+    let body;
+    if (dim === "pharmacies") {
+      // chains first (roll-up header + member rows), loose pharmacies after
+      const chains = new Map(), loose = [];
+      for (const i of order) {
+        const ch = pharmChain(p, i);
+        if (ch) { if (!chains.has(ch)) chains.set(ch, []); chains.get(ch).push(i); }
+        else loose.push(i);
+      }
+      const chainTotal = (members) => members.reduce((s, i) => s + (counts.get(i) || 0), 0);
+      body = [...chains.entries()].sort((a, b) => chainTotal(b[1]) - chainTotal(a[1])).map(([ch, members]) => {
+        const selN = active ? members.filter((i) => active.has(i)).length : 0;
+        return `<label class="ghead"><input type="checkbox" data-uchain data-members="${members.join(",")}"${selN === members.length ? " checked" : ""}> ${esc(ch)} <span class="gn">· ${members.length} locations</span><span class="cnt num">${fmt(chainTotal(members))}</span></label>` +
+          members.map((i) => row(i, "gmember")).join("");
+      }).join("") + loose.map((i) => row(i)).join("");
+    } else {
+      body = order.map((i) => row(i)).join("");
     }
     pop.innerHTML =
       (p.dims[dim].length > 15 ? `<input class="popsearch" type="text" data-usearch="${dim}" placeholder="Search ${USLICER_LABELS[dim].toLowerCase()}…" value="${esc(util.psearch[dim] || "")}">` : "") +
       `<label class="allrow"><input type="checkbox" data-udim="${dim}" data-idx=""${active ? "" : " checked"}> All ${USLICER_LABELS[dim].toLowerCase()}</label>` +
-      order.map((i) => {
-        const l = label(i);
-        const hide = search && !l.toLowerCase().includes(search) ? ' style="display:none"' : "";
-        return `<label${hide}><input type="checkbox" data-udim="${dim}" data-idx="${i}"${active && active.has(i) ? " checked" : ""}> ${esc(clip(l, 44))}<span class="cnt num">${fmt(counts.get(i) || 0)}</span></label>`;
-      }).join("");
+      body;
+    for (const gc of pop.querySelectorAll("input[data-uchain]")) chainState(gc);
   }
   // active-filter chips — condensed by default: 3+ selections in one dimension
   // roll up into a single "N <DIM> ×" chip that expands on click
@@ -1587,6 +1669,129 @@ function hbars(el, entries, fmtVal, revStyle) {
     `<span class="n num">${fmtVal(e.v)}</span></div>`).join("");
 }
 
+// shrink KPI numbers to fit their grid cell (quarter totals in the millions
+// overflow the Dollars/Claims panels at full size)
+function fitNums(row) {
+  for (const el of row.querySelectorAll(".v")) {
+    el.style.fontSize = "";
+    if (!el.clientWidth) continue;
+    let size = parseFloat(getComputedStyle(el).fontSize);
+    while (el.scrollWidth > el.clientWidth && size > 13) el.style.fontSize = --size + "px";
+  }
+}
+
+/* --- monthly stacked columns: collected+reversed or by pharmacy chain --- */
+const TREND_COLORS = ["#0A4C70", "#E9AE2E", "#3884A4", "#C94F4E", "#2F9C5C", "#7A5EA6", "#D07A2E", "#5B8DEF"];
+function renderUtilTrend(p, hasCube) {
+  const panel = $("util-trend-panel");
+  panel.style.display = hasCube ? "" : "none";
+  if (!hasCube) return;
+  const t = util.trend;
+  for (const b of panel.querySelectorAll(".segbtns button"))
+    b.classList.toggle("on", t[b.parentElement.dataset.tset] === b.dataset.tval);
+  const isMoney = t.measure === "money";
+  const mOrder = p.dims.months.map((v, i) => i)
+    .sort((a, b) => String(p.dims.months[a]).localeCompare(String(p.dims.months[b])));
+  const mPos = new Map(mOrder.map((mi, k) => [mi, k]));
+  let series; // [{name, color, vals: per-month numbers}]
+  if (t.mode === "status") {
+    series = [
+      { name: isMoney ? "Collected $" : "Collected Claims", color: COL_COLLECTED, vals: mOrder.map(() => 0) },
+      { name: isMoney ? "Reversed $" : "Reversed Claims", color: COL_REVERSED, vals: mOrder.map(() => 0) },
+    ];
+    for (const f of p.facts) {
+      if (!factPass(f)) continue;
+      const k = mPos.get(f[0]);
+      series[0].vals[k] += isMoney ? f[8] + f[9] : f[10] - f[11];
+      series[1].vals[k] += isMoney ? -f[9] : f[11];
+    }
+  } else {
+    // by pharmacy: chains roll up into one segment, loose pharmacies stand alone
+    const byEnt = new Map(), totals = new Map();
+    for (const f of p.facts) {
+      if (!factPass(f)) continue;
+      const ent = pharmChain(p, f[3]) || p.dims.pharmacies[f[3]];
+      const v = isMoney ? f[8] + f[9] : f[10] - f[11];
+      let vals = byEnt.get(ent);
+      if (!vals) { vals = mOrder.map(() => 0); byEnt.set(ent, vals); }
+      vals[mPos.get(f[0])] += v;
+      totals.set(ent, (totals.get(ent) || 0) + v);
+    }
+    const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([l]) => l);
+    const keep = ranked.slice(0, TREND_COLORS.length);
+    series = keep.map((l, i) => ({ name: l, color: TREND_COLORS[i], vals: byEnt.get(l) }));
+    if (ranked.length > keep.length) {
+      const other = mOrder.map(() => 0);
+      for (const l of ranked.slice(keep.length)) byEnt.get(l).forEach((v, k) => other[k] += v);
+      series.push({ name: `Other (${ranked.length - keep.length})`, color: "#9AA7B4", vals: other });
+    }
+  }
+  // a month can net negative under filters — clamp so stacks draw sanely
+  for (const s of series) s.vals = s.vals.map((v) => Math.max(v, 0));
+  const colTotal = mOrder.map((_, k) => series.reduce((sum, sr) => sum + sr.vals[k], 0));
+  const fmtV = isMoney ? shortMoney : fmt;
+  const fmtFull = isMoney ? money0 : int0;
+  const bw = 46, gap = 22, padL = 56, padR = 14, padTop = 24, padBot = 34, h = 320;
+  const n = mOrder.length;
+  const w = padL + padR + n * bw + Math.max(n - 1, 0) * gap;
+  const chartH = h - padTop - padBot, baseY = padTop + chartH;
+  const max = Math.max(...colTotal, 1);
+  let s = `<line class="axis" x1="${padL}" y1="${baseY}" x2="${w - padR}" y2="${baseY}"/>`;
+  s += `<line class="axis" x1="${padL}" y1="${padTop}" x2="${w - padR}" y2="${padTop}" style="stroke-dasharray:2 3"/>`;
+  s += `<text class="axlbl" x="${padL - 6}" y="${padTop + 3}" text-anchor="end">${fmtV(max)}</text>`;
+  s += `<text class="axlbl" x="${padL - 6}" y="${baseY + 3}" text-anchor="end">${isMoney ? "$0" : "0"}</text>`;
+  mOrder.forEach((mi, k) => {
+    const x = padL + k * (bw + gap);
+    let y = baseY;
+    for (const sr of series) {
+      const v = sr.vals[k];
+      if (v <= 0) continue;
+      const bh = chartH * (v / max);
+      y -= bh;
+      s += `<rect x="${x}" y="${y.toFixed(1)}" width="${bw}" height="${Math.max(bh, 0.5).toFixed(1)}" fill="${sr.color}" rx="1">` +
+           `<title>${esc(monthLabel(p.dims.months[mi]))} · ${esc(sr.name)} · ${fmtFull(v)}</title></rect>`;
+    }
+    if (colTotal[k] > 0)
+      s += `<text class="val" x="${x + bw / 2}" y="${(y - 5).toFixed(1)}" text-anchor="middle" font-size="10">${fmtV(colTotal[k])}</text>`;
+    s += `<text class="cat" x="${x + bw / 2}" y="${baseY + 16}" text-anchor="middle" font-size="9.5">${esc(monthLabel(p.dims.months[mi]))}</text>`;
+  });
+  $("util-trend").innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${s}</svg>`;
+  $("util-trend-legend").innerHTML = series.map((sr) =>
+    `<div class="li"><span class="sw" style="background:${sr.color}"></span>` +
+    `<span><b>${esc(sr.name)}</b> <span class="p">${fmtV(sr.vals.reduce((a, b) => a + b, 0))}</span></span></div>`).join("");
+}
+
+// Fact-level export of the selected period — every row of the cube (month ×
+// client × pharmacy × brand × class × drug × U&C), ignoring active slicers so
+// the team always gets the complete dataset.
+function downloadUtilCsv() {
+  const d = util.data;
+  const p = d && d.periods && d.periods[util.period];
+  if (!p) return;
+  if (!Array.isArray(p.facts)) { alert("This period was stored without row-level data — re-run the watcher to rebuild it."); return; }
+  const q = (s) => { s = String(s ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const r2 = (v) => Math.round(v * 100) / 100;
+  const rows = [["Month", "Client", "Pharmacy", "PharmacyCity", "PharmacyState", "NPILast4", "PharmacyGroup",
+    "Brand", "TherapeuticClass", "Drug", "PaidAtUC", "PaidDollars", "ReversedDollars", "CollectedDollars",
+    "PaidClaims", "ReversedClaims", "CollectedClaims"]];
+  for (const f of p.facts) {
+    const meta = (p.pharmMeta && p.pharmMeta[f[3]]) || {};
+    rows.push([
+      p.dims.months[f[0]], p.dims.groups[f[1]], p.dims.pharmacies[f[3]], meta.city || "", p.dims.states[f[2]],
+      meta.npi4 || "", pharmChain(p, f[3]) || "", BRAND_NAMES[p.dims.brands[f[4]]] || p.dims.brands[f[4]],
+      p.dims.classes[f[5]], p.dims.drugs[f[6]], f[7] ? "Y" : "",
+      r2(f[8]), r2(-f[9]), r2(f[8] + f[9]), f[10], f[11], f[10] - f[11],
+    ]);
+  }
+  // the string below starts with an invisible U+FEFF — Excel needs the BOM to read UTF-8
+  const blob = new Blob(["﻿" + rows.map((r) => r.map(q).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `myrxcard-utilization-${util.period}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 function renderUtil() {
   const d = util.data;
   const has = d && d.periods && Object.keys(d.periods).length;
@@ -1632,6 +1837,8 @@ function renderUtil() {
   $("kpi-claims").innerHTML =
     kpi("paid", int0(c.paid), "Paid Claims") + kpi("reversed", int0(c.reversed), "Reversed Claims") +
     kpi("collected", int0(c.collected), "Collected Claims") + kpi("pct", pctInt(c.reversedPct), "Reversed % Claims");
+  fitNums($("kpi-money"));
+  fitNums($("kpi-claims"));
 
   // donuts share of Paid: Collected vs Reversed
   const mColl = m.paid ? m.collected / m.paid : 0, mRev = m.paid ? m.reversed / m.paid : 0;
@@ -1648,6 +1855,7 @@ function renderUtil() {
   ]);
 
   $("pharm-chart").innerHTML = pharmChartSVG(a.pharmacies, util.f ? util.f.pharmacies : null);
+  renderUtilTrend(p, hasCube);
   renderUtilGeo(p, a);
 
   // drug-level visuals (need the cube)
@@ -1769,6 +1977,7 @@ async function boot() {
     if (b) setTab(b.dataset.tab);
   });
   $("util-select").addEventListener("change", (e) => { util.period = e.target.value; utilFilterReset(); renderUtil(); });
+  $("util-csv-btn").addEventListener("click", downloadUtilCsv);
   // utilization slicers: button toggles pop; checkbox changes update filters;
   // chips clear one filter; pharmacy bars cross-filter on click
   $("view-utilization").addEventListener("click", (e) => {
@@ -1781,6 +1990,8 @@ async function boot() {
       clampPop(pop);
       return;
     }
+    const tb = e.target.closest(".segbtns button");
+    if (tb) { util.trend[tb.parentElement.dataset.tset] = tb.dataset.tval; renderUtil(); return; }
     const xClear = e.target.closest("[data-uchipclear]");
     if (xClear) { util.f[xClear.dataset.uchipclear] = null; renderUtil(); return; }
     const ex = e.target.closest("[data-uexpand]");
@@ -1822,6 +2033,16 @@ async function boot() {
       lbl.style.display = !q || lbl.textContent.toLowerCase().includes(q) ? "" : "none";
   });
   $("util-slicers").addEventListener("change", (e) => {
+    const gc = e.target.closest("input[data-uchain]");
+    if (gc) {
+      // chain header: add or drop every member location in one go
+      const members = gc.dataset.members.split(",").map(Number);
+      if (!util.f.pharmacies) util.f.pharmacies = new Set();
+      for (const i of members) gc.checked ? util.f.pharmacies.add(i) : util.f.pharmacies.delete(i);
+      if (!util.f.pharmacies.size) util.f.pharmacies = null;
+      renderUtil();
+      return;
+    }
     const cb = e.target.closest("input[data-udim]");
     if (!cb) return;
     const dim = cb.dataset.udim, idx = cb.dataset.idx;
