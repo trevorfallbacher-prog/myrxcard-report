@@ -154,6 +154,12 @@
   #theme-btn svg { width: 17px; height: 17px; display: block; }
   .brand .kicker { color: var(--tertiary); margin-bottom: 4px; }
   .brand h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.015em; }
+  /* plain-english statement of the current view: "Q3 2026 (All)" or
+     "Apr 2026 + May 2026 · Brookshire Brothers · TX, LA" */
+  .view-desc {
+    font-size: 12.5px; font-weight: 600; color: var(--secondary); margin-top: 2px;
+    max-width: 46vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   @media (max-width: 1024px) {
     #sidebar { transform: translateX(-100%); }
     #sidebar.open { transform: none; box-shadow: 0 0 0 100vmax rgba(10,30,45,0.45), 0 10px 40px rgba(10,30,45,0.35); }
@@ -742,6 +748,7 @@
       <button class="iconbtn" id="menu-btn" type="button" aria-label="Toggle menu">&#9776;</button>
       <div class="brand">
         <h1 id="app-title">Search performance</h1>
+        <div class="view-desc num" id="view-desc"></div>
       </div>
     </div>
     <div class="controls-stack">
@@ -1604,6 +1611,26 @@ function renderRecent(a) {
 
 const FILTER_LABELS = { state: (v) => STATE_NAMES[v] || v, drug: (v) => v, group: (v) => v, device: (v) => v };
 
+// plain-english statement of the current search view for the header:
+// "Q3 2026 (All)" · "Apr 2026 + May 2026 · TX, MA · mobile"
+function searchViewDesc() {
+  const f = state.filters;
+  let tfPart;
+  if (state.tfLabel) tfPart = state.tfLabel;
+  else if (state.period.type === "CUSTOM" && state.period.from)
+    tfPart = `${new Date(state.period.from + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })} – ${new Date((state.period.to || state.period.from) + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+  else if (state.period.type === "ALL") tfPart = "All time";
+  else tfPart = PERIOD_LABELS[state.period.type] || "All time";
+  const parts = [];
+  const cap = (dim, plural) => {
+    const arr = f[dim];
+    if (!arr || !arr.length) return;
+    parts.push(arr.length <= 3 ? arr.map((v) => dim === "state" ? v : FILTER_LABELS[dim](v)).join(", ") : `${arr.length} ${plural}`);
+  };
+  cap("state", "states"); cap("drug", "drugs"); cap("group", "groups"); cap("device", "devices");
+  return `${tfPart}${parts.length ? " · " + parts.join(" · ") : " (All)"}`;
+}
+
 // Search-tab export: every event behind the current filtered view, one row
 // per search, matching what the charts are showing.
 function downloadSearchCsv() {
@@ -1683,6 +1710,7 @@ function renderAll() {
   }
   const mdy = (s) => s ? new Date(s + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
   $("date-btn-label").textContent = `${mdy($("date-from").value)} – ${mdy($("date-to").value)}`;
+  if (state.tab === "search") $("view-desc").textContent = searchViewDesc();
   renderStats(a, prevA);
   renderTrend(a);
   renderFunnel(a);
@@ -2736,6 +2764,46 @@ function downloadUtilCsv() {
   URL.revokeObjectURL(a.href);
 }
 
+// plain-english statement of the current utilization view:
+// "Jan 2025 – Jun 2026 (All)" · "Q2 2026 · Brookshire Brothers · TX, LA"
+function utilViewDesc(p) {
+  let tfPart;
+  if (util.tf.sel && util.tf.sel.size) {
+    const opts = tfOptions(util.tf.gran);
+    const labs = [...util.tf.sel].map((k) => (opts.find((o) => o.key === k) || { label: k }).label);
+    tfPart = labs.length <= 3 ? labs.join(" + ") : `${labs.length} ${TF_NAMES[util.tf.gran].toLowerCase()}`;
+  } else if (util.range) {
+    tfPart = `${shortDay(util.range.a)} – ${shortDay(util.range.b)}, ${String(util.range.b).slice(0, 4)}`;
+  } else {
+    const months = p.dims ? p.dims.months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort() : [];
+    tfPart = months.length ? `${monthLabel(months[0])} – ${monthLabel(months[months.length - 1])}` : "All data";
+  }
+  const parts = [], F = util.f || {};
+  if (util.drill != null) parts.push(p.dims.pharmacies[util.drill]);
+  else if (F.pharmacies && F.pharmacies.size) {
+    // a selection that exactly matches a chain reads as the chain's name
+    let lbl = null;
+    for (const [chain] of PHARM_GROUPS) {
+      const members = p.dims.pharmacies.map((_, i) => i).filter((i) => pharmChain(p, i) === chain);
+      if (members.length && members.length === F.pharmacies.size && members.every((i) => F.pharmacies.has(i))) { lbl = chain; break; }
+    }
+    if (!lbl) {
+      const sel = [...F.pharmacies];
+      lbl = sel.length <= 2 ? sel.map((i) => p.dims.pharmacies[i]).join(", ") : `${sel.length} pharmacies`;
+    }
+    parts.push(lbl);
+  }
+  const dimPart = (dim, plural, max2) => {
+    if (!F[dim] || !F[dim].size) return;
+    const labs = [...F[dim]].map((i) => udimLabel(dim, p.dims[dim][i]));
+    parts.push(labs.length <= (max2 || 2) ? labs.join(", ") : `${labs.length} ${plural}`);
+  };
+  dimPart("groups", "clients");
+  dimPart("states", "states", 4);
+  dimPart("brands", "brand types");
+  return `${tfPart}${parts.length ? " · " + parts.join(" · ") : " (All)"}`;
+}
+
 function renderUtil() {
   const d = util.data;
   const has = d && d.periods && Object.keys(d.periods).length;
@@ -2819,6 +2887,7 @@ function renderUtil() {
     setStagger(sel);
   for (const el of document.querySelectorAll("#kpi-money .v, #kpi-claims .v, #uc-count"))
     if (el.closest(".vis")) countUp(el); // below-fold numbers roll up at reveal instead
+  $("view-desc").textContent = utilViewDesc(p);
 }
 
 async function setTab(name) {
