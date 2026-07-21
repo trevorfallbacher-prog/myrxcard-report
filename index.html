@@ -104,6 +104,7 @@
     position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
     background: var(--card); border: 1px solid var(--hair); border-radius: 10px;
     box-shadow: 0 8px 28px rgba(10,76,112,0.16); padding: 8px 10px; min-width: 230px;
+    max-width: calc(100vw - 16px);
   }
   .pop[hidden] { display: none; }
   .pop label { display: flex; align-items: center; gap: 9px; padding: 6px 4px; font-size: 13px; color: var(--ink-soft); cursor: pointer; border-radius: 6px; }
@@ -1716,15 +1717,27 @@ async function boot() {
     $("period-select").value = "CUSTOM";
     renderAll();
   });
+  // pops anchor to one edge of their button; near a viewport edge that can push
+  // them off-screen, so shift the open pop back inside after it renders
+  function clampPop(pop) {
+    if (pop.hidden) return;
+    pop.style.transform = "";
+    const r = pop.getBoundingClientRect();
+    const shift = r.left < 8 ? 8 - r.left
+      : r.right > innerWidth - 8 ? (innerWidth - 8) - r.right : 0;
+    if (shift) pop.style.transform = `translateX(${shift}px)`;
+  }
   $("group-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     $("state-pop").hidden = true;
     $("group-pop").hidden = !$("group-pop").hidden;
+    clampPop($("group-pop"));
   });
   $("state-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     $("group-pop").hidden = true;
     $("state-pop").hidden = !$("state-pop").hidden;
+    clampPop($("state-pop"));
   });
   document.addEventListener("click", (e) => {
     const path = e.composedPath ? e.composedPath() : [e.target];
@@ -1763,6 +1776,7 @@ async function boot() {
       const pop = sbtn.parentElement.querySelector(".pop");
       for (const other of document.querySelectorAll("#util-slicers .pop")) if (other !== pop) other.hidden = true;
       pop.hidden = !pop.hidden;
+      clampPop(pop);
       return;
     }
     const xClear = e.target.closest("[data-uchipclear]");
