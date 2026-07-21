@@ -544,6 +544,30 @@
   .cal-grid button.cap.b { border-top-left-radius: 0; border-bottom-left-radius: 0; }
   .cal-grid button.cap.a.b { border-radius: 999px; }
 
+  /* themed scrollbars (chart strips, pops, tables, sidebar) */
+  * { scrollbar-width: thin; scrollbar-color: var(--hair-bright) transparent; }
+  ::-webkit-scrollbar { height: 9px; width: 9px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--hair-bright); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--ink-mute); background-clip: padding-box; }
+  ::-webkit-scrollbar-corner { background: transparent; }
+
+  /* pharmacy drill-down: full name + big collected/reversed comparison */
+  .pdrill-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+  .pdrill-name { font-size: 22px; font-weight: 700; letter-spacing: -0.015em; }
+  .pdrill-sub { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); letter-spacing: 0.03em; margin: 4px 0 22px; }
+  .pdrill-rows { display: flex; flex-direction: column; gap: 20px; max-width: 880px; }
+  .pdrill-row .lbl { display: flex; justify-content: space-between; align-items: baseline; font-size: 13.5px; color: var(--ink-soft); margin-bottom: 8px; }
+  .pdrill-row .lbl b { font-size: 18px; color: var(--ink); }
+  .pdrill-track { height: 26px; border-radius: 999px; background: var(--track); overflow: hidden; }
+  .pdrill-track i { display: block; height: 100%; border-radius: 999px; }
+  .pdrill-row.coll i { background: var(--chart-coll); }
+  .pdrill-row.rev i { background: var(--chart-rev); }
+  .vis .pdrill-track i { animation: growX 0.9s cubic-bezier(0.22, 1, 0.36, 1) backwards; animation-delay: calc(var(--i, 0) * 150ms + 100ms); }
+  .pdrill-stats { display: flex; gap: 34px; margin-top: 24px; flex-wrap: wrap; }
+  .pdrill-stats .v { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+  .pdrill-stats .k { margin-top: 3px; }
+
   /* floating hover tooltip (replaces the browser's delayed native title tips) */
   #tip {
     position: fixed; z-index: 90; display: none; pointer-events: none;
@@ -908,7 +932,7 @@
       </div>
 
       <div class="panel span12">
-        <div class="kicker">Collected + reversed $ by pharmacy <span class="hint">· blue = collected, gold = reversed · tap a bar to filter</span></div>
+        <div class="kicker">Collected + reversed $ by pharmacy <span class="hint">· blue = collected, gold = reversed · tap a bar to drill in</span></div>
         <div id="pharm-chart"></div>
       </div>
 
@@ -1797,9 +1821,43 @@ function colPath(x, y, w, h, r) {
   return `M${x.toFixed(1)} ${(y + h).toFixed(1)} v${(-(h - r)).toFixed(1)} q0 ${(-r).toFixed(1)} ${r.toFixed(1)} ${(-r).toFixed(1)} h${(w - 2 * r).toFixed(1)} q${r.toFixed(1)} 0 ${r.toFixed(1)} ${r.toFixed(1)} v${(h - r).toFixed(1)} z`;
 }
 
+// drill view for one pharmacy: full name, address, and a large
+// collected-vs-reversed comparison with claim counts
+function pharmDrillHTML(p, pi) {
+  let coll = 0, rev = 0, pn = 0, rn = 0;
+  for (const f of p.facts) {
+    if (f[3] !== pi || !factPass(f, "pharmacies")) continue;
+    coll += f[8] + f[9]; rev += -f[9]; pn += f[10]; rn += f[11];
+  }
+  const m = (p.pharmMeta || [])[pi] || {};
+  const name = p.dims.pharmacies[pi];
+  const max = Math.max(coll, rev, 1);
+  const query = [name, m.addr, m.city, m.st, m.zip].filter(Boolean).join(", ");
+  const sub = [m.addr, m.city ? `${m.city}, ${m.st}` : "", m.zip].filter(Boolean).join(" · ");
+  return `
+    <div class="pdrill-head">
+      <button class="iconbtn" id="pharm-back" type="button">&#8592; ALL PHARMACIES</button>
+      <div class="pdrill-name">${esc(name)}</div>
+    </div>
+    <div class="pdrill-sub">${esc(sub)}${m.npi4 ? ` · NPI &#8230;${esc(m.npi4)}` : ""}
+      <a class="gmap" href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}" target="_blank" rel="noopener" title="Open in Google Maps">&#8599;</a></div>
+    <div class="pdrill-rows">
+      <div class="pdrill-row coll" style="--i:0"><div class="lbl"><span>Collected $</span><b class="num">${money0(Math.max(coll, 0))}</b></div>
+        <div class="pdrill-track"><i style="width:${(100 * Math.max(coll, 0) / max).toFixed(1)}%"></i></div></div>
+      <div class="pdrill-row rev" style="--i:1"><div class="lbl"><span>Reversed $</span><b class="num">${money0(rev)}</b></div>
+        <div class="pdrill-track"><i style="width:${(100 * rev / max).toFixed(1)}%"></i></div></div>
+    </div>
+    <div class="pdrill-stats">
+      <div><div class="v num">${int0(pn)}</div><div class="k kicker">Paid claims</div></div>
+      <div><div class="v num">${int0(rn)}</div><div class="k kicker">Reversed claims</div></div>
+      <div><div class="v num">${int0(pn - rn)}</div><div class="k kicker">Collected claims</div></div>
+      <div><div class="v num">${pn ? Math.round(100 * rn / pn) : 0}%</div><div class="k kicker">Reversed % claims</div></div>
+    </div>`;
+}
+
 function pharmChartSVG(data, selSet) {
   if (!data.length) return `<div style="color:var(--ink-mute);padding:16px 0">Nothing collected under the current filters.</div>`;
-  const bw = 24, gap = 9, padL = 46, padR = 12, padTop = 22, padBot = 104, h = 300;
+  const bw = 24, gap = 9, padL = 46, padR = 12, padTop = 22, padBot = 122, h = 320;
   const n = data.length;
   const w = padL + padR + n * bw + (n - 1) * gap;
   const chartH = h - padTop - padBot;
@@ -1829,7 +1887,7 @@ function pharmChartSVG(data, selSet) {
     if (coll / max > 0.045)
       s += `<text class="val" x="${x + bw / 2}" y="${(yR - 5).toFixed(1)}" text-anchor="middle" font-size="9.5">${shortMoney(coll)}</text>`;
     const cx = x + bw / 2, cy = baseY + 9;
-    s += `<text class="cat" x="${cx}" y="${cy}" text-anchor="end" font-size="9" transform="rotate(-55 ${cx} ${cy})">${esc(clip(p.name, 20))}</text>`;
+    s += `<text class="cat" x="${cx}" y="${cy}" text-anchor="end" font-size="9" transform="rotate(-55 ${cx} ${cy})">${esc(clip(p.name, 26))}</text>`;
   });
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="--base:${baseY}px">${s}</svg>`;
 }
@@ -1941,6 +1999,7 @@ function utilFilterReset() {
   util.chipsOpen = new Set();
   util.range = null; // {a, b} yyyymmdd, from hand-edited date inputs
   util.rangeMonths = null;
+  util.drill = null;
   util.tf = { gran: (util.tf && util.tf.gran) || "Q", sel: null };
   util.tfMonths = util.tfRanges = util.tfDays = null;
 }
@@ -2167,6 +2226,7 @@ function renderUtilDates(p) {
 }
 
 function togglePharm(pi) {
+  util.drill = null; // list/map toggles browse the overview, not the drill
   if (!util.f.pharmacies) util.f.pharmacies = new Set();
   util.f.pharmacies.has(pi) ? util.f.pharmacies.delete(pi) : util.f.pharmacies.add(pi);
   if (!util.f.pharmacies.size) util.f.pharmacies = null;
@@ -2654,7 +2714,11 @@ function renderUtil() {
     { label: "Reversed Claims", val: int0(c.reversed), pct: pct2(cRev), color: COL_REVERSED },
   ]);
 
-  $("pharm-chart").innerHTML = pharmChartSVG(a.pharmacies, util.f ? util.f.pharmacies : null);
+  // bar drill-down: a drilled pharmacy must still be part of the selection
+  if (util.drill != null && !(util.f.pharmacies && util.f.pharmacies.has(util.drill))) util.drill = null;
+  $("pharm-chart").innerHTML = util.drill != null && hasCube
+    ? pharmDrillHTML(p, util.drill)
+    : pharmChartSVG(a.pharmacies, util.f ? util.f.pharmacies : null);
   renderUtilTrend(p, hasCube);
   renderUtilGeo(p, a);
 
@@ -2983,7 +3047,20 @@ async function boot() {
       renderUtil();
       return;
     }
-    const bar = e.target.closest("#pharm-chart .bar, #util-locations .bar-row[data-pi]");
+    if (e.target.closest("#pharm-back")) {
+      util.drill = null;
+      util.f.pharmacies = null;
+      renderUtil();
+      return;
+    }
+    const cbar = e.target.closest("#pharm-chart .bar");
+    if (cbar) { // drill into that pharmacy and focus the tab on it
+      util.drill = Number(cbar.dataset.pi);
+      util.f.pharmacies = new Set([util.drill]);
+      renderUtil();
+      return;
+    }
+    const bar = e.target.closest("#util-locations .bar-row[data-pi]");
     if (bar) { togglePharm(Number(bar.dataset.pi)); return; }
     const pin = e.target.closest("#util-map .pin");
     if (pin) {
