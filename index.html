@@ -326,8 +326,9 @@
   .util-period { display: flex; align-items: center; gap: 9px; }
   .util-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
   /* active-filter chips live on their own row under the slicer buttons */
-  #util-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 18px; }
-  #util-chips:empty { display: none; }
+  #util-chips, #filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 18px; }
+  #util-chips:empty, #filter-chips:empty { display: none; }
+  #filter-chips { margin: 0 0 18px; }
   .util-controls .slicer button.on { border-color: var(--secondary); color: var(--secondary); font-weight: 600; }
   #pharm-chart .bar.sel { fill: var(--accent); }
   #pharm-chart .bar { cursor: pointer; }
@@ -444,7 +445,6 @@
     <div class="controls">
       <span class="badge-sample" id="sample-badge" hidden>SAMPLE DATA</span>
       <span id="search-only" style="display:contents">
-      <span id="filter-chips" style="display:inline-flex;gap:6px;flex-wrap:wrap"></span>
       <div class="slicer" id="state-slicer">
         <button class="iconbtn" id="state-btn" type="button">STATES &#9662;</button>
         <div class="pop" id="state-pop" hidden></div>
@@ -489,6 +489,7 @@
   <div id="notice"></div>
 
  <div id="view-search">
+  <div id="filter-chips"></div>
   <div class="stats" id="stats"></div>
 
   <div class="grid">
@@ -780,11 +781,9 @@ function periodBounds(p) {
   }
 }
 
-// group and state filters are multi-select (arrays); the rest are single-value
+// every filter dimension is multi-select (array of values, null = all)
 const dimMatch = (filters, e, d) =>
-  d === "group" || d === "state"
-    ? (!filters[d] || !filters[d].length || filters[d].includes(e[d]))
-    : (!filters[d] || e[d] === filters[d]);
+  !filters[d] || !filters[d].length || filters[d].includes(e[d]);
 
 function aggregate(all, period, filters) {
   const [fromTs, toTs] = periodBounds(period);
@@ -881,7 +880,8 @@ function aggregate(all, period, filters) {
 const PERIOD_LABELS = { MTD: "Month to date", QTD: "Quarter to date", YTD: "Year to date",
   LM: "Last month", LQ: "Last quarter", LY: "Last year", ALL: "All time", CUSTOM: "Custom range" };
 let state = { events: [], period: { type: "QTD", from: null, to: null }, mode: "live", lastSync: null, tab: "search",
-  filters: { state: null, drug: null, group: null, device: null } }; // group: null | array of names
+  chipsOpen: new Set(), // dims whose condensed chip is expanded
+  filters: { state: null, drug: null, group: null, device: null } }; // each: null | array of values
 
 function renderStats(a) {
   const items = [
@@ -950,7 +950,7 @@ function renderFunnel(a) {
 function renderBars(el, entries, nameFn, dim) {
   const max = Math.max(1, ...entries.map(([, c]) => c));
   el.innerHTML = entries.map(([k, c]) =>
-    `<div class="bar-row${dim && state.filters[dim] === k ? " on" : ""}"${dim ? ` data-dim="${dim}" data-val="${esc(k)}"` : ""}><span class="name" title="${esc(nameFn(k))}">${esc(nameFn(k))}</span>
+    `<div class="bar-row${dim && (state.filters[dim] || []).includes(k) ? " on" : ""}"${dim ? ` data-dim="${dim}" data-val="${esc(k)}"` : ""}><span class="name" title="${esc(nameFn(k))}">${esc(nameFn(k))}</span>
      <span class="track"><i style="width:${((c / max) * 100).toFixed(1)}%"></i></span>
      <span class="n num">${fmt(c)}</span></div>`).join("") ||
     `<span style="color:var(--ink-mute);font-size:13px">No data in this window</span>`;
@@ -1010,7 +1010,7 @@ function renderDrill(a) {
   const barList = (entries, dim) => {
     const mx = Math.max(1, ...entries.map(([, c]) => c));
     return entries.map(([k, c]) =>
-      `<div class="bar-row${dim && state.filters[dim] === k ? " on" : ""}"${dim ? ` data-dim="${dim}" data-val="${esc(k)}"` : ""}><span class="name" title="${esc(k)}">${esc(k)}</span>
+      `<div class="bar-row${dim && (state.filters[dim] || []).includes(k) ? " on" : ""}"${dim ? ` data-dim="${dim}" data-val="${esc(k)}"` : ""}><span class="name" title="${esc(k)}">${esc(k)}</span>
        <span class="track"><i style="width:${((c / mx) * 100).toFixed(1)}%"></i></span>
        <span class="n num">${fmt(c)}</span></div>`).join("") ||
       `<span style="color:var(--ink-mute);font-size:13px">None in this window</span>`;
@@ -1058,7 +1058,7 @@ function renderDevices(a) {
   const track = a.devices.map(([d, c]) =>
     `<i style="width:${((c / total) * 100).toFixed(1)}%;background:${colors[d] || "var(--ink-mute)"}"></i>`).join("");
   const rows = a.devices.map(([d, c]) =>
-    `<div class="row${state.filters.device === d ? " on" : ""}" data-dim="device" data-val="${esc(d)}"><span class="l" style="text-transform:capitalize">${esc(d)}</span>
+    `<div class="row${(state.filters.device || []).includes(d) ? " on" : ""}" data-dim="device" data-val="${esc(d)}"><span class="l" style="text-transform:capitalize">${esc(d)}</span>
      <span class="r num">${fmt(c)} · ${((c / total) * 100).toFixed(0)}%</span></div>`).join("");
   $("devices").innerHTML = `<div class="split"><div class="split-track">${track}</div>${rows}</div>`;
 }
@@ -1103,13 +1103,26 @@ const FILTER_LABELS = { state: (v) => STATE_NAMES[v] || v, drug: (v) => v, group
 function renderAll() {
   const f = state.filters;
   const a = aggregate(state.events, state.period, f);
+  // chips: condensed by default — 3+ selections in one dimension roll up
+  const SDIM_LABEL = { state: "States", drug: "Drugs", group: "Groups", device: "Devices" };
   const chips = [];
-  for (const d of ["drug", "device"]) if (f[d]) chips.push([d, f[d]]);
-  for (const s of (f.state || [])) chips.push(["state", s]);
-  for (const g of (f.group || [])) chips.push(["group", g]);
-  $("filter-chips").innerHTML = chips.map(([d, v]) =>
-    `<button class="badge-filter" type="button" data-dim="${d}" data-val="${esc(v)}">${esc(FILTER_LABELS[d](v)).toUpperCase()} <span class="x">&#215;</span></button>`).join("") +
-    (chips.length ? `<button class="badge-filter reset" type="button" id="reset-filters">RESET FILTERS</button>` : "");
+  let anyChip = false;
+  for (const d of DIMS) {
+    const sel = f[d] || [];
+    if (!sel.length) continue;
+    anyChip = true;
+    if (sel.length > 2 && !state.chipsOpen.has(d)) {
+      chips.push(`<button class="badge-filter" type="button" data-sexpand="${d}" title="Show the ${sel.length} selected">` +
+        `${sel.length} ${SDIM_LABEL[d].toUpperCase()} &#9656; <span class="x" data-sclear="${d}" title="Clear">&#215;</span></button>`);
+      continue;
+    }
+    if (sel.length > 2)
+      chips.push(`<button class="badge-filter reset" type="button" data-scollapse="${d}">${SDIM_LABEL[d].toUpperCase()} &#9662; COLLAPSE</button>`);
+    for (const v of sel)
+      chips.push(`<button class="badge-filter" type="button" data-dim="${d}" data-val="${esc(v)}">${esc(FILTER_LABELS[d](v)).toUpperCase()} <span class="x">&#215;</span></button>`);
+  }
+  $("filter-chips").innerHTML = chips.join("") +
+    (anyChip ? `<button class="badge-filter reset" type="button" id="reset-filters">RESET FILTERS</button>` : "");
   renderGroupSlicer(a);
   renderStateSlicer(a);
   // date inputs always mirror the active period's effective dates
@@ -1140,26 +1153,20 @@ function renderAll() {
     `LIVE SEARCH REPORT · GENERATED ${gen.toUpperCase()}` +
     (a.total ? ` · WINDOW ${fd(a.first).toUpperCase()} – ${fd(a.anchor).toUpperCase()}` : "") +
     ` · PERIOD: ${PERIOD_LABELS[state.period.type].toUpperCase()}` +
-    ["drug", "device"].filter((d) => f[d]).map((d) => ` · ${d.toUpperCase()}: ${FILTER_LABELS[d](f[d]).toUpperCase()}`).join("") +
-    ((f.state || []).length ? ` · STATES: ${f.state.join(", ")}` : "") +
-    ((f.group || []).length ? ` · GROUPS: ${f.group.map((g) => g.toUpperCase()).join(", ")}` : "") +
+    DIMS.filter((d) => (f[d] || []).length).map((d) =>
+      ` · ${d.toUpperCase()}S: ${f[d].map((v) => FILTER_LABELS[d](v).toUpperCase()).join(", ")}`).join("") +
     (state.mode === "sample" ? " · SAMPLE DATA" : "");
 }
 
-function toggleGroup(name) {
-  const cur = state.filters.group || [];
-  const next = cur.includes(name) ? cur.filter((g) => g !== name) : cur.concat([name]);
-  state.filters.group = next.length ? next : null;
+function toggleDim(dim, val) {
+  const cur = state.filters[dim] || [];
+  const next = cur.includes(val) ? cur.filter((x) => x !== val) : cur.concat([val]);
+  state.filters[dim] = next.length ? next : null;
+  if (dim === "state") history.replaceState(null, "", next.length === 1 ? "#" + next[0] : location.pathname);
   renderAll();
 }
-
-function toggleState(code) {
-  const cur = state.filters.state || [];
-  const next = cur.includes(code) ? cur.filter((s) => s !== code) : cur.concat([code]);
-  state.filters.state = next.length ? next : null;
-  history.replaceState(null, "", next.length === 1 ? "#" + next[0] : location.pathname);
-  renderAll();
-}
+const toggleGroup = (name) => toggleDim("group", name);
+const toggleState = (code) => toggleDim("state", code);
 
 function renderStateSlicer(a) {
   const sel = state.filters.state || [];
@@ -1823,20 +1830,27 @@ async function boot() {
   $("app").addEventListener("click", (e) => {
     if (e.target.closest("#reset-filters")) {
       for (const d of DIMS) state.filters[d] = null;
+      state.chipsOpen.clear();
       history.replaceState(null, "", location.pathname);
       renderAll();
       return;
     }
+    const sclear = e.target.closest("[data-sclear]");
+    if (sclear) {
+      state.filters[sclear.dataset.sclear] = null;
+      if (sclear.dataset.sclear === "state") history.replaceState(null, "", location.pathname);
+      renderAll(); return;
+    }
+    const sexpand = e.target.closest("[data-sexpand]");
+    if (sexpand) { state.chipsOpen.add(sexpand.dataset.sexpand); renderAll(); return; }
+    const scollapse = e.target.closest("[data-scollapse]");
+    if (scollapse) { state.chipsOpen.delete(scollapse.dataset.scollapse); renderAll(); return; }
     const t = e.target.closest("[data-dim]");
     if (!t) return;
     const dim = t.dataset.dim, val = t.dataset.val || null;
-    if (dim === "group") { if (val) toggleGroup(val); return; }
-    if (dim === "state") {
-      if (val) toggleState(val);
-      else { state.filters.state = null; history.replaceState(null, "", location.pathname); renderAll(); }
-      return;
-    }
-    state.filters[dim] = val === state.filters[dim] ? null : val;
+    if (val) { toggleDim(dim, val); return; }
+    state.filters[dim] = null;
+    if (dim === "state") history.replaceState(null, "", location.pathname);
     renderAll();
   });
   const hashState = (location.hash || "").replace("#", "").toUpperCase();
