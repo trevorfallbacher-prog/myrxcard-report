@@ -339,8 +339,8 @@
   #util-chips:empty, #filter-chips:empty { display: none; }
   #filter-chips { margin: 0 0 18px; }
   .util-controls .slicer button.on { border-color: var(--secondary); color: var(--secondary); font-weight: 600; }
-  #pharm-chart .bar.sel { fill: var(--accent); }
   #pharm-chart .bar { cursor: pointer; }
+  #pharm-chart .bar.sel { stroke: var(--ink); stroke-width: 1.5; }
   .kicker .hint { text-transform: none; letter-spacing: 0.02em; color: var(--ink-mute); font-weight: 400; }
   .bars-wide .bar-row { grid-template-columns: 220px 1fr 74px; }
   .bars-wide .bar-row .track i.rev { background: var(--accent); }
@@ -425,6 +425,8 @@
   #pharm-chart svg { display: block; }
   #pharm-chart .bar { fill: var(--secondary); transition: fill 120ms ease-out; }
   #pharm-chart .bar:hover { fill: var(--primary); }
+  #pharm-chart .barrev { fill: var(--accent); }
+  #pharm-chart .barrev:hover { fill: var(--accent-bright); }
   #pharm-chart .val { font-family: var(--mono); fill: var(--ink-soft); }
   #pharm-chart .cat { font-family: var(--mono); fill: var(--ink-mute); }
   #pharm-chart .axis { stroke: var(--hair); stroke-width: 1; }
@@ -634,7 +636,7 @@
       </div>
 
       <div class="panel span12">
-        <div class="kicker">Collected $ by pharmacy <span class="hint">· tap a bar to filter</span></div>
+        <div class="kicker">Collected + reversed $ by pharmacy <span class="hint">· blue = collected, gold = reversed · tap a bar to filter</span></div>
         <div id="pharm-chart"></div>
       </div>
 
@@ -644,10 +646,6 @@
           <div class="segbtns" data-tset="measure">
             <button type="button" data-tval="money">DOLLARS</button>
             <button type="button" data-tval="claims">CLAIMS</button>
-          </div>
-          <div class="segbtns" data-tset="mode">
-            <button type="button" data-tval="status">COLLECTED + REVERSED</button>
-            <button type="button" data-tval="pharm">BY PHARMACY</button>
           </div>
         </div>
         <div id="util-trend"></div>
@@ -1265,7 +1263,7 @@ async function sync() {
 /* ---------------- utilization tab ---------------- */
 // Reads utilization.json (published by tools/watch-utilization.mjs when a
 // quarterly claims .xlsx is dropped into the Avalon Reports folder).
-let util = { loaded: false, data: null, period: null, trend: { measure: "money", mode: "status" } };
+let util = { loaded: false, data: null, period: null, trend: { measure: "money" } };
 
 const COL_COLLECTED = "#0A4C70"; // brand navy  (--primary)
 const COL_REVERSED  = "#E9AE2E"; // brand gold  (--accent)
@@ -1342,7 +1340,7 @@ function pharmChartSVG(data, selSet) {
   const n = data.length;
   const w = padL + padR + n * bw + (n - 1) * gap;
   const chartH = h - padTop - padBot;
-  const max = Math.max(...data.map((p) => p.collected), 1);
+  const max = Math.max(...data.map((p) => Math.max(p.collected, 0) + (p.reversed || 0)), 1);
   const baseY = padTop + chartH;
   let s = "";
   // y-axis: baseline + max gridline
@@ -1351,12 +1349,19 @@ function pharmChartSVG(data, selSet) {
   s += `<text class="axlbl" x="${padL - 6}" y="${padTop + 3}" text-anchor="end">${shortMoney(max)}</text>`;
   s += `<text class="axlbl" x="${padL - 6}" y="${baseY + 3}" text-anchor="end">$0</text>`;
   data.forEach((p, i) => {
-    const bh = Math.max(2, chartH * (p.collected / max));
-    const x = padL + i * (bw + gap), y = baseY - bh;
-    s += `<rect class="bar${selSet && selSet.has(p.pi) ? " sel" : ""}" data-pi="${p.pi}" x="${x}" y="${y.toFixed(1)}" width="${bw}" height="${bh.toFixed(1)}" rx="1.5">` +
-         `<title>${esc(p.name)} · ${money0(p.collected)}</title></rect>`;
-    if (p.collected / max > 0.045)
-      s += `<text class="val" x="${x + bw / 2}" y="${(y - 5).toFixed(1)}" text-anchor="middle" font-size="9.5">${shortMoney(p.collected)}</text>`;
+    const coll = Math.max(p.collected, 0), rev = p.reversed || 0;
+    const ch = coll > 0 ? Math.max(2, chartH * (coll / max)) : 0;
+    const rh = chartH * (rev / max);
+    const x = padL + i * (bw + gap);
+    const yC = baseY - ch, yR = yC - rh;
+    const sel = selSet && selSet.has(p.pi) ? " sel" : "";
+    const title = `<title>${esc(p.name)} · collected ${money0(coll)} · reversed ${money0(rev)}</title>`;
+    if (ch > 0)
+      s += `<rect class="bar${sel}" data-pi="${p.pi}" x="${x}" y="${yC.toFixed(1)}" width="${bw}" height="${ch.toFixed(1)}" rx="1.5">${title}</rect>`;
+    if (rh > 0.4)
+      s += `<rect class="bar barrev${sel}" data-pi="${p.pi}" x="${x}" y="${yR.toFixed(1)}" width="${bw}" height="${rh.toFixed(1)}" rx="1.5">${title}</rect>`;
+    if (coll / max > 0.045)
+      s += `<text class="val" x="${x + bw / 2}" y="${(yR - 5).toFixed(1)}" text-anchor="middle" font-size="9.5">${shortMoney(coll)}</text>`;
     const cx = x + bw / 2, cy = baseY + 9;
     s += `<text class="cat" x="${cx}" y="${cy}" text-anchor="end" font-size="9" transform="rotate(-55 ${cx} ${cy})">${esc(clip(p.name, 20))}</text>`;
   });
@@ -1489,11 +1494,12 @@ function togglePharm(pi) {
 
 function utilAgg(p) {
   let paid = 0, rev = 0, pn = 0, rn = 0, ucN = 0;
-  const byPharm = new Map(), byClass = new Map(), byDrugRev = new Map(), byDrugUC = new Map();
+  const byPharm = new Map(), byPharmRev = new Map(), byClass = new Map(), byDrugRev = new Map(), byDrugUC = new Map();
   for (const f of p.facts) {
     if (!factPass(f)) continue;
     paid += f[8]; rev += f[9]; pn += f[10]; rn += f[11];
     byPharm.set(f[3], (byPharm.get(f[3]) || 0) + f[8] + f[9]);
+    if (f[9]) byPharmRev.set(f[3], (byPharmRev.get(f[3]) || 0) - f[9]);
     byClass.set(f[5], (byClass.get(f[5]) || 0) + f[8] + f[9]);
     if (f[11]) byDrugRev.set(f[6], (byDrugRev.get(f[6]) || 0) + f[11]);
     // U&C = net claim count (paid − reversed), matching Power BI's Sum of ClaimCount
@@ -1506,8 +1512,9 @@ function utilAgg(p) {
   return {
     money: { paid, reversed: revAbs, collected: paid + rev, reversedPct: paid ? revAbs / paid : 0 },
     claims: { paid: pn, reversed: rn, collected: pn - rn, reversedPct: pn ? rn / pn : 0 },
-    pharmacies: [...byPharm.entries()].map(([i, v]) => ({ pi: i, name: p.dims.pharmacies[i], collected: v }))
-      .filter((x) => x.collected > 0).sort((a, b) => b.collected - a.collected),
+    pharmacies: [...byPharm.entries()]
+      .map(([i, v]) => ({ pi: i, name: p.dims.pharmacies[i], collected: v, reversed: byPharmRev.get(i) || 0 }))
+      .filter((x) => x.collected > 0 || x.reversed > 0).sort((a, b) => b.collected - a.collected),
     classes: top(byClass, p.dims.classes, 13).filter((x) => x.v > 0),
     revDrugs: top(byDrugRev, p.dims.drugs, 13),
     ucCount: ucN,
@@ -1680,8 +1687,7 @@ function fitNums(row) {
   }
 }
 
-/* --- monthly stacked columns: collected+reversed or by pharmacy chain --- */
-const TREND_COLORS = ["#0A4C70", "#E9AE2E", "#3884A4", "#C94F4E", "#2F9C5C", "#7A5EA6", "#D07A2E", "#5B8DEF"];
+/* --- monthly stacked columns: collected + reversed per month --- */
 function renderUtilTrend(p, hasCube) {
   const panel = $("util-trend-panel");
   panel.style.display = hasCube ? "" : "none";
@@ -1693,38 +1699,15 @@ function renderUtilTrend(p, hasCube) {
   const mOrder = p.dims.months.map((v, i) => i)
     .sort((a, b) => String(p.dims.months[a]).localeCompare(String(p.dims.months[b])));
   const mPos = new Map(mOrder.map((mi, k) => [mi, k]));
-  let series; // [{name, color, vals: per-month numbers}]
-  if (t.mode === "status") {
-    series = [
-      { name: isMoney ? "Collected $" : "Collected Claims", color: COL_COLLECTED, vals: mOrder.map(() => 0) },
-      { name: isMoney ? "Reversed $" : "Reversed Claims", color: COL_REVERSED, vals: mOrder.map(() => 0) },
-    ];
-    for (const f of p.facts) {
-      if (!factPass(f)) continue;
-      const k = mPos.get(f[0]);
-      series[0].vals[k] += isMoney ? f[8] + f[9] : f[10] - f[11];
-      series[1].vals[k] += isMoney ? -f[9] : f[11];
-    }
-  } else {
-    // by pharmacy: chains roll up into one segment, loose pharmacies stand alone
-    const byEnt = new Map(), totals = new Map();
-    for (const f of p.facts) {
-      if (!factPass(f)) continue;
-      const ent = pharmChain(p, f[3]) || p.dims.pharmacies[f[3]];
-      const v = isMoney ? f[8] + f[9] : f[10] - f[11];
-      let vals = byEnt.get(ent);
-      if (!vals) { vals = mOrder.map(() => 0); byEnt.set(ent, vals); }
-      vals[mPos.get(f[0])] += v;
-      totals.set(ent, (totals.get(ent) || 0) + v);
-    }
-    const ranked = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([l]) => l);
-    const keep = ranked.slice(0, TREND_COLORS.length);
-    series = keep.map((l, i) => ({ name: l, color: TREND_COLORS[i], vals: byEnt.get(l) }));
-    if (ranked.length > keep.length) {
-      const other = mOrder.map(() => 0);
-      for (const l of ranked.slice(keep.length)) byEnt.get(l).forEach((v, k) => other[k] += v);
-      series.push({ name: `Other (${ranked.length - keep.length})`, color: "#9AA7B4", vals: other });
-    }
+  const series = [
+    { name: isMoney ? "Collected $" : "Collected Claims", color: COL_COLLECTED, vals: mOrder.map(() => 0) },
+    { name: isMoney ? "Reversed $" : "Reversed Claims", color: COL_REVERSED, vals: mOrder.map(() => 0) },
+  ];
+  for (const f of p.facts) {
+    if (!factPass(f)) continue;
+    const k = mPos.get(f[0]);
+    series[0].vals[k] += isMoney ? f[8] + f[9] : f[10] - f[11];
+    series[1].vals[k] += isMoney ? -f[9] : f[11];
   }
   // a month can net negative under filters — clamp so stacks draw sanely
   for (const s of series) s.vals = s.vals.map((v) => Math.max(v, 0));
