@@ -153,12 +153,15 @@
   #theme-btn { padding: 6px 9px; line-height: 1; }
   #theme-btn svg { width: 17px; height: 17px; display: block; }
   .brand .kicker { color: var(--tertiary); margin-bottom: 4px; }
-  .brand h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.015em; }
-  /* plain-english statement of the current view: "Q3 2026 (All)" or
-     "Apr 2026 + May 2026 · Brookshire Brothers · TX, LA" */
+  /* the page name is the small eyebrow; the plain-english view statement
+     ("Q3 2026 (All)" / "Apr 2026 · Brookshire Brothers · TX, LA") IS the header */
+  .brand h1 {
+    font-size: 11.5px; font-weight: 600; letter-spacing: 0.09em;
+    text-transform: uppercase; color: var(--ink-mute);
+  }
   .view-desc {
-    font-size: 12.5px; font-weight: 600; color: var(--secondary); margin-top: 2px;
-    max-width: 46vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-size: 20px; font-weight: 700; color: var(--ink); letter-spacing: -0.015em;
+    margin-top: 3px; max-width: 52vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   @media (max-width: 1024px) {
     #sidebar { transform: translateX(-100%); }
