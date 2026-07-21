@@ -379,6 +379,10 @@
     header.top { position: static !important; box-shadow: none !important; padding: 0 0 10px !important; }
     * { animation: none !important; transition: none !important; }
     .grid > .panel, .stats { opacity: 1 !important; }
+    /* the curve is drawn by an animation (dashoffset-hidden); with animations
+       off in print it must be forced fully drawn and high-contrast */
+    #trend path.tline { stroke-dasharray: none !important; stroke-dashoffset: 0 !important; stroke: #0A4C70 !important; }
+    #trend circle.tdot { opacity: 1 !important; }
     /* always print the light theme regardless of the on-screen mode */
     html.dark {
       --bg: #FFFFFF; --bg-base: #FFFFFF; --card: #FFFFFF; --card-solid: #EEF4FB;
@@ -603,6 +607,10 @@
     animation-delay: min(calc(var(--i, 0) * 10ms), 380ms);
   }
   .vis #pharm-chart text.val, .vis #util-trend text.val { animation: softFade 0.5s backwards; animation-delay: min(calc(var(--i, 0) * 10ms + 380ms), 800ms); }
+  /* trend curve draws itself over the columns after they rise */
+  @keyframes drawLine { to { stroke-dashoffset: 0; } }
+  .vis #trend path.tline { stroke-dasharray: 1; stroke-dashoffset: 1; animation: drawLine 1.1s cubic-bezier(0.4, 0, 0.2, 1) 0.45s forwards; }
+  .vis #trend circle.tdot { transform-box: fill-box; transform-origin: center; animation: pinPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) 1.3s backwards; }
   .vis .donut-wrap svg { animation: sweepIn 0.7s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; }
   .vis .donut-legend .li { animation: fadeSlide 0.5s backwards; animation-delay: calc(180ms + var(--i, 0) * 110ms); }
   .vis .geo-map .pin { animation: pinPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; animation-delay: min(calc(var(--i, 0) * 45ms), 650ms); }
@@ -1393,13 +1401,28 @@ function renderTrend(a) {
     return `<line x1="${padL}" y1="${gy}" x2="${W}" y2="${gy}" stroke="var(--hair)" stroke-dasharray="2 4" stroke-width="1"/><text x="0" y="${gy + 3.5}">${Math.round(max * f)}</text>`;
   }).join("");
 
+  // smoothed trend curve over the columns (Catmull-Rom → cubic bezier)
+  let curve = "", dots = "";
+  if (data.length > 1) {
+    const pts = data.map(([, c], i) => [padL + i * iw + iw / 2, y(c)]);
+    curve = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+      curve += ` C${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(1)} ${(p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)}` +
+        ` ${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(1)} ${(p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)}` +
+        ` ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    }
+    curve = `<path class="tline" pathLength="1" d="${curve}" fill="none" stroke="var(--tertiary)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+    if (data.length <= 40)
+      dots = pts.map(([cx2, cy2]) => `<circle class="tdot" cx="${cx2.toFixed(1)}" cy="${cy2.toFixed(1)}" r="3" fill="var(--tertiary)" stroke="var(--card)" stroke-width="1.5"/>`).join("");
+  }
   let avgMark = "";
   if (trendAvg > 0) {
     const yA = y(Math.min(trendAvg, max));
     avgMark = `<line class="avgline" x1="${padL}" y1="${yA.toFixed(1)}" x2="${W - 4}" y2="${yA.toFixed(1)}" data-tip="Average per ${({ D: "day", W: "week", M: "month", Y: "year" })[a.trendGran] || "week"}: ${fmt(Math.round(trendAvg))} searches"/>` +
       `<text class="avglbl" x="${W - 4}" y="${(yA - 6).toFixed(1)}" text-anchor="end">AVG ${fmt(Math.round(trendAvg))}</text>`;
   }
-  $("trend").innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="--base:${baseY}px">${grid}${bars}${avgMark}${labels}</svg>`;
+  $("trend").innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="--base:${baseY}px">${grid}${bars}${curve}${dots}${avgMark}${labels}</svg>`;
 }
 
 function renderFunnel(a) {
