@@ -15,6 +15,7 @@ import XLSX from "xlsx";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { loadStrengthCache } from "./ndc-strength.mjs";
 
 // ZIP -> [lat, lon] centroids (GeoNames postal data, CC-BY 4.0) for the map view
 let ZIPS = null;
@@ -71,6 +72,9 @@ export function aggregateRows(rows, sourceLabel = "") {
     for (const k in r) o[norm(k)] = r[k];
     return o;
   });
+  // NDC -> strength labels resolved by ndc-strength.mjs (watcher runs
+  // prepareStrengths before aggregating; missing entries degrade gracefully)
+  const strengths = loadStrengthCache();
 
   let paidMoney = 0, reversedMoney = 0;
   let paidClaims = 0, reversedClaims = 0;
@@ -133,11 +137,16 @@ export function aggregateRows(rows, sourceLabel = "") {
     }
     const bi = intern("brands", norm(r.BrandCode).toUpperCase() || "—");
     const ci = intern("classes", titleize(norm(r.TherapeuticClass).replace(/\*/g, "").trim()) || "—");
-    const di = intern("drugs", norm(r.DrugName) || "—");
+    // drugs split per strength (from the FDA NDC directory) so each dose is
+    // its own row in the drug visuals; unknown strengths fold into the base name
+    const dname = norm(r.DrugName) || "—";
+    const strength = strengths[norm(r.NDC).replace(/\D/g, "").padStart(11, "0")] || "";
+    const di = intern("drugs", strength ? `${dname} · ${strength}` : dname, `${dname}|${strength}`);
     const uc = num(r.CostBasis) === 4 ? 1 : 0; // NCPDP basis-of-cost 04 = Usual & Customary
-    const fk = `${mi}|${gi}|${si}|${pi}|${bi}|${ci}|${di}|${uc}`;
+    const day = pd ? pd.y * 10000 + pd.m * 100 + pd.d : 0; // yyyymmdd, 0 = unknown
+    const fk = `${mi}|${gi}|${si}|${pi}|${bi}|${ci}|${di}|${uc}|${day}`;
     let f = factMap.get(fk);
-    if (!f) { f = [mi, gi, si, pi, bi, ci, di, uc, 0, 0, 0, 0]; factMap.set(fk, f); }
+    if (!f) { f = [mi, gi, si, pi, bi, ci, di, uc, 0, 0, 0, 0, day]; factMap.set(fk, f); }
     if (type === "P") { f[8] += gross; f[10] += 1; }
     else { f[9] += gross; f[11] += 1; } // reversal gross is negative; keep sign
   }
@@ -192,7 +201,8 @@ export function aggregateRows(rows, sourceLabel = "") {
     dims,
     pharmMeta,
     // [monthIdx, groupIdx, stateIdx, pharmacyIdx, brandIdx, classIdx, drugIdx,
-    //  paidAtUC flag, paid$, reversed$ (negative), paidClaims, reversedClaims]
-    facts: [...factMap.values()].map((f) => [f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], r2(f[8]), r2(f[9]), f[10], f[11]]),
+    //  paidAtUC flag, paid$, reversed$ (negative), paidClaims, reversedClaims,
+    //  processDate yyyymmdd (0 when the row had no parseable date)]
+    facts: [...factMap.values()].map((f) => [f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], r2(f[8]), r2(f[9]), f[10], f[11], f[12]]),
   };
 }

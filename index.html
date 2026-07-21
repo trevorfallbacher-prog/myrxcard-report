@@ -281,7 +281,7 @@
     @page { margin: 12mm; }
     html, body { background: #fff !important; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .controls-stack, footer, #notice, .stack-controls, #util-csv-btn { display: none !important; }
+    .controls-stack, footer, #notice, .stack-controls, #util-csv-btn, .util-daterow { display: none !important; }
     #app { padding: 0; max-width: none; }
     header.top { margin-bottom: 14px; }
     .print-meta { display: block; }
@@ -384,6 +384,25 @@
   #util-trend .axis { stroke: var(--hair); stroke-width: 1; }
   #util-trend .axlbl { font-family: var(--mono); fill: var(--ink-mute); font-size: 10px; }
   .trend-legend { flex-direction: row; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
+  /* utilization date range: quick-pick + inputs + dual-thumb day slider */
+  .util-daterow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 14px 0 4px; }
+  .util-daterow[hidden] { display: none; }
+  .dslider { position: relative; flex: 1; min-width: 240px; max-width: 560px; height: 38px; }
+  .dslider .ds-track { position: absolute; left: 0; right: 0; top: 10px; height: 4px; background: var(--hair); border-radius: 2px; }
+  .dslider .ds-fill { position: absolute; top: 10px; height: 4px; background: var(--secondary); border-radius: 2px; }
+  .dslider input[type="range"] {
+    position: absolute; left: 0; top: 1px; width: 100%; margin: 0; height: 22px;
+    -webkit-appearance: none; appearance: none; background: transparent; pointer-events: none; outline: none;
+  }
+  .dslider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; pointer-events: auto; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--card); border: 2px solid var(--secondary); cursor: grab; box-shadow: 0 1px 4px rgba(10,76,112,0.25);
+  }
+  .dslider input[type="range"]::-moz-range-thumb {
+    pointer-events: auto; width: 13px; height: 13px; border-radius: 50%;
+    background: var(--card); border: 2px solid var(--secondary); cursor: grab;
+  }
+  .ds-labels { position: absolute; top: 22px; left: 0; right: 0; display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); }
   /* pharmacy locations: list + map */
   .geo-wrap { display: flex; gap: 22px; align-items: stretch; }
   .geo-list { flex: 0 0 400px; max-height: 430px; overflow-y: auto; padding-right: 6px; }
@@ -609,6 +628,20 @@
           <select id="util-select" aria-label="Reporting period"></select>
         </div>
         <button class="iconbtn" id="util-csv-btn" type="button" title="Download this period's data as CSV">CSV &#8595;</button>
+      </div>
+    </div>
+    <div class="util-daterow" id="util-daterow" hidden>
+      <select class="periodsel" id="util-quick" aria-label="Quick date range"></select>
+      <span class="daterange">
+        <input type="date" id="util-from" aria-label="From date">
+        <span style="color:var(--ink-mute)">&#8211;</span>
+        <input type="date" id="util-to" aria-label="To date">
+      </span>
+      <div class="dslider" id="util-dslider">
+        <div class="ds-track"></div><div class="ds-fill" id="ds-fill"></div>
+        <input type="range" id="ds-a" aria-label="Range start">
+        <input type="range" id="ds-b" aria-label="Range end">
+        <div class="ds-labels"><span id="ds-la"></span><span id="ds-lb"></span></div>
       </div>
     </div>
     <div id="util-chips"></div>
@@ -1475,16 +1508,96 @@ function utilFilterReset() {
   util.f = { groups: null, pharmacies: null, months: null, states: null, brands: null };
   util.psearch = {};
   util.chipsOpen = new Set();
+  util.range = null; // {a, b} as yyyymmdd, from the date slider / quick picks
 }
 
 // pass check, optionally ignoring one dimension (for slicer counts)
 function factPass(f, skipDim) {
+  if (util.range && f[12] && (f[12] < util.range.a || f[12] > util.range.b)) return false;
   const F = util.f;
   for (const dim in USLICER_DIMS) {
     if (dim === skipDim) continue;
     if (F[dim] && !F[dim].has(f[USLICER_DIMS[dim]])) return false;
   }
   return true;
+}
+
+/* --- date range: day-stamped facts (f[12] = yyyymmdd) drive a dual-thumb
+       slider, from/to inputs, and quarter/month/week quick picks --- */
+const ymdToDate = (n) => new Date(Math.floor(n / 10000), Math.floor(n / 100) % 100 - 1, n % 100);
+const dateToYmd = (d) => d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const dayDiff = (a, b) => Math.round((b - a) / 86400000);
+const ymdToInput = (n) => `${String(n).slice(0, 4)}-${String(n).slice(4, 6)}-${String(n).slice(6)}`;
+const inputToYmd = (s) => (s ? +s.replace(/-/g, "") : null);
+const shortDay = (n) => ymdToDate(n).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+function utilDayDomain(p) {
+  let a = Infinity, b = -Infinity;
+  if (Array.isArray(p.facts)) for (const f of p.facts) if (f[12]) { if (f[12] < a) a = f[12]; if (f[12] > b) b = f[12]; }
+  return a <= b ? { a, b } : null;
+}
+
+function updateSliderViz() {
+  if (!util.dayDomain) return;
+  const max = Math.max(+$("ds-a").max, 1);
+  const lo = Math.min(+$("ds-a").value, +$("ds-b").value), hi = Math.max(+$("ds-a").value, +$("ds-b").value);
+  $("ds-fill").style.left = (100 * lo / max) + "%";
+  $("ds-fill").style.width = (100 * (hi - lo) / max) + "%";
+  const d0 = ymdToDate(util.dayDomain.a);
+  $("ds-la").textContent = shortDay(dateToYmd(addDays(d0, lo)));
+  $("ds-lb").textContent = shortDay(dateToYmd(addDays(d0, hi)));
+}
+
+function sliderRange() {
+  const d0 = ymdToDate(util.dayDomain.a);
+  const lo = Math.min(+$("ds-a").value, +$("ds-b").value), hi = Math.max(+$("ds-a").value, +$("ds-b").value);
+  return { a: dateToYmd(addDays(d0, lo)), b: dateToYmd(addDays(d0, hi)) };
+}
+
+function buildQuickOptions(dom) {
+  const qs = new Map(), ms = new Map(), ws = new Map();
+  let d = ymdToDate(dom.a);
+  const end = ymdToDate(dom.b);
+  while (d <= end) {
+    const y = d.getFullYear(), mo = d.getMonth(), q0 = Math.floor(mo / 3) * 3;
+    const qk = `Q${q0 / 3 + 1} ${y}`;
+    if (!qs.has(qk)) qs.set(qk, [dateToYmd(new Date(y, q0, 1)), dateToYmd(new Date(y, q0 + 3, 0))]);
+    const mk = `${y}-${String(mo + 1).padStart(2, "0")}`;
+    if (!ms.has(mk)) ms.set(mk, [dateToYmd(new Date(y, mo, 1)), dateToYmd(new Date(y, mo + 1, 0))]);
+    const wStart = addDays(d, -((d.getDay() + 6) % 7)); // Monday
+    const wk = dateToYmd(wStart);
+    if (!ws.has(wk)) ws.set(wk, [wk, dateToYmd(addDays(wStart, 6))]);
+    d = addDays(d, 1);
+  }
+  const opts = (m, lbl) => [...m.entries()].map(([k, [a, b]]) =>
+    `<option value="${a}:${b}">${lbl ? lbl(k) : k}</option>`).join("");
+  $("util-quick").innerHTML = `<option value="">Full period</option>` +
+    `<optgroup label="Quarter">${opts(qs)}</optgroup>` +
+    `<optgroup label="Month">${opts(ms, monthLabel)}</optgroup>` +
+    `<optgroup label="Week">${opts(ws, (k) => "Wk of " + shortDay(+k))}</optgroup>`;
+  $("util-quick").dataset.built = util.period;
+}
+
+function renderUtilDates(p) {
+  const dom = utilDayDomain(p);
+  util.dayDomain = dom;
+  $("util-daterow").hidden = !dom;
+  if (!dom) return;
+  if ($("util-quick").dataset.built !== util.period) buildQuickOptions(dom);
+  const a = util.range ? Math.max(util.range.a, dom.a) : dom.a;
+  const b = util.range ? Math.min(util.range.b, dom.b) : dom.b;
+  $("util-from").min = $("util-to").min = ymdToInput(dom.a);
+  $("util-from").max = $("util-to").max = ymdToInput(dom.b);
+  $("util-from").value = ymdToInput(a);
+  $("util-to").value = ymdToInput(b);
+  const d0 = ymdToDate(dom.a), span = Math.max(dayDiff(d0, ymdToDate(dom.b)), 1);
+  $("ds-a").min = $("ds-b").min = 0;
+  $("ds-a").max = $("ds-b").max = span;
+  $("ds-a").value = dayDiff(d0, ymdToDate(a));
+  $("ds-b").value = dayDiff(d0, ymdToDate(b));
+  if (!util.range) $("util-quick").value = "";
+  updateSliderViz();
 }
 
 function togglePharm(pi) {
@@ -1618,6 +1731,11 @@ function renderUtilSlicers(p) {
       for (const i of items)
         chips.push(`<button class="badge-filter" type="button" data-uchip="${dim}" data-idx="${i}">${esc(clip(chipLabel(dim, i), 26)).toUpperCase()} <span class="x">&#215;</span></button>`);
     }
+  }
+  if (util.range) {
+    any = true;
+    chips.push(`<button class="badge-filter" type="button" data-urangeclear title="Clear date range">` +
+      `${shortDay(util.range.a).toUpperCase()} &#8211; ${shortDay(util.range.b).toUpperCase()} <span class="x">&#215;</span></button>`);
   }
   $("util-chips").innerHTML = chips.join("") +
     (any ? `<button class="badge-filter reset" type="button" data-uchip="__reset">RESET</button>` : "");
@@ -1778,13 +1896,13 @@ function downloadUtilCsv() {
   if (!Array.isArray(p.facts)) { alert("This period was stored without row-level data — re-run the watcher to rebuild it."); return; }
   const q = (s) => { s = String(s ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const r2 = (v) => Math.round(v * 100) / 100;
-  const rows = [["Month", "Client", "Pharmacy", "PharmacyAddress", "PharmacyCity", "PharmacyState", "PharmacyZip", "NPILast4", "PharmacyGroup",
+  const rows = [["Month", "ProcessDate", "Client", "Pharmacy", "PharmacyAddress", "PharmacyCity", "PharmacyState", "PharmacyZip", "NPILast4", "PharmacyGroup",
     "Brand", "TherapeuticClass", "Drug", "PaidAtUC", "PaidDollars", "ReversedDollars", "CollectedDollars",
     "PaidClaims", "ReversedClaims", "CollectedClaims"]];
   for (const f of p.facts) {
     const meta = (p.pharmMeta && p.pharmMeta[f[3]]) || {};
     rows.push([
-      p.dims.months[f[0]], p.dims.groups[f[1]], p.dims.pharmacies[f[3]], meta.addr || "", meta.city || "", p.dims.states[f[2]],
+      p.dims.months[f[0]], f[12] ? ymdToInput(f[12]) : "", p.dims.groups[f[1]], p.dims.pharmacies[f[3]], meta.addr || "", meta.city || "", p.dims.states[f[2]],
       meta.zip || "", meta.npi4 || "", pharmChain(p, f[3]) || "", BRAND_NAMES[p.dims.brands[f[4]]] || p.dims.brands[f[4]],
       p.dims.classes[f[5]], p.dims.drugs[f[6]], f[7] ? "Y" : "",
       r2(f[8]), r2(-f[9]), r2(f[8] + f[9]), f[10], f[11], f[10] - f[11],
@@ -1837,6 +1955,7 @@ function renderUtil() {
     (gen ? ` · UPDATED ${gen.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }).toUpperCase()}` : "");
 
   if (hasCube) renderUtilSlicers(p);
+  renderUtilDates(hasCube ? p : { facts: null });
 
   $("kpi-money").innerHTML =
     kpi("paid", money0(m.paid), "Paid $") + kpi("reversed", money0(m.reversed), "Reversed $") +
@@ -1985,6 +2104,24 @@ async function boot() {
   });
   $("util-select").addEventListener("change", (e) => { util.period = e.target.value; utilFilterReset(); renderUtil(); });
   $("util-csv-btn").addEventListener("click", downloadUtilCsv);
+  // date range: quick picks fill the range; inputs and slider set it directly
+  $("util-quick").addEventListener("change", (e) => {
+    const v = e.target.value;
+    util.range = v ? { a: +v.split(":")[0], b: +v.split(":")[1] } : null;
+    renderUtil();
+  });
+  for (const id of ["util-from", "util-to"]) $(id).addEventListener("change", () => {
+    const a = inputToYmd($("util-from").value), b = inputToYmd($("util-to").value);
+    if (a && b) { util.range = a <= b ? { a, b } : { a: b, b: a }; $("util-quick").value = ""; renderUtil(); }
+  });
+  for (const id of ["ds-a", "ds-b"]) {
+    $(id).addEventListener("input", updateSliderViz);        // live labels while dragging
+    $(id).addEventListener("change", () => {                 // full re-render on release
+      util.range = sliderRange();
+      $("util-quick").value = "";
+      renderUtil();
+    });
+  }
   // utilization slicers: button toggles pop; checkbox changes update filters;
   // chips clear one filter; pharmacy bars cross-filter on click
   $("view-utilization").addEventListener("click", (e) => {
@@ -2002,6 +2139,7 @@ async function boot() {
     if (tb) { util.trend[tb.parentElement.dataset.tset] = tb.dataset.tval; renderUtil(); return; }
     const xClear = e.target.closest("[data-uchipclear]");
     if (xClear) { util.f[xClear.dataset.uchipclear] = null; renderUtil(); return; }
+    if (e.target.closest("[data-urangeclear]")) { util.range = null; renderUtil(); return; }
     const ex = e.target.closest("[data-uexpand]");
     if (ex) { util.chipsOpen.add(ex.dataset.uexpand); renderUtil(); return; }
     const col = e.target.closest("[data-ucollapse]");

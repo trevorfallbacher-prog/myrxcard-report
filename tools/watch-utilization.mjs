@@ -10,6 +10,7 @@
 import chokidar from "chokidar";
 import { basename } from "node:path";
 import { mergeFile, writeStore, loadStore, publish } from "./store.mjs";
+import { prepareStrengths } from "./ndc-strength.mjs";
 
 const WATCH_DIR = process.argv[2] || process.env.WATCH_DIR ||
   "C:\\Users\\trevo\\iCloudDrive\\Desktop\\Avalon Reports";
@@ -37,6 +38,9 @@ async function processFile(path) {
   log(`Detected ${basename(path)} — aggregating…`);
   let res;
   try {
+    // resolve drug strengths for any new NDCs first (offline-safe: on failure
+    // the aggregate just shows plain drug names until a later run)
+    try { await prepareStrengths(path); } catch (e) { log(`NDC strength lookup skipped: ${e.message}`); }
     res = mergeFile(path, loadStore());
   } catch (e) {
     log(`Could not parse ${basename(path)}: ${e.message}`);
