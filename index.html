@@ -9,29 +9,67 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    /* TailAdmin-style palette: indigo primary, sky secondary series color,
-       slate grays, dark sidebar */
-    --bg: #F1F5F9;
-    --bg-base: #F1F5F9;
+    /* MyRxCard brand — sampled from myrxcard.com: teal-blues, navy ink, gold
+       step accents. Layout follows TailAdmin v2; the palette stays brand. */
+    --bg: #F4F8FC;
+    --bg-base: #F4F8FC;
     --card: #FFFFFF;
-    --card-solid: #F7F9FC;
-    --primary: #3C50E0;
-    --secondary: #3C50E0;
-    --tertiary: #8A99AF;
-    --accent: #80CAEE;
-    --accent-bright: #FFA70B;
-    --ink: #1C2434;
-    --ink-soft: #475569;
-    --ink-mute: #8A99AF;
-    --hair: #E2E8F0;
-    --hair-bright: #CBD5E1;
-    --danger: #D34053;
-    --success: #219653;
-    --sidebar: #1C2434;
-    --sidebar-hover: #333A48;
-    --sidebar-ink: #DEE4EE;
+    --card-solid: #EEF4FB;
+    --primary: #0A4C70;
+    --secondary: #16688F;
+    --tertiary: #3884A4;
+    --accent: #E9AE2E;
+    --accent-bright: #F5C43C;
+    --ink: #1A2E3B;
+    --ink-soft: #4A6274;
+    --ink-mute: #7A8FA0;
+    --hair: #DCE7F0;
+    --hair-bright: #B9CEDD;
+    --danger: #C94F4E;
+    --success: #2F9C5C;
+    --success-tint: #E4F5EB;
+    --danger-tint: #FBEAEA;
+    --nav-on: #EAF3F9;
+    --chart-coll: #16688F;
+    --chart-rev: #E9AE2E;
+    --map-ocean: #DDEBF5;
+    --map-st: #C6D8E6;
+    --map-stroke: #FDFEFF;
+    --tip-bg: #1A2E3B;
+    --tip-ink: #F2F8FF;
+    --track: #E7EEF5;
+    --seg-bg: #EDF2F8;
+    --shadow: 0 1px 3px rgba(16,24,40,0.06);
     --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
     --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  html.dark {
+    /* dark mode: same brand hues on deep-navy surfaces */
+    --bg: #0B1824;
+    --bg-base: #0B1824;
+    --card: #102434;
+    --card-solid: #16303F;
+    --primary: #4FA3D1;
+    --secondary: #5CB1DE;
+    --tertiary: #5C93B0;
+    --ink: #E9F2F9;
+    --ink-soft: #B3C9DA;
+    --ink-mute: #7492A8;
+    --hair: #1E3A4D;
+    --hair-bright: #2C516A;
+    --success-tint: #123121;
+    --danger-tint: #3A1D1D;
+    --nav-on: #16303F;
+    --chart-coll: #4FA3D1;
+    --chart-rev: #E9AE2E;
+    --map-ocean: #0E2130;
+    --map-st: #1C3A4E;
+    --map-stroke: #0B1824;
+    --tip-bg: #E9F2F9;
+    --tip-ink: #12283A;
+    --track: #1C3A4E;
+    --seg-bg: #0E2130;
+    --shadow: 0 1px 3px rgba(0,0,0,0.4);
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html { background: var(--bg); }
@@ -46,10 +84,10 @@
   }
   .num { font-variant-numeric: tabular-nums; }
   .kicker {
-    font-family: var(--sans);
-    font-size: 11.5px;
-    font-weight: 600;
-    letter-spacing: 0.09em;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
     text-transform: uppercase;
     color: var(--ink-mute);
   }
@@ -80,42 +118,45 @@
   .gate-panel button:disabled { background: var(--hair-bright); color: #fff; cursor: default; }
   .gate-error { color: var(--danger); font-size: 13px; margin-top: 12px; min-height: 18px; }
 
-  /* ---------- Shell: fixed dark sidebar + sticky white topbar (TailAdmin) ---------- */
+  /* ---------- Shell: white sidebar + white topbar on soft canvas (TailAdmin v2) ---------- */
   #app { display: none; }
   #sidebar {
     position: fixed; left: 0; top: 0; bottom: 0; width: 250px; z-index: 45;
-    background: var(--sidebar); color: var(--sidebar-ink);
+    background: var(--card); color: var(--ink-soft);
+    border-right: 1px solid var(--hair);
     padding: 22px 16px 70px; overflow-y: auto;
-    transition: transform 0.25s ease-out;
+    transition: transform 0.25s ease-out, background 0.2s, border-color 0.2s;
   }
   .side-logo { padding: 2px 10px 14px; }
-  .side-logo .logo { color: #fff; margin-bottom: 0; }
+  .side-logo .logo { margin-bottom: 0; }
   .side-sec { font-size: 11px; font-weight: 600; letter-spacing: 0.12em; color: var(--ink-mute); margin: 16px 10px 8px; }
   #side-nav { display: flex; flex-direction: column; gap: 4px; }
   #side-nav button {
     display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
-    background: transparent; border: 0; border-radius: 8px; cursor: pointer;
-    color: var(--sidebar-ink); font: inherit; font-weight: 500; font-size: 14px;
-    padding: 11px 12px; transition: background 0.15s ease-out;
+    background: transparent; border: 0; border-radius: 10px; cursor: pointer;
+    color: var(--ink-soft); font: inherit; font-weight: 500; font-size: 14px;
+    padding: 11px 12px; transition: background 0.15s ease-out, color 0.15s ease-out;
   }
-  #side-nav button:hover { background: var(--sidebar-hover); }
-  #side-nav button.on { background: var(--sidebar-hover); color: #fff; }
-  #side-nav svg { width: 18px; height: 18px; flex: 0 0 auto; opacity: 0.85; }
-  .side-foot { position: fixed; bottom: 0; left: 0; width: 250px; padding: 14px 26px; background: var(--sidebar); display: flex; align-items: center; gap: 9px; }
+  #side-nav button:hover { background: var(--card-solid); color: var(--ink); }
+  #side-nav button.on { background: var(--nav-on); color: var(--secondary); font-weight: 600; }
+  #side-nav svg { width: 19px; height: 19px; flex: 0 0 auto; }
+  .side-foot { position: fixed; bottom: 0; left: 0; width: 250px; padding: 14px 26px; background: var(--card); border-right: 1px solid var(--hair); display: flex; align-items: center; gap: 9px; }
   .maincol { margin-left: 250px; min-height: 100vh; }
   .content { padding: 24px 24px 56px; max-width: 1420px; }
   header.top {
     position: sticky; top: 0; z-index: 35;
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
-    flex-wrap: wrap; background: var(--card); box-shadow: 0 1px 0 var(--hair), 0 1px 8px rgba(16,24,40,0.04);
-    padding: 13px 24px;
+    flex-wrap: wrap; background: var(--card); border-bottom: 1px solid var(--hair);
+    padding: 13px 24px; transition: background 0.2s, border-color 0.2s;
   }
   #menu-btn { display: none; font-size: 16px; padding: 6px 10px; }
+  #theme-btn { padding: 6px 9px; line-height: 1; }
+  #theme-btn svg { width: 17px; height: 17px; display: block; }
   .brand .kicker { color: var(--tertiary); margin-bottom: 4px; }
   .brand h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.015em; }
   @media (max-width: 1024px) {
     #sidebar { transform: translateX(-100%); }
-    #sidebar.open { transform: none; box-shadow: 0 0 0 100vmax rgba(28,36,52,0.4), 0 10px 40px rgba(16,24,40,0.4); }
+    #sidebar.open { transform: none; box-shadow: 0 0 0 100vmax rgba(10,30,45,0.45), 0 10px 40px rgba(10,30,45,0.35); }
     .maincol { margin-left: 0; }
     #menu-btn { display: inline-block; }
   }
@@ -157,18 +198,20 @@
   .sync .dot.err { background: var(--danger); box-shadow: 0 0 6px rgba(201,79,78,0.45); }
   .iconbtn {
     background: var(--card); border: 1px solid var(--hair); border-radius: 8px;
-    color: var(--ink-soft); padding: 7px 13px; font-family: var(--sans); font-size: 12.5px;
-    font-weight: 600; letter-spacing: 0.03em; cursor: pointer;
+    color: var(--ink-soft); padding: 6px 12px; font-family: var(--mono); font-size: 12px;
+    letter-spacing: 0.06em; cursor: pointer;
     transition: border-color 150ms ease-out, color 150ms ease-out;
   }
   .iconbtn:hover { border-color: var(--hair-bright); color: var(--ink); }
   /* header controls: each gets its own color so they read at a glance */
-  #state-btn { background: #EFF2FE; border-color: #BAC4F5; color: var(--primary); }
-  #state-btn:hover { border-color: var(--primary); }
-  #group-btn { background: #EBF7FD; border-color: #A9DBF4; color: #1D7FB5; }
+  #state-btn { background: #EAF3F9; border-color: #A9CBDE; color: var(--secondary); }
+  #state-btn:hover { border-color: var(--secondary); }
+  #group-btn { background: #FBF3DC; border-color: #E3C878; color: #8A6410; }
   #group-btn:hover { border-color: var(--accent); }
-  #pdf-btn { background: var(--primary); border-color: var(--primary); color: #F1F4FF; }
-  #pdf-btn:hover { background: #2E3FBE; border-color: #2E3FBE; color: #FFFFFF; }
+  html.dark #state-btn { background: #122C3E; border-color: #2C516A; }
+  html.dark #group-btn { background: #33290F; border-color: #6B570F; color: #E9C558; }
+  #pdf-btn { background: var(--primary); border-color: var(--primary); color: #F2F8FF; }
+  #pdf-btn:hover { background: var(--secondary); border-color: var(--secondary); color: #FFFFFF; }
 
   .badge-sample {
     font-family: var(--mono); font-size: 12px; letter-spacing: 0.1em;
@@ -191,18 +234,30 @@
   /* ---------- Stat strip ---------- */
   .stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-bottom: 22px; }
   .stat {
-    background: var(--card); border: 1px solid var(--hair); border-radius: 10px;
-    box-shadow: 0 1px 3px rgba(16,24,40,0.06); padding: 18px;
+    background: var(--card); border: 1px solid var(--hair); border-radius: 16px;
+    box-shadow: var(--shadow); padding: 18px;
   }
-  .stat .v { font-size: 27px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
-  .stat .k { margin-top: 6px; }
+  .stat .s-ico, .kpi .k-ico {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; border-radius: 12px; background: var(--card-solid);
+    color: var(--ink-soft); margin-bottom: 14px;
+  }
+  .stat .s-ico svg, .kpi .k-ico svg { width: 21px; height: 21px; }
+  .stat .s-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; margin-top: 4px; }
+  .stat .v { font-size: 25px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
+  .tbadge {
+    display: inline-flex; align-items: center; gap: 3px; border-radius: 999px;
+    padding: 3px 8px; font-size: 11.5px; font-weight: 600; white-space: nowrap;
+  }
+  .tbadge.up { background: var(--success-tint); color: var(--success); }
+  .tbadge.down { background: var(--danger-tint); color: var(--danger); }
 
   /* ---------- Grid ---------- */
   .grid { display: grid; gap: 20px; grid-template-columns: repeat(12, 1fr); }
   .panel {
-    background: var(--card); border: 1px solid var(--hair); border-radius: 10px;
+    background: var(--card); border: 1px solid var(--hair); border-radius: 16px;
     padding: 22px;
-    box-shadow: 0 1px 3px rgba(16,24,40,0.06);
+    box-shadow: var(--shadow);
   }
   .panel > .kicker { margin-bottom: 16px; }
   .span7 { grid-column: span 7; }
@@ -222,7 +277,7 @@
   .funnel-row .lbl .name { color: var(--ink-soft); font-size: 13px; }
   .funnel-row .lbl .val { font-weight: 600; font-size: 15px; }
   .funnel-row .lbl .pct { color: var(--ink-mute); font-size: 12px; font-family: var(--mono); margin-left: 8px; }
-  .funnel-bar { height: 8px; background: #E7EEF5; border-radius: 4px; overflow: hidden; }
+  .funnel-bar { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
   .funnel-bar i { display: block; height: 100%; border-radius: 4px; transition: width 250ms ease-out; }
   .funnel-note { color: var(--ink-mute); font-size: 12.5px; margin-top: 14px; border-top: 1px solid var(--hair); padding-top: 12px; }
   .funnel-note b { color: var(--secondary); font-weight: 600; }
@@ -235,8 +290,8 @@
   .bar-row[data-dim]:hover .name, .funnel-row[data-dim]:hover .name, .split .row[data-dim]:hover .l, td[data-dim]:hover { color: var(--secondary); }
   .bar-row.on .name, .funnel-row.on .name, .split .row.on .l { color: var(--secondary); font-weight: 700; }
   .bar-row.on .track i { background: var(--accent); }
-  .bar-row .track { height: 7px; background: #E7EEF5; border-radius: 4px; overflow: hidden; }
-  .bar-row .track i { display: block; height: 100%; border-radius: 4px; background: var(--secondary); }
+  .bar-row .track { height: 8px; background: var(--track); border-radius: 999px; overflow: hidden; }
+  .bar-row .track i { display: block; height: 100%; border-radius: 999px; background: var(--secondary); }
   .bar-row .n { text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ink-soft); }
 
   /* split */
@@ -305,7 +360,7 @@
 
   /* MyRxCard wordmark */
   .logo { display: flex; align-items: center; font-size: 19px; font-weight: 800; letter-spacing: -0.01em; color: var(--ink); margin-bottom: 6px; }
-  .logo .rx { background: var(--secondary); color: #fff; border-radius: 7px; padding: 0 6px; margin: 0 3px; font-weight: 700; }
+  .logo .rx { background: #16688F; color: #fff; border-radius: 7px; padding: 0 6px; margin: 0 3px; font-weight: 700; } /* brand-fixed: never themed */
 
   /* ---------- Print / PDF export ---------- */
   .print-meta {
@@ -322,6 +377,16 @@
     header.top { position: static !important; box-shadow: none !important; padding: 0 0 10px !important; }
     * { animation: none !important; transition: none !important; }
     .grid > .panel, .stats { opacity: 1 !important; }
+    /* always print the light theme regardless of the on-screen mode */
+    html.dark {
+      --bg: #FFFFFF; --bg-base: #FFFFFF; --card: #FFFFFF; --card-solid: #EEF4FB;
+      --primary: #0A4C70; --secondary: #16688F; --tertiary: #3884A4;
+      --ink: #1A2E3B; --ink-soft: #4A6274; --ink-mute: #7A8FA0;
+      --hair: #DCE7F0; --hair-bright: #B9CEDD; --nav-on: #EAF3F9;
+      --chart-coll: #16688F; --chart-rev: #E9AE2E;
+      --map-ocean: #DDEBF5; --map-st: #C6D8E6; --map-stroke: #FDFEFF;
+      --track: #E7EEF5; --seg-bg: #EDF2F8; --success-tint: #E4F5EB; --danger-tint: #FBEAEA;
+    }
     #app { padding: 0; max-width: none; }
     header.top { margin-bottom: 14px; }
     .print-meta { display: block; }
@@ -385,7 +450,7 @@
     background: var(--primary); border-radius: 12px; padding: 26px 20px; color: #F2F8FF;
   }
   .uc-tile .v { font-size: 38px; font-weight: 700; letter-spacing: -0.02em; }
-  .uc-tile .k { font-family: var(--sans); font-weight: 600; font-size: 11.5px; letter-spacing: 0.08em; text-transform: uppercase; margin-top: 8px; color: #C3CEF6; }
+  .uc-tile .k { font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 8px; color: #BFD6E4; }
   .uc-table { flex: 1; min-width: 260px; max-height: 340px; overflow-y: auto; }
   @media (max-width: 700px) { .bars-wide .bar-row { grid-template-columns: 130px 1fr 64px; } }
   /* utilization slicers: scrollable pops with sticky search, anchored under their button */
@@ -405,13 +470,15 @@
   .pop label.gmember { padding-left: 26px; }
   /* monthly stacked columns */
   .stack-controls { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
-  .segbtns { display: inline-flex; border: 1px solid var(--hair); border-radius: 8px; overflow: hidden; }
+  /* TailAdmin v2 segmented pills: gray rail, active pill goes white + shadow */
+  .segbtns { display: inline-flex; gap: 2px; background: var(--seg-bg); border-radius: 10px; padding: 3px; }
   .segbtns button {
-    background: transparent; border: none; padding: 6px 12px; font-family: var(--mono);
-    font-size: 11.5px; letter-spacing: 0.05em; color: var(--ink-mute); cursor: pointer;
+    background: transparent; border: none; border-radius: 8px; padding: 6px 14px;
+    font-family: var(--sans); font-size: 12.5px; font-weight: 500;
+    color: var(--ink-mute); cursor: pointer; transition: color 0.15s, background 0.15s;
   }
-  .segbtns button + button { border-left: 1px solid var(--hair); }
-  .segbtns button.on { background: var(--card-solid); color: var(--ink); font-weight: 600; }
+  .segbtns button:hover { color: var(--ink-soft); }
+  .segbtns button.on { background: var(--card); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(16,24,40,0.12); }
   #util-trend { overflow-x: auto; }
   #util-trend svg { display: block; }
   #util-trend .val { font-family: var(--mono); fill: var(--ink-soft); }
@@ -419,10 +486,41 @@
   #util-trend .axis { stroke: var(--hair); stroke-width: 1; }
   #util-trend .axlbl { font-family: var(--mono); fill: var(--ink-mute); font-size: 10px; }
   .trend-legend { flex-direction: row; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
+  /* date-range button + TailAdmin v2 calendar popup */
+  .datebtn { display: inline-flex; align-items: center; gap: 8px; font-family: var(--sans); font-weight: 500; font-size: 12.5px; letter-spacing: 0; }
+  .datebtn svg { width: 15px; height: 15px; color: var(--ink-mute); }
+  #cal-pop {
+    position: fixed; z-index: 80; width: 316px;
+    background: var(--card); border: 1px solid var(--hair); border-radius: 16px;
+    box-shadow: 0 12px 34px rgba(10,30,45,0.18); padding: 16px;
+  }
+  #cal-pop[hidden] { display: none; }
+  .cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .cal-head .cal-title { font-weight: 600; font-size: 14.5px; }
+  .cal-head button {
+    background: transparent; border: 1px solid var(--hair); border-radius: 8px;
+    width: 30px; height: 30px; color: var(--ink-soft); cursor: pointer; font-size: 14px;
+  }
+  .cal-head button:hover { border-color: var(--hair-bright); color: var(--ink); }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px 0; }
+  .cal-grid .dow { text-align: center; font-size: 12px; font-weight: 600; color: var(--ink-mute); padding: 6px 0; }
+  .cal-grid button {
+    background: transparent; border: 0; height: 38px; font: inherit; font-size: 13px;
+    color: var(--ink); cursor: pointer; border-radius: 999px; position: relative;
+  }
+  .cal-grid button:hover { background: var(--card-solid); }
+  .cal-grid button.out { color: var(--ink-mute); opacity: 0.55; }
+  .cal-grid button.dis { opacity: 0.25; pointer-events: none; }
+  .cal-grid button.inr { background: var(--nav-on); border-radius: 0; }
+  .cal-grid button.cap { background: var(--secondary); color: #fff; font-weight: 600; border-radius: 999px; }
+  .cal-grid button.cap.a { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+  .cal-grid button.cap.b { border-top-left-radius: 0; border-bottom-left-radius: 0; }
+  .cal-grid button.cap.a.b { border-radius: 999px; }
+
   /* floating hover tooltip (replaces the browser's delayed native title tips) */
   #tip {
     position: fixed; z-index: 90; display: none; pointer-events: none;
-    background: var(--ink); color: #F2F8FF; font-family: var(--mono); font-size: 11.5px;
+    background: var(--tip-bg); color: var(--tip-ink); font-family: var(--mono); font-size: 11.5px;
     line-height: 1.55; padding: 7px 10px; border-radius: 7px; max-width: 320px;
     box-shadow: 0 6px 18px rgba(10,30,45,0.3); white-space: pre-line;
   }
@@ -447,16 +545,21 @@
   .stats.vis .stat { animation: panelIn 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: calc(var(--i, 0) * 55ms); }
   .vis .kpi { animation: fadeSlide 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
   .vis .bar-row { animation: fadeSlide 0.45s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: min(calc(var(--i, 0) * 35ms), 500ms); }
-  .vis .bar-row .track i { animation: growX 0.65s cubic-bezier(0.25, 0.9, 0.3, 1) backwards; animation-delay: min(calc(var(--i, 0) * 35ms + 140ms), 640ms); }
+  .vis .bar-row .track i { animation: growX 0.9s cubic-bezier(0.22, 1, 0.36, 1) backwards; animation-delay: min(calc(var(--i, 0) * 30ms + 120ms), 600ms); }
   .vis .state-list button { animation: fadeSlide 0.4s backwards; animation-delay: min(calc(var(--i, 0) * 30ms), 400ms); }
-  .vis #pharm-chart rect.bar, .vis #util-trend rect {
+  .vis #pharm-chart .bar, .vis #util-trend rect, .vis #util-trend path.seg {
     /* scale about the chart baseline (--base set on the svg) so stacked
        segments rise as one column instead of floating apart */
     transform-box: view-box; transform-origin: center var(--base, bottom);
-    animation: riseY 0.55s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
-    animation-delay: min(calc(var(--i, 0) * 12ms), 480ms);
+    animation: riseY 0.8s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+    animation-delay: min(calc(var(--i, 0) * 10ms), 380ms);
   }
-  .vis #pharm-chart text.val, .vis #util-trend text.val { animation: softFade 0.45s backwards; animation-delay: min(calc(var(--i, 0) * 12ms + 320ms), 820ms); }
+  .vis #pharm-chart text.val, .vis #util-trend text.val { animation: softFade 0.5s backwards; animation-delay: min(calc(var(--i, 0) * 10ms + 380ms), 800ms); }
+  /* area chart: line draws itself in, gradient fill fades up after */
+  @keyframes drawLine { to { stroke-dashoffset: 0; } }
+  .vis #trend path.tline { stroke-dasharray: 1; stroke-dashoffset: 1; animation: drawLine 1.2s cubic-bezier(0.4, 0, 0.2, 1) 0.15s forwards; }
+  .vis #trend path.tarea { animation: softFade 0.9s ease-out 0.5s backwards; }
+  .vis #trend circle.tdot { animation: pinPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 1.1s backwards; }
   .vis .donut-wrap svg { animation: sweepIn 0.7s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; }
   .vis .donut-legend .li { animation: fadeSlide 0.5s backwards; animation-delay: calc(180ms + var(--i, 0) * 110ms); }
   .vis .geo-map .pin { animation: pinPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; animation-delay: min(calc(var(--i, 0) * 45ms), 650ms); }
@@ -480,13 +583,13 @@
   .geo-list .bar-row.on .track i { background: var(--accent); }
   .geo-map { flex: 1; min-width: 320px; }
   .geo-map svg { width: 100%; height: auto; display: block; border-radius: 10px; }
-  .geo-map .ocean { fill: #EFF4FB; }
-  .geo-map .st { fill: #DEE4EE; stroke: #FFFFFF; stroke-width: 1.1; vector-effect: non-scaling-stroke; }
-  .geo-map .pin { fill: var(--primary); fill-opacity: 0.82; stroke: #fff; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: pointer; transition: fill 120ms ease-out; }
+  .geo-map .ocean { fill: var(--map-ocean); }
+  .geo-map .st { fill: var(--map-st); stroke: var(--map-stroke); stroke-width: 1.1; vector-effect: non-scaling-stroke; }
+  .geo-map .pin { fill: var(--primary); fill-opacity: 0.78; stroke: #fff; stroke-width: 1; vector-effect: non-scaling-stroke; cursor: pointer; transition: fill 120ms ease-out; }
   .geo-list .gmap { color: var(--ink-mute); text-decoration: none; margin-left: 5px; font-size: 12px; }
   .geo-list .gmap:hover { color: var(--secondary); }
   .geo-map .pin:hover { fill: var(--secondary); fill-opacity: 0.95; }
-  .geo-map .pin.sel { fill: var(--accent-bright); fill-opacity: 0.95; }
+  .geo-map .pin.sel { fill: var(--accent); fill-opacity: 0.95; }
   @media (max-width: 900px) { .geo-wrap { flex-direction: column; } .geo-list { flex-basis: auto; max-height: 300px; } }
   .util-period select {
     font-family: var(--mono); font-size: 12px; color: var(--ink-soft); background: var(--card-solid);
@@ -495,13 +598,15 @@
   .util-period select:focus { border-color: var(--secondary); }
 
   .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
-  .kpi { border-left: 3px solid var(--secondary); padding: 1px 0 1px 12px; min-width: 0; }
-  .kpi .v { font-size: 25px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.05; white-space: nowrap; }
-  .kpi .k { margin-top: 5px; font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-mute); }
-  .kpi.paid { border-color: var(--primary); }
-  .kpi.reversed { border-color: var(--accent); }
-  .kpi.collected { border-color: var(--secondary); }
-  .kpi.pct { border-color: var(--tertiary); }
+  .kpi { min-width: 0; }
+  .kpi .k-ico { width: 38px; height: 38px; border-radius: 10px; margin-bottom: 10px; }
+  .kpi .k-ico svg { width: 18px; height: 18px; }
+  .kpi .v { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.05; white-space: nowrap; margin-top: 3px; }
+  .kpi .k { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-mute); }
+  .kpi.paid .k-ico { color: var(--primary); }
+  .kpi.reversed .k-ico { color: var(--accent); }
+  .kpi.collected .k-ico { color: var(--secondary); }
+  .kpi.pct .k-ico { color: var(--tertiary); }
 
   .donut-wrap { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; }
   .donut-wrap svg { flex: 0 0 auto; }
@@ -513,10 +618,10 @@
 
   #pharm-chart { overflow-x: auto; padding-bottom: 4px; }
   #pharm-chart svg { display: block; }
-  #pharm-chart .bar { fill: var(--primary); transition: fill 120ms ease-out; }
-  #pharm-chart .bar:hover { fill: #2E3FBE; }
+  #pharm-chart .bar { fill: var(--secondary); transition: fill 120ms ease-out; }
+  #pharm-chart .bar:hover { fill: var(--primary); }
   #pharm-chart .barrev { fill: var(--accent); }
-  #pharm-chart .barrev:hover { fill: #5FB8E8; }
+  #pharm-chart .barrev:hover { fill: var(--accent-bright); }
   #pharm-chart .val { font-family: var(--mono); fill: var(--ink-soft); }
   #pharm-chart .cat { font-family: var(--mono); fill: var(--ink-mute); }
   #pharm-chart .axis { stroke: var(--hair); stroke-width: 1; }
@@ -607,13 +712,18 @@
         <option value="ALL">All time</option>
         <option value="CUSTOM">Custom range&#8230;</option>
       </select>
-      <span class="daterange" id="custom-range">
+      <button class="iconbtn datebtn" id="date-btn" type="button" aria-label="Pick a date range">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+        <span id="date-btn-label">&#8212;</span>
+      </button>
+      <span class="daterange" id="custom-range" style="display:none">
         <input type="date" id="date-from" aria-label="From date">
         <span style="color:var(--ink-mute)">&#8211;</span>
         <input type="date" id="date-to" aria-label="To date">
       </span>
       </span>
       <button class="iconbtn" id="pdf-btn" type="button">EXPORT PDF</button>
+      <button class="iconbtn" id="theme-btn" type="button" aria-label="Toggle dark mode"></button>
     </div>
     </div>
   </header>
@@ -721,11 +831,15 @@
           <button class="iconbtn" id="tf-btn" type="button">QUARTERS &#9662;</button>
           <div class="pop" id="tf-pop" hidden></div>
         </div>
-        <span class="daterange" id="util-daterange" hidden>
+        <span class="daterange" id="util-daterange" hidden style="display:none">
           <input type="date" id="util-from" aria-label="From date">
           <span style="color:var(--ink-mute)">&#8211;</span>
           <input type="date" id="util-to" aria-label="To date">
         </span>
+        <button class="iconbtn datebtn" id="util-date-btn" type="button" hidden aria-label="Pick a date range">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+          <span id="util-date-label">&#8212;</span>
+        </button>
         <button class="iconbtn" id="util-csv-btn" type="button" title="Download the current filtered view as CSV">CSV &#8595;</button>
       </div>
     </div>
@@ -815,6 +929,7 @@
   </div><!-- /content -->
   </div><!-- /maincol -->
 </div>
+<div id="cal-pop" hidden></div>
 
 <script>window.US_PATHS = {"AL":["m 643,467.4 .4,-7.3 -.9,-1.2 -1.7,-.7 -2.5,-2.8 .5,-2.9 48.8,-5.1 -.7,-2.2 -1.5,-1.5 -.5,-1.4 .6,-6.3 -2.4,-5.7 .5,-2.6 .3,-3.7 2.2,-3.8 -.2,-1.1 -1.7,-1 v -3.2 l -1.8,-1.9 -2.9,-6.1 -12.9,-45.8 -45.7,4 1.3,2 -1.3,67 4.4,33.2 .9,-.5 1.3,.1 .6,.4 .8,-.1 2,-3.8 v -2.3 l 1.1,-1.1 1.4,.5 3.4,6.4 v .9 l -3.3,2.2 3.5,-.4 4.9,-1.6 z"],"AK":["m 15.8,572 h 2.4 l .7,.7 -1,1.2 -1.9,.2 -2.5,1.3 -3.7,-.1 2.2,-.9 .3,-1.1 2.5,-.3 z m 8.3,-1.7 1.3,.5 h .9 l .5,1.2 .3,-.6 .9,.2 1.1,1.5 0,.5 -4.2,1.9 -2.4,-.1 -1,-.5 -1.1,.7 -2,0 -1.1,-1.4 4.7,-.5 z m 5.4,-.1 1,.1 .7,.7 v 1 l -1.3,.1 -.9,-1.1 z m 2.5,.3 1.3,-.1 -.1,1 -1.1,.6 z m .3,2.2 3.4,-.1 .2,1.1 -1.3,.1 -.3,-.5 -.8,.6 -.4,-.6 -.9,-.2 z m 166.3,7.6 2.1,.1 -1,1.9 -1.1,-.1 -.4,-.8 .5,-1.3 m -1.1,-2.9 .6,-1.3 -.2,-2.3 2.4,-.5 4.5,4.4 1.3,3.4 1.9,1.6 .3,5.1 -1.4,0 -1.3,-2.3 -3.1,-2.4 h -.6 l 1.1,2.8 1.7,.2 .2,2.1 -.9,.1 -4.1,-4.4 -.1,-.9 1.9,-1 0,-1 -.5,-.8 -1.6,-.6 -1.7,-1.3 1.4,.1 .5,-.4 -.6,-.9 -.6,.5 z m -3.6,-9.1 1.3,.1 2.4,2.5 -.2,.8 -.8,-.1 -.1,1.8 .5,.5 0,1.5 -.8,.3 -.4,1.2 -.8,-.4 -.4,-2.2 1.1,-1.4 -2.1,-2.2 .1,-1.2 z m 1.5,-1.5 1.9,.2 2.5,.1 3.4,3.2 -.2,.5 -1.1,.6 -1.1,-.2 -.1,-.7 -1.2,-1.6 -.3,.7 1,1.3 -.2,1.2 -.8,-.1 -1.3,.2 -.1,-1.7 -2.6,-2.8 z m -12.7,-8.9 .9,-.4 h 1.6 l .7,-.5 4.1,2.2 .1,1.5 -.5,.5 h -.8 l -1.4,-.7 1.1,1.3 1.8,0 .5,2 -.9,0 -2.2,-1.5 -1.1,-.2 .6,1.3 .1,.9 .8,-.6 1.7,1.2 1.3,-.1 -.2,.8 1.9,4.3 0,3.4 .4,2.1 -.8,.3 -1.2,-2 -.5,-1.5 -1.6,-1.6 -.2,-2.7 -.6,-1.7 h -.7 l .3,1.1 0,.5 -1.4,1 .1,-3.3 -1.6,-1.6 -1.3,-2.3 -1.2,-1.2 z m 7.2,-2.3 1.1,1.8 2.4,-.1 1,2.1 -.6,.6 2,3.2 v 1.3 l -1.2,.8 v .7 l -2,1.9 -.5,-1.4 -.1,-1.3 .6,-.7 v -1.1 l -1.5,-1.9 -.5,-3.7 -.9,-1.5 z m -56.7,-18.3 -4,4.1 v 1.6 l 2.1,-.8 .8,-1.9 2.2,-2.4 z m -31.6,16.6 0,.6 1.8,1.2 .2,-1.4 .6,.9 3.5,.1 .7,-.6 .2,-1.8 -.5,-.7 -1.4,0 0,-.8 .4,-.6 v -.4 l -1.5,-.3 -3.3,3.6 z m -8.1,6.2 1.5,5.8 h 2.1 l 2.4,-2.5 .3,1.2 6.3,-4 .7,-1 -1,-1.1 v -.7 l .5,-1.3 -.9,-.1 -2,1 0,-1.2 -2.7,-.6 -2.4,.3 -.2,3.4 -.8,-2 -1.5,-.1 -1,.6 z m -2.2,8.2 .1,-.7 2.1,-1.3 .6,.3 1.3,.2 1.3,1.2 -2.2,-.2 -.4,-.6 -1,.6 z m -5.2,3.3 -1.1,.8 1.5,1.4 .8,-.7 -.1,-1.3 z m -6.3,-7.9 1.4,.1 .4,.6 -1.8,.1 z m -13.9,11.9 v .5 l .7,.1 -.1,-.6 z m -.4,-3.2 -1,1 v .5 l .7,1.1 1,-1 -.7,-.1 z m -2,-.8 -.3,1 -1.3,.1 -.4,.2 0,1.3 -.5,.9 .6,0 .7,-.9 .8,-.1 .9,-1 .2,-1.3 z m -4.4,-2 -.2,1.8 1.4,.8 1.2,-.6 0,-1 1.7,-.3 -.1,-.6 -.9,-.2 -.7,.6 -.9,-.5 z m -4.9,-.1 1,.7 -.3,1.2 -1.4,-1.1 z m -4.2,1.3 1.4,.1 -.7,.8 z m -3.5,3 1.8,1.1 -1.7,.1 z m -25.4,-31.2 1.2,.6 -.8,.6 z m -.7,-6.3 .4,1.2 .8,-1.2 z m 24.3,-19.3 1.5,-.1 .9,.4 1.1,-.5 1.3,-.1 1.6,.8 .8,1.9 -.1,.9 -1.2,2 -2.4,-.2 -2.1,-1.8 -1,-.4 -1.1,-2 z m -21.1,-14.4 .1,1.9 2,2 v .5 l -.8,-.2 -1.7,-.8 -.3,-1.1 -.3,-1.6 z m 18.3,-23.3 v 1.2 l 1.9,1.8 h 2.3 l .6,1.1 v 1.6 l 2.1,1.9 1.8,1.2 -.1,.7 -.7,1.1 -1.4,-1.2 -2.1,.1 -.8,-.8 -.9,-2.1 -1.5,-2.2 -2.6,-.1 -1,-.7 1,-2.1 z m 16.8,-4.5 1,0 .1,1.1 h -1 z m 16.2,19.7 .9,.1 0,1.2 -1.7,-.5 z m 127.8,77.7 -1.2,.4 -.1,1.1 h 1.2 z m -157.6,-4.5 -1.3,-.4 -4.1,.6 -2.8,1.4 -.1,1.9 1.9,.7 1.5,-.9 1.7,-.1 4.7,1.4 .1,-1.3 -1.6,-1.1 z m 2.1,2.3 -.4,-1.4 1.2,.2 .1,1.4 1.8,0 .4,-2.5 .3,2.4 2.5,-.1 3.2,-3.3 .8,.1 -.7,1.3 1.4,.9 4.2,-.2 2.6,-1.2 1.4,-.1 .3,1.5 .6,-.5 .4,-1.4 5.9,.2 1.9,-1.6 -1.3,-1.1 .6,-1.2 2.6,.2 -.2,-1.2 2.5,.2 .7,-1.1 1.1,.2 4.6,-1.9 .2,-1.7 5.6,-2.4 2,-1.9 1.2,-.6 1.3,.8 2.3,-.9 1.1,-1.9 .5,-1.3 1.7,-.9 1.5,-.7 .4,-1.4 -1.1,-1.7 -2.2,-.2 -.2,-1.3 .8,-1.6 1.4,-.2 1.3,-1.5 1.9,-.1 3.4,-3.2 .4,-1.4 1.5,-2.3 3.8,-4.1 2.5,-.9 1.9,-.9 2.1,.8 1.4,2.6 -1.5,0 -1.4,-1.5 -3,2 -1.7,.1 -.2,3.1 -3.1,4.9 .6,2 2.3,0 -.6,1 -1.4,.1 -2.4,1.8 0,.9 1.9,1 3.4,-.6 1.4,-1.7 1.4,.1 3,-1.7 .5,-2.3 1.6,-.1 6.3,.8 1,-1.1 1,-4.5 -1.6,1.1 .6,-2.2 -1.6,-1.4 .8,-1.5 .1,1.5 3.4,0 .7,-1 1.6,-.1 -.3,1.7 1.9,.1 -1.9,1.3 4.1,1.1 -3.5,.4 -1.3,1.2 .9,1.4 4.6,-1.7 2.3,1.7 .7,-.9 .6,1.4 4,2.3 h 2.9 l 3.9,-.5 4.3,1.1 2,1.9 4.5,.4 1.8,-1.5 .8,2.4 -1.8,.7 1.2,1.2 7.4,3.8 1.4,2.5 5.4,4.1 3.3,-2 -.6,-2.2 -3.5,-2 3.1,1.2 .5,-.7 .9,1.3 0,2.7 2.1,-.6 2.1,1.8 -2.5,-9.8 1.2,1.3 1.4,6 2.2,2.5 2.4,-.4 1.8,3.5 h .9 l .6,5.6 3.4,.5 1.6,2.2 1.8,1.1 .4,2.8 -1.8,2.6 2.9,1.6 1.2,-2.4 -.2,3.1 -.8,.9 1.4,1.7 .7,-2.4 -.2,-1.2 .8,.2 .6,2.3 -1,1.4 .6,2.6 .5,.4 .3,-1.6 .7,.6 -.3,2 1.2,.2 -.4,.9 1.7,-.1 0,-1 h -1 l .1,-1.7 -.8,-.6 1.7,-.3 .5,-.8 0,-1.6 .5,1.3 -.6,1.8 1.2,3.9 1.8,.1 2.2,-4.2 .1,-1.9 -1.3,-4 -.1,-1.2 .5,-1.2 -.7,-.7 -1.7,.1 -2.5,-2 -1.7,0 -2,-1.4 -1.5,0 -.5,-1.6 -1.4,-.3 -.2,-1.5 -1,-.5 .1,-1.7 -5.1,-7.4 -1.8,-1.5 v -1.2 l -4.3,-3.5 -.7,-1.1 -1.6,-2 -1.9,-.6 0,-2.2 -1.2,-1.3 -1.7,-.7 -2.1,1.3 -1.6,2.1 -.4,2.4 -1.5,.1 -2.5,2.7 -.8,-.3 v -2.5 l -2.4,-2.2 -2.3,-2 -.5,-2 -2.5,-1.3 .2,-2.2 -2.8,-.1 -.7,1.1 -1.2,0 -.7,-.7 -1.2,.8 -1.8,-1.2 0,-85.8 -6.9,-4.1 -1.8,-.5 -2.2,1.1 -2.2,.1 -2.3,-1.6 -4.3,-.6 -5.8,-3.6 -5.7,-.4 -2,.5 -.2,-1.8 -1.8,-.7 1.1,-1 -.2,-.9 -3.2,-1.1 h -2.4 l -.4,.4 -.9,-.6 .1,-2.6 -.8,-.9 -2.5,2.9 -.8,-.1 v -.8 l 1.7,-.8 v -.8 l -1.9,-2.4 -1.1,-.1 -4.5,3.1 h -3.9 l .4,-.9 -1.8,-.1 -5.2,3.4 -1.8,0 -.6,-.8 -2.7,1.5 -3.6,3.7 -2.8,2.7 -1.5,1.2 -2.6,.1 -2.2,-.4 -2.3,-1.3 v 0 l -2.8,3.9 -.1,2.4 2.6,2.4 2.1,4.5 .2,5.3 2.9,2 3.4,.4 .7,.8 -1.5,2.3 .7,2.7 -1.7,-2.6 v -2.4 l -1.5,-.3 .1,1.2 .7,2.1 2.9,3.7 h -1.4 l -2.2,1.1 -6.2,-2.5 -.1,-2 1.4,-1.3 0,-1.4 -2.1,-.5 -2.3,.2 -4.8,.2 1.5,2.3 -1.9,-1.8 -8.4,1.2 -.8,1.5 4.9,4.7 -.8,1.4 -.3,2 -.7,.8 -.1,1.9 4.4,3.6 4.1,.2 4.6,1.9 h 2 l .8,-.6 3.8,.1 .1,-.8 1.2,1.1 .1,2 -2.5,-.1 .1,3.3 .5,3.2 -2.9,2.7 -1.9,-.1 -2,-.8 -1,.1 -3.1,2.1 -1.7,.2 -1.4,-2.8 -3.1,0 -2.2,2 -.5,1.8 -3.3,1.8 -5.3,4.3 -.3,3.1 .7,2.2 1,1.2 1,-.4 .9,1 -.8,.6 -1.5,.9 1.1,1.5 -2.6,1.1 .8,2.2 1.7,2.3 .8,4.1 4,1.5 2.6,-.8 1.7,-1.1 .5,2.1 .3,4.4 -1.9,1.4 0,4.4 -.6,.9 h -1.7 l 1.7,1.2 2.1,-.1 .4,-1 4.6,-.6 2,2.6 1.3,-.7 1.3,5.1 1,.5 1,-.7 .1,-2.4 .9,-1 .7,1.1 .2,1.6 1.6,.4 4.7,-1.2 .2,1.2 -2,1.1 -1.6,1.7 -2.8,7 -4.3,2 -1.4,1.5 -.3,1.4 -1,-.6 -9.3,3.3 -1.8,4.1 -1.3,-.4 .5,-1.1 -1.5,-1.4 -3.5,-.2 -5.3,3.2 -2.2,1.3 -2.3,0 -.5,2.4 z"],"AZ":["m 139.6,387.6 3,-2.2 .8,-2.4 -1,-1.6 -1.8,-.2 -1.1,-1.6 1.1,-6.9 1.6,-.3 2.4,-3.2 1.6,-7 2.4,-3.6 4.8,-1.7 1.3,-1.3 -.4,-1.9 -2.3,-2.5 -1.2,-5.8 -1.4,-1.8 -1.3,-3.4 .9,-2.1 1.4,-3 .5,-2.9 -.5,-4.9 1,-13.6 3.5,-.6 3.7,1.4 1.2,2.7 h 2 l 2.4,-2.9 3.4,-17.5 46.2,8.2 40,6 -17.4,124.1 -37.3,-5.4 -64.2,-37.5 .5,-2.9 2,-1.8 z"],"AR":["m 584.2,367 .9,-2.2 1.2,.5 .7,-1 -.8,-.7 .3,-1.5 -1.1,-.9 .6,-1 -.1,-1.5 -1.1,-.1 .8,-.8 1.3,.8 .3,-1.4 -.4,-1.1 .1,-.7 2,.6 -.4,-1.5 1.6,-1.3 -.5,-.9 -1.1,.1 -.6,-.9 .9,-.9 1.6,-.2 .5,-.8 1.4,-.2 -.1,-.8 -.9,-.9 v -.5 h 1.5 l .4,-.7 -1.4,-1 -.1,-.6 -11.2,.8 2.8,-5.1 1.7,-1.5 v -2.2 l -1.6,-2.5 -39.8,2 -39.1,.7 4.1,24.4 -.7,39 2.6,2.3 2.8,-1.3 3.2,.8 .2,11.9 52.3,-1.3 1.2,-1.5 .5,-3 -1.5,-2.3 -.5,-2.2 .9,-.7 v -.8 l -1.7,-1.1 -.1,-.7 1.6,-.9 -1.2,-1.1 1.7,-7.1 3.4,-1.6 v -.8 l -1.1,-1.4 2.9,-5.4 h 1.9 l 1.5,-1.2 -.3,-5.2 3.1,-4.5 1.8,-.6 -.5,-3.1 z"],"CA":["m 69.4,365.6 3.4,5.2 -1.4,.1 -1.8,-1.9 z m 1.9,-9.8 1.8,4.1 2.6,1 .7,-.6 -1.3,-2.5 -2.6,-2.4 z m -19.9,-19 v 2.4 l 2,1.2 4.4,-.2 1,-1 -3.1,-.2 z m -5.9,.1 3.3,.5 1.4,2.2 h -3.8 z m 47.9,45.5 -1,-3 .2,-3 -.4,-7.9 -1.8,-4.8 -1.2,-1.4 -.6,-1.5 -7,-8.6 -3.6,.1 -2,-1.9 1.1,-1.8 -.7,-3.7 -2.2,-1.2 -3.9,-.6 -2.8,-1.3 -1.5,-1.9 -4.5,-6.6 -2.7,-2.2 -3.7,-.5 -3.1,-2.3 -4.7,-1.5 -2.8,-.3 -2.5,-2.5 .2,-2.8 .8,-4.8 1.8,-5.1 -1.4,-1.6 -4,-9.4 -2.7,-3.7 -.4,-3 -1.6,-2.3 .2,-2.5 -2,-5 -2.9,-2.7 .6,-7.1 2.4,-.8 1.8,-3.1 -.4,-3.2 -1,-.9 h -2.5 l -2.5,-3.3 -1.5,-3.5 v -7.5 l 1.2,-4.2 .2,-2.1 2.5,.2 -.1,1.6 -.8,.7 v 2.5 l 3.7,3.2 v -4.7 l -1.4,-3.4 .5,-1.1 -1,-1.7 2.8,-1.5 -1.9,-3 -1.4,.5 -1.5,3.8 .5,1.3 -.8,1 -.9,-.1 -5.4,-6.1 .7,-5.6 -1.1,-3.9 -6.5,-12.8 .8,-10.7 2.3,-3.6 .2,-6.4 -5.5,-11.1 .3,-5.2 6.9,-7.5 1.7,-2.4 -.1,-1.4 4,-9.2 .1,-8.4 .9,-2.5 66.1,18.6 -16.4,63.1 1.1,3.5 70.4,105 -.9,2.1 1.3,3.4 1.4,1.8 1.2,5.8 2.3,2.5 .4,1.9 -1.3,1.3 -4.8,1.7 -2.4,3.6 -1.6,7 -2.4,3.2 -1.6,.3 -1.1,6.9 1.1,1.6 1.8,.2 1,1.6 -.8,2.4 -3,2.2 -2.2,-.1 z"],"CO":["m 374.6,323.3 -16.5,-1 -51.7,-4.8 -52.6,-6.5 11.5,-88.3 44.9,5.7 37.5,3.4 33.1,2.4 -1.4,22.1 z"],"CT":["m 873.5,178.9 .4,-1.1 -3.2,-12.3 -.1,-.3 -14.9,3.4 v .7 l -.9,.3 -.5,-.7 -10.5,2.4 2.8,16.3 1.8,1.5 -3.5,3.4 1.7,2.2 5.4,-4.5 1.7,-1.3 h .8 l 2.4,-3.1 1.4,.1 2.9,-1.1 h 2.1 l 5.3,-2.7 2.8,-.9 1,-1 1.5,.5 z"],"DE":["m 822.2,226.6 -1.6,.3 -1.5,1.1 -1.2,2.1 7.6,27.1 10.9,-2.3 -2.2,-7.6 -1.1,.5 -3.3,-2.6 -.5,-1.7 -1.8,-1 -.2,-3.7 -2.1,-2.2 -1.1,-.8 -1.2,-1.1 -.4,-3.2 .3,-2.1 1,-2.2 z"],"FL":["m 751.7,445.1 -4,-.7 -1.7,-.9 -2.2,1.4 v 2.5 l 1.4,2.1 -.5,4.3 -2.1,.6 -1,-1.1 -.6,-3.2 -50.1,3.3 -3.3,-6 -48.8,5.1 -.5,2.9 2.5,2.8 1.7,.7 .9,1.2 -.4,7.3 -1.1,.6 .5,.4 1,-.3 .7,-.8 10.5,-2.7 9.2,-.5 8.1,1.9 8.5,5 2.4,.8 2.2,2 -.1,2.7 h 2.4 l 1.9,-1 2.5,.1 2,-.8 2.9,-2 3.1,-2.9 1.1,-.4 .6,.5 h 1.4 l .5,-.8 -.5,-1.2 -.6,-.6 .2,-.8 2,-1.1 5,-.4 .8,1 1,.1 2.3,1 3,1.8 1.2,1.7 1.1,1.2 2.8,1.4 v 2.4 l 2.8,1.9 1,.1 1.6,1.4 .7,1.6 1,.2 .8,2.1 .7,.6 1,-1.1 2.9,.1 .5,1.4 1.1,.9 v 1.3 l 2.9,2.2 .2,9.6 -1.8,5.8 1,1.2 -.2,3.4 -.8,1.4 .7,1.2 2.3,2.3 .3,1.5 .8,1 -.4,-1.9 1.3,-.6 .8,-3.6 -3,-1.2 .1,-.6 2.6,-.4 .9,2.6 1.1,.6 .1,-2 1.1,.3 .6,.8 -.1,.7 -2.9,4.2 -.2,1.1 -1.7,1.9 v 1.1 l 3.7,3.8 5.3,7.9 1.8,2.1 v 1.8 l 2.8,4.6 2.3,.6 .7,-1.2 -2.1,.3 -3,-4.5 .2,-1.4 1.5,-.8 v -1.5 l -.6,-1.3 .9,-.9 .4,.9 .7,.5 v 4 l -1.2,-.6 -.8,.9 1.4,1.6 1,2.6 1.2,-.6 2.3,1.2 2.1,2.2 1.6,5.1 3.1,4.8 .8,-1.3 2.8,-.5 3.2,1.3 .3,1.7 3.3,3.8 .1,1.1 2.2,2.7 -.7,.5 v 2.7 l 2.7,1.4 h 1.5 l 2.7,-1.8 1.5,.3 1.1,.4 2.3,-1.7 .2,-.7 1.2,.3 2.4,-1.7 1.3,-2.3 -.7,-3.2 -.2,-1.3 1.1,-4 .6,-.2 .6,1.6 .8,-1.8 -.8,-7.2 -.4,-10.5 -1,-6.8 -.7,-1.7 -6.6,-11.1 -5.2,-9.1 -2.2,-3.3 -1.3,-3.6 -.2,-3.4 .9,-.3 v -.9 l -1.1,-2.2 -4,-4 -7.6,-9.7 -5.7,-10.4 -4.3,-10.7 -.6,-3.7 -1.2,-1 -.5,-3.8 z m 9.2,134.5 1.7,-.1 -.7,-1 z m 7.3,-1.1 v -.7 l 1.6,-.2 3.7,-3.3 1.5,-.6 2.4,-.9 .3,1.3 1.7,.8 -2.6,1.2 h -2.4 l -3.9,2.5 z m 17.2,-7.6 -3,1.4 -1,1.3 1.1,.1 z m 3.8,-2.9 -1.1,.3 -1.4,2 1.1,-.2 1.5,-1.6 z m 8.3,-15.7 -1.7,5.6 -.8,1 -1,2.6 -1.2,1.6 -.7,1.7 -1.9,2.2 v .9 l 2.7,-2.8 2.4,-3.5 .6,-2 2.1,-4.9 z"],"GA":["m 761.8,414.1 v 1.4 l -4.2,6.2 -1.2,.2 1.5,.5 v 2 l -.9,1.1 -.6,6 -2.3,6.2 .5,2 .7,5.1 -3.6,.3 -4,-.7 -1.7,-.9 -2.2,1.4 v 2.5 l 1.4,2.1 -.5,4.3 -2.1,.6 -1,-1.1 -.6,-3.2 -50.1,3.3 -3.3,-6 -.7,-2.2 -1.5,-1.5 -.5,-1.4 .6,-6.3 -2.4,-5.7 .5,-2.6 .3,-3.7 2.2,-3.8 -.2,-1.1 -1.7,-1 v -3.2 l -1.8,-1.9 -2.9,-6.1 -12.9,-45.8 22.9,-2.9 21.4,-3 -.1,1.9 -1.9,1 -1.4,3.2 .2,1.3 6.1,3.8 2.6,-.3 3.1,4 .4,1.7 4.2,5.1 2.6,1.7 1.4,.2 2.2,1.6 1.1,2.2 2,1.6 1.8,.5 2.7,2.7 .1,1.4 2.6,2.8 5,2.3 3.6,6.7 .3,2.7 3.9,2.1 2.5,4.8 .8,3.1 4.2,.4 z"],"HI":["m 317,553.7 -.2,3.2 1.7,1.9 .1,1.2 -4.8,4.5 -.1,1.2 1.9,3.2 1.7,4.2 v 2.6 l -.5,1.2 .1,3.4 4.1,2.1 1.1,1.1 1.2,-1.1 2.1,-3.6 4.5,-2.9 3.3,-.5 2.5,-1 1.7,-1.2 3.2,-3.5 -2.8,-1.1 -1.4,-1.4 .1,-1.7 -.5,-.6 h -2 l .2,-2.5 -.7,-1.2 -2.6,-2.3 -4.5,-1.9 -2.8,-.2 -3.3,-2.7 -1.2,-.6 z m -15.3,-17 -1.1,1.5 -.1,1.7 2.7,2.4 1.9,.5 .6,1 .4,3 3.6,.2 5.3,-2.6 -.1,-2.5 -1.4,-.5 -3.5,-2.6 -1.8,-.3 -2.9,1.3 -1.5,-2.7 z m -1.5,11.5 .9,-1.4 2.5,-.3 .6,1.8 z m -7,-8.7 1.7,4 3.1,-.6 .3,-2 -1.4,-1.5 z m -4.1,-6.7 -1.1,2.4 h 5 l 4.8,1.6 2.5,-1.6 .2,-1.5 -4.8,.2 z m -16,-10.6 -1.9,2.1 -2.9,.6 .8,2.2 2.2,2.8 .1,1 2.1,-.3 2.3,.1 1.7,1.2 3.5,-.8 v -.7 l -1,-.8 -.5,-2.1 -.8,-.3 -.5,1 -1.2,-1.3 .2,-1.4 -1.8,-3.3 -1.1,-.7 z m -31.8,-12.4 -4.2,2.9 .2,2.3 2.4,1.2 1.9,1.3 2.7,.4 2.6,-2.2 -.2,-1.9 .8,-1.7 v -1.4 l -1,-.9 z m -10.8,4.8 -.3,1.2 -1.9,.9 -.6,1.8 1,.8 1.1,-1.5 1.9,-.6 .4,-2.6 z"],"ID":["m 165.3,183.1 -24.4,-5.4 8.5,-37.3 2.9,-5.8 .4,-2.1 .8,-.9 -.9,-2 -2.9,-1.2 .2,-4.2 4,-5.8 2.5,-.8 1.6,-2.3 -.1,-1.6 1.8,-1.6 3.2,-5.5 4.2,-4.8 -.5,-3.2 -3.5,-3.1 -1.6,-3.6 1.1,-4.3 -.7,-4 12.7,-56.1 14.2,3 -4.8,22 3.7,7.4 -1.6,4.8 3.6,4.8 1.9,.7 3.9,8.3 v 2.1 l 2.3,3 h .9 l 1.4,2.1 h 3.2 v 1.6 l -7.1,17 -.5,4.1 1.4,.5 1.6,2.6 2.8,-1.4 3.6,-2.4 1.9,1.9 .5,2.5 -.5,3.2 2.5,9.7 2.6,3.5 2.3,1.4 .4,3 v 4.1 l 2.3,2.3 1.6,-2.3 6.9,1.6 2.1,-1.2 9,1.7 2.8,-3.3 1.8,-.6 1.2,1.8 1.6,4.1 .9,.1 -8.5,54.8 -47.9,-8.2 z"],"IL":["m 623.5,265.9 -1,5.2 v 2 l 2.4,3.5 v .7 l -.3,.9 .9,1.9 -.3,2.4 -1.6,1.8 -1.3,4.2 -3.8,5.3 -.1,7 h -1 l .9,1.9 v .9 l -2.2,2.7 .1,1.1 1.5,2.2 -.1,.9 -3.7,.6 -.6,1.2 -1.2,-.6 -1,.5 -.4,3.3 1.7,1.8 -.4,2.4 -1.5,.3 -6.9,-3 -4,3.7 .3,1.8 h -2.8 l -1.4,-1.5 -1.8,-3.8 v -1.9 l .8,-.6 .1,-1.3 -1.7,-1.9 -.9,-2.5 -2.7,-4.1 -4.8,-1.3 -7.4,-7.1 -.4,-2.4 2.8,-7.6 -.4,-1.9 1.2,-1.1 v -1.3 l -2.8,-1.5 -3,-.7 -3.4,1.2 -1.3,-2.3 .6,-1.9 -.7,-2.4 -8.6,-8.4 -2.2,-1.5 -2.5,-5.9 -1.2,-5.4 1.4,-3.7 .7,-.7 .1,-2.3 -.7,-.9 1,-1.5 1.8,-.6 .9,-.3 1,-1.2 v -2.4 l 1.7,-2.4 .5,-.5 .1,-3.5 -.9,-1.4 -1,-.3 -1.1,-1.6 1,-4 3,-.8 h 2.4 l 4.2,-1.8 1.7,-2.2 .1,-2.4 1.1,-1.3 1.3,-3.2 -.1,-2.6 -2.8,-3.5 h -1.2 l -.9,-1.1 .2,-1.6 -1.7,-1.7 -2.5,-1.3 .5,-.6 45.9,-2.8 .1,4.6 3.4,4.6 1.2,4.1 1.6,3.2 z"],"IN":["m 629.2,214.8 -5.1,2.3 -4.7,-1.4 4.1,50.2 -1,5.2 v 2 l 2.4,3.5 v .7 l -.3,.9 .9,1.9 -.3,2.4 -1.6,1.8 -1.3,4.2 -3.8,5.3 -.1,7 h -1 l .9,1.9 1.1,.8 .6,-1 -.7,-1.7 4.6,-.5 .2,1.2 1.1,.2 .4,-.9 -.6,-1.3 .3,-.8 1.3,.8 1.7,-.4 1.7,.6 3.4,2.1 1.8,-2.8 3.5,-2.2 3,3.3 1.6,-2.1 .3,-2.7 3.8,-2.3 .2,1.3 1.9,1.2 3,-.2 1.2,-.7 .1,-3.4 2.5,-3.7 4.6,-4.4 -.1,-1.7 1.2,-3.8 2.2,1 6.7,-4.5 -.4,-1.7 -1.5,-2.1 1,-1.9 -6.6,-57.2 -.1,-1.4 -32.4,3.4 z"],"IA":["m 556.9,183 2.1,1.6 .6,1.1 -1.6,3.3 -.1,2.5 2,5.5 2.7,1.5 3.3,.7 1.3,2.8 -.5,.6 2.5,1.3 1.7,1.7 -.2,1.6 .9,1.1 h 1.2 l 2.8,3.5 .1,2.6 -1.3,3.2 -1.1,1.3 -.1,2.4 -1.7,2.2 -4.2,1.8 h -2.4 l -3,.8 -1,4 1.1,1.6 1,.3 .9,1.4 -.1,3.5 -.5,.5 -1.7,2.4 v 2.4 l -1,1.2 -.9,.3 -1.8,.6 -1,1.5 .7,.9 -.1,2.3 -.7,.7 -1.5,-.8 -1.1,-1.1 -.6,-1.6 -1.7,-1.3 -14.3,.8 -27.2,1.2 -25.9,-.1 -1.8,-4.4 .7,-2.2 -.8,-3.3 .2,-2.9 -1.3,-.7 -.4,-6.1 -2.8,-5 -.2,-3.7 -2.2,-4.3 -1.3,-3.7 v -1.4 l -.6,-1.7 v -2.3 l -.5,-.9 -.7,-1.7 -.3,-1.3 -1.3,-1.2 1,-4.3 1.7,-5.1 -.7,-2 -1.3,-.4 -.4,-1.6 1,-.5 .1,-1.1 -1.3,-1.5 .1,-1.6 2.2,.1 h 28.2 l 36.3,-.9 18.6,-.7 z"],"KS":["m 459.1,259.5 -43.7,-1.2 -36,-2 -4.8,67 67.7,2.9 62,.1 -.5,-48.1 -3.2,-.7 -2.6,-4.7 -2.5,-2.5 .5,-2.3 2.7,-2.6 .1,-1.2 -1.5,-2.1 -.9,1 -2,-.6 -2.9,-3 z"],"KY":["m 692.1,322.5 -20.5,1.4 -5.2,.8 -17.4,1 -2.6,.8 -22.6,2 -.7,-.6 h -3.7 l 1.2,3.2 -.6,.9 -23.3,1.5 1,-2.7 1.4,.9 .7,-.4 1.2,-4.1 -1,-1 1,-2 .2,-.9 -1.3,-.8 -.3,-1.8 4,-3.7 6.9,3 1.5,-.3 .4,-2.4 -1.7,-1.8 .4,-3.3 1,-.5 1.2,.6 .6,-1.2 3.7,-.6 .1,-.9 -1.5,-2.2 -.1,-1.1 2.2,-2.7 0,-.9 1.1,.8 .6,-1 -.7,-1.7 4.6,-.5 .2,1.2 1.1,.2 .4,-.9 -.6,-1.3 .3,-.8 1.3,.8 1.7,-.4 1.7,.6 3.4,2.1 1.8,-2.8 3.5,-2.2 3,3.3 1.6,-2.1 .3,-2.7 3.8,-2.3 .2,1.3 1.9,1.2 3,-.2 1.2,-.7 .1,-3.4 2.5,-3.7 4.6,-4.4 -.1,-1.7 1.2,-3.8 2.2,1 6.7,-4.5 -.4,-1.7 -1.5,-2.1 1,-1.9 1.3,.5 2.2,.1 1.9,-.8 2.9,1.2 2.2,3.4 v 1 l 4.1,.7 2.3,-.2 1.9,2.1 2.2,.2 v -1 l 1.9,-.8 3,.8 1.2,.8 1.3,-.7 h .9 l .6,-1.7 3.4,-1.8 .5,.8 .8,2.9 3.5,1.4 1.2,2.1 -.1,1.1 .6,1 -.6,3.6 1.9,1.6 .8,1.1 1,.6 -.1,.9 4.4,5.6 h 1.4 l 1.5,1.8 1.2,.3 1.4,-.1 -4.9,6.6 -2.9,1 -3,3 -.4,2.2 -2.1,1.3 -.1,1.7 -1.4,1.4 -1.8,.5 -.5,1.9 -1,.4 -6.9,4.2 z m -98,11.3 -.7,-.7 .2,-1 h 1.1 l .7,.7 -.3,1 z"],"LA":["m 602.5,472.8 -1.2,-1.8 .3,-1.3 -4.8,-6.8 .9,-4.6 1,-1.4 .1,-1.4 -36,2 1.7,-11.9 2.4,-4.8 6,-8.4 -1.8,-2.5 h 2 v -3.3 l -2.4,-2.5 .5,-1.7 -1.2,-1 -1.6,-7.1 .6,-1.4 -52.3,1.3 .5,19.9 .7,3.4 2.6,2.8 .7,5.4 3.8,4.6 .8,4.3 h 1 l -.1,7.3 -3.3,6.4 1.3,2.3 -1.3,1.5 .7,3 -.1,4.3 -2.2,3.5 -.1,.8 -1.7,1.2 1,1.8 1.2,1.1 1.6,-1.3 5.3,-.9 6.1,-.1 9.6,3.8 8,1 1.5,-1.4 1.8,-.2 4.8,2.2 1.6,-.4 1.1,-1.5 -4.2,-1.8 -2.2,1 -1.1,-.2 -1.4,-2 3.3,-2.2 1.6,-.1 v 1.7 l 1.5,-.1 3.4,-.3 .4,2.3 1.1,.4 .6,1.9 4.8,1 1.7,1.6 v .7 h -1.2 l -1.5,1.7 1.7,1.2 5.4,1 2.7,2.8 4.4,-1 -3.7,.2 -.1,-.6 2.8,-.7 .2,-1.8 1.2,-.3 v -1.4 l 1.1,.1 v 1.6 l 2.5,.1 .8,-1.9 .9,.3 .2,2.5 1.2,.2 -1.8,2 2.6,-.9 2,-1.1 2.9,-3.3 h -.7 l -1.3,1.2 -.4,-.1 -.5,-.8 .9,-1.2 v -2.3 l 1.1,-.8 .7,.7 1,-.8 1,-.1 .6,1.3 -.6,1.9 h 2.4 l 5.1,1.7 .5,1.3 1.6,1.4 2.8,.1 1.3,.7 1.8,-1 .9,-1.7 v -1.7 h -1.4 l -1.2,-1.4 -1.1,-1.1 -3.2,-.9 -2.6,.2 -4.2,-2.4 v -2.3 l 1.3,-1 2.4,.6 -3.1,-1.6 .2,-.8 h 3.6 l 2.6,-3.5 -2.6,-1.8 .8,-1.5 -1.2,-.8 h -.8 l -2,2.1 v 2.1 l -.6,.7 -1.1,-.1 -1.6,-1.4 h -1.3 v -1.5 l .6,-.7 .8,.7 1.7,-1.6 .7,-1.6 .8,-.3 z m -10.3,-2.7 1.9,1 .8,1.1 2.5,.1 1.5,.8 .2,1.4 -.4,.6 -.9,-1.5 -1.4,1.2 -.9,1.4 -2.8,.8 -1.6,.1 -3.7,-1 .1,-1.7 2,-2 1.1,-2.4 z m -4.7,1.2 v 1.1 l -1.8,2 h -1.2 v -2.2 l 1.6,-1.5 z"],"ME":["m 875,128.7 .6,4 3.2,2 .8,2.2 2.3,1.4 1.4,-.3 1,-3 -.8,-2.9 1.6,-.9 .5,-2.8 -.6,-1.3 3.3,-1.9 -2.2,-2.3 .9,-2.4 1.4,-2.2 .5,3.2 1.6,-2 1.3,.9 1.2,-.8 v -1.7 l 3.2,-1.3 .3,-2.9 2.5,-.2 2.7,-3.7 v -.7 l -.9,-.5 -.1,-3.3 .6,-1.1 .2,1.6 1,-.5 -.2,-3.2 -.9,.3 -.1,1.2 -1.2,-1.4 .9,-1.4 .6,.1 1.1,-.4 .5,2.8 2,-.3 2.9,.7 v -1 l -1.1,-1.2 1.3,.1 .1,-2.3 .6,.8 .3,1.9 2.1,1.5 .2,-1 .9,-.2 -.3,-.8 .8,-.6 -.1,-1.6 -1.6,-.2 -2,.7 1.4,-1.6 .7,-.8 1.3,-.2 .4,1.3 1.7,1.6 .4,-2.1 2.3,-1.2 -.9,-1.3 .1,-1.7 1.1,.5 h .7 l 1.7,-1.4 .4,-2.3 2.2,.3 .1,-.7 .2,-1.6 .5,1.4 1.5,-1 2.3,-4.1 -.1,-2.2 -1.4,-2 -3,-3.2 h -1.9 l -.8,2.2 -2.9,-3 .3,-.8 v -1.5 l -1.6,-4.5 -.8,-.2 -.7,.4 h -4.8 l -.3,-3.6 -8.1,-26 -7.3,-3.7 -2.9,-.1 -6.7,6.6 -2.7,-1 -1,-3.9 h -2.7 l -6.9,19.5 .7,6.2 -1.7,2.4 -.4,4.6 1.3,3.7 .8,.2 v 1.6 l -1.6,4.5 -1.5,1.4 -1.3,2.2 -.4,7.8 -2.4,-1 -1.5,.4 z m 34.6,-24.7 -1,.8 v 1.3 l .7,-.8 .9,.8 .4,-.5 1.1,.2 -1,-.8 .4,-.8 z m -1.7,2.6 -1,1.1 .5,.4 -.1,1 h 1.1 v -1.8 z m -3,-1.6 .9,1.3 1,.5 .3,-1 v -1.8 l -1.3,-.7 -.4,1.2 z m -1,5 -1.7,-1.7 1.6,-2.4 .8,.3 .2,1.1 1,.8 v 1.1 l -1,1 z"],"MD":["m 822.9,269.3 0,-1.7 h -.8 l 0,1.8 z m 11.8,-3.9 1.2,-2.2 .1,-2.5 -.6,-.6 -.7,.9 -.2,2.1 -.8,1.4 -.3,1.1 -4.6,1.6 -.7,.8 -1.3,.2 -.4,.9 -1.3,.6 -.3,-2.5 .4,-.7 -.8,-.5 .2,-1.5 -1.6,1 v -2 l 1.2,-.3 -1.9,-.4 -.7,-.8 .4,-1.3 -.8,-.6 -.7,1.6 .5,.8 -.7,.6 -1.1,.5 -2,-1 -.2,-1.2 -1,-1.1 -1.4,-1.7 1.5,-.8 -1,-.6 v -.9 l .6,-1 1.7,-.3 -1.4,-.6 -.1,-.7 -1.3,-.1 -.4,1.1 -.6,.3 .1,-3.4 1,-1 .8,.7 .1,-1.6 -1,-.9 -.9,1.1 -1,1.4 -.6,-1 .2,-2.4 .9,-1 .9,.9 1.2,-.7 -.4,-1.7 -1,1 -.9,-2.1 -.2,-1.7 1.1,-2.4 1.1,-1.4 1.4,-.2 -.5,-.8 .5,-.6 -.3,-.7 .2,-2.1 -1.5,.4 -.8,1.1 1,1.3 -2.6,3.6 -.9,-.4 -.7,.9 -.6,2.2 -1.8,.5 1.3,.6 1.3,1.3 -.2,.7 .9,1.2 -1.1,1 .5,.3 -.5,1.3 v 2.1 l -.5,1.3 .9,1.1 .7,3.4 1.3,1.4 1.6,1.4 .4,2.8 1.6,2 .4,1.4 v 1 h -.7 l -1.5,-1.2 -.4,.2 -1.2,-.2 -1.7,-1.4 -1.4,-.3 -1,.5 -1.2,-.3 -.4,.2 -1.7,-.8 -1,-1 -1,-1.3 -.6,-.2 -.8,.7 -1.6,1.3 -1.1,-.8 -.4,-2.3 .8,-2.1 -.3,-.5 .3,-.4 -.7,-1 1,-.1 1,-.9 .4,-1.8 1.7,-2.6 -2.6,-1.8 -1,1.7 -.6,-.6 h -1 l -.6,-.1 -.4,-.4 .1,-.5 -1.7,-.6 -.8,.3 -1.2,-.1 -.7,-.7 -.5,-.2 -.2,-.7 .6,-.8 v -.9 l -1.2,-.2 -1,-.9 -.9,.1 -1.6,-.3 -.9,-.4 .2,-1.6 -1,-.5 -.2,-.7 h -.7 l -.8,-1.2 .2,-1 -2.6,.4 -2.2,-1.6 -1.4,.3 -.9,1.4 h -1.3 l -1.7,2.9 -3.3,.4 -1.9,-1 -2.6,3.8 -2.2,-.3 -3.1,3.9 -.9,1.6 -1.8,1.6 -1.7,-11.4 60.5,-11.8 7.6,27.1 10.9,-2.3 0,5.3 -.1,3.1 -1,1.8 z m -13.4,-1.8 -1.3,.9 .8,1.8 1.7,.8 -.4,-1.6 z"],"MA":["m 899.9,174.2 h 3.4 l .9,-.6 .1,-1.3 -1.9,-1.8 .4,1 -1.5,1.5 h -2.3 l .1,.8 z m -9,1.8 -1.2,-.6 1,-.8 .6,-2.1 1.2,-1 .8,-.2 .6,.9 1.1,.2 .6,-.6 .5,1.9 -1.3,.3 -2.8,.7 z m -34.9,-23.4 18.4,-3.8 1,-1.5 .3,-1.7 1.9,-.6 .5,-1.1 1.7,-1.1 1.3,.3 1.7,3.3 1,.4 1.1,-1.3 .8,1.3 v 1.1 l -3,2.4 .2,.8 -.9,1 .4,.8 -1.3,.3 .9,1.2 -.8,.7 .6,1 .9,-.2 .3,-.8 1.1,.6 h 1.8 l 2.5,2.6 .2,2.6 1.8,.1 .8,1.1 .6,2 1,.7 h 1.9 l 1.9,-.1 .8,-.9 1.6,-1.2 1.1,-.3 -1.2,-2.1 -.3,.9 -1.5,-3.6 h -.8 l -.4,.9 -1.2,-1 1.3,-1.1 1.8,.4 2.3,2.1 1.3,2.7 1.2,3.3 -1,2.8 v -1.8 l -.7,-1 -3.5,2.3 -.9,-.3 -1.6,1 -.1,1.2 -2.2,1.2 -2,2.1 -2,1.9 h -1.2 l 3.3,-3.3 .5,-1.9 -.5,-.6 -.3,-1.3 -.9,-.1 -.1,1.3 -1,1.2 h -1.2 l -.3,1.1 .4,1.2 -1.2,1.1 -1.1,-.2 -.4,1 -1.4,-3 -1.3,-1.1 -2.6,-1.3 -.6,-2.2 h -.8 l -.7,-2.6 -6.5,2 -.1,-.3 -14.9,3.4 v .7 l -.9,.3 -.5,-.7 -10.5,2.4 -.7,-1 .5,-15 z"],"MI":["m 663.3,209.8 .1,1.4 21.4,-3.5 .5,-1.2 3.9,-5.9 v -4.3 l .8,-2.1 2.2,-.8 2,-7.8 1,-.5 1,.6 -.2,.6 -1.1,.8 .3,.9 .8,.4 1.9,-1.4 .4,-9.8 -1.6,-2.3 -1.2,-3.7 v -2.5 l -2.3,-4.4 v -1.8 l -1.2,-3.3 -2.3,-3 -2.9,-1 -4.8,3 -2.5,4.6 -.2,.9 -3,3.5 -1.5,-.2 -2.9,-2.8 -.1,-3.4 1.5,-1.9 2,-.2 1.2,-1.7 .2,-4 .8,-.8 1.1,-.1 .9,-1.7 -.2,-9.6 -.3,-1.3 -1.2,-1.2 -1.7,-1 -.1,-1.8 .7,-.6 1.8,.8 -.3,-1.7 -1.9,-2.7 -.7,-1.6 -1.1,-1.1 h -2.2 l -8.1,-2.9 -1.4,-1.7 -3.1,-.3 -1.2,.3 -4.4,-2.3 h -1.4 l .5,1 -2.7,-.1 .1,.6 .6,.6 -2.5,2.1 .1,1.8 1.5,2.3 1.5,.2 v .6 l -1.5,.5 -2.1,-.1 -2.8,2.5 .1,2.5 .4,5.8 -2.2,3.4 .8,-4.5 -.8,-.6 -.9,5.3 -1,-2.3 .5,-2.3 -.5,-1 .6,-1.3 -.6,-1.1 1,-1 v -1.2 l -1.3,.6 -1.3,3.1 -.7,.7 -1.3,2.4 -1.7,-.2 -.1,1.2 h -1.6 l .2,1.5 .2,2 -3,1.2 .1,1.3 1,1.7 -.1,5.2 -1.3,4.4 -1.7,2.5 1.2,1.4 .8,3.5 -1,2.5 -.2,2.1 1.7,3.4 2.5,4.9 1.2,1.9 1.6,6.9 -.1,8.8 -.9,3.9 -2,3.2 -.9,3.7 -2,3 -1.2,1 z m -95.8,-96.8 3,3.8 17,3.8 1.4,1 4,.8 .7,.5 2.8,-.2 4.9,.8 1.4,1.5 -1,1 .8,.8 3.8,.7 1.2,1.2 .1,4.4 -1.3,2.8 2,.1 1,-.8 .9,.8 -1.1,3.1 1,1.6 1.2,.3 .8,-1.8 2.9,-4.6 1.6,-6 2.3,-2 -.5,-1.6 .5,-.9 1,1.6 -.3,2.2 2.9,-2.2 .2,-2.3 2.1,.6 .8,-1.6 .7,.6 -.7,1.5 -1,.5 -1,2 1.4,1.8 1.1,-.5 -.5,-.7 1,-1.5 1.9,-1.7 h .8 l .2,-2.6 2,-1.8 7.9,-.5 1.9,-3.1 3.8,-.3 3.8,1.2 4.2,2.7 .7,-.2 -.2,-3.5 .7,-.2 4.5,1.1 1.5,-.2 2.9,-.7 1.7,.4 1.8,.1 v -1.1 l -.7,-.9 -1.5,-.2 -1.1,-.8 .5,-1.4 -.8,-.3 -2.6,.1 -.1,-1 1.1,-.8 .6,.8 .5,-1.8 -.7,-.7 .7,-.2 -1.4,-1.3 .3,-1.3 .1,-1.9 h -1.3 l -1.5,1 -1.9,.1 -.5,1.8 -1.9,.2 -.3,-1.2 -2.2,.1 -1,1.2 -.7,-.1 -.2,-.8 -2.6,.4 -.1,-4.8 1,-2 -.7,-.1 -1.8,1.1 h -2.2 l -3.8,2.7 -6.2,.3 -4.1,.8 -1.9,1.5 -1.4,1.3 -2.5,1.7 -.3,.8 -.6,-1.7 -1.3,-.6 v .6 l .7,.7 v 1.3 l -1.5,-.6 h -.6 l -.3,1.2 -2,-1.9 -1.3,-.2 -1.3,1.5 -3.2,-.1 -.5,-1.4 -2,-1.9 -1.3,-1.6 v -.7 l -1.1,-1.4 -2.6,-1.2 -3.3,-.1 -1.1,-.9 h -1.4 l -.7,.4 -2.2,2.2 -.7,1.1 -1,-.7 .2,-1 .8,-2.1 3.2,-5 .8,-.2 1.7,-1.9 .7,-1.6 3,-.6 .8,-.6 -.1,-1 -.5,-.5 -4.5,.2 -2,.5 -2.6,1.2 -1.2,1.2 -1.7,2.2 -1.8,1 -3.3,3.4 -.4,1.6 -7.4,4.6 -4,.5 -1.8,.4 -2.3,3 -1.8,.7 -4.4,2.3 z m 100.7,3.8 3.8,.1 .6,-.5 -.2,-2 -1.7,-1.8 -1.9,.1 -.1,.5 1.1,.4 -1.6,.8 -.3,1 -.6,-.6 -.4,.8 z m -75.1,-41.9 -2.3,.2 -2.7,1.9 -7.1,5.3 .8,1 1.8,.3 2.8,-2 -1.1,-.5 2.3,-1.6 h 1 l 3,-1.9 -.1,-.9 z m 41.1,62.8 v 1 l 2.1,1.6 -.2,-2.4 z m -.7,2.8 1.1,.1 v .9 h -1 z m 21.4,-21.3 v .9 l .8,-.2 v -.5 z m 4.7,3.1 -.1,-1.1 -1.6,-.2 -.6,-.4 h -.9 l -.4,.3 .9,.4 1.1,1.1 z m -18,1.2 -.1,1.1 -.3,.7 .2,2.2 .4,.3 .7,.1 .5,-.9 .1,-1.6 -.3,-.6 -.1,-1.1 z"],"MN":["m 464.7,68.6 -1.1,2.8 .8,1.4 -.3,5.1 -.5,1.1 2.7,9.1 1.3,2.5 .7,14 1,2.7 -.4,5.8 2.9,7.4 .3,5.8 -.1,2.1 -.1,2.2 -.9,2 -3.1,1.9 -.3,1.2 1.7,2.5 .4,1.8 2.6,.6 1.5,1.9 -.2,39.5 h 28.2 l 36.3,-.9 18.6,-.7 -1.1,-4.5 -.2,-3 -2.2,-3 -2.8,-.7 -5.2,-3.6 -.6,-3.3 -6.3,-3.1 -.2,-1.3 h -3.3 l -2.2,-2.6 -2,-1.3 .7,-5.1 -.9,-1.6 .5,-5.4 1,-1.8 -.3,-2.7 -1.2,-1.3 -1.8,-.3 v -1.7 l 2.8,-5.8 5.9,-3.9 -.4,-13 .9,.4 .6,-.5 .1,-1.1 .9,-.6 1.4,1.2 .7,-.1 v 0 l -1.2,-2.2 4.3,-3.1 3.1,-3.7 1.6,-.8 4.7,-5.9 6.3,-5.8 3.9,-2.1 6.3,-2.7 7.6,-4.5 -.6,-.4 -3.7,.7 -2.8,.1 -1,-1.6 -1.4,-.9 -9.8,1.2 -1,-2.8 -1.6,-.1 -1.7,.8 -3.7,3.1 h -4.1 l -2.1,-1 -.3,-1.7 -3.9,-.8 -.6,-1.6 -.7,-1.3 -1,.9 -2.6,.1 -9.9,-5.5 h -2.9 l -.8,-.7 -3.1,1.3 -.8,1.3 -3.3,.8 -1.3,-.2 v -1.7 l -.7,-.9 h -5.9 l -.4,-1.4 h -2.6 l -1.1,.4 -2.4,-1.7 .3,-1.4 -.6,-2.4 -.7,-1.1 -.2,-3 -1,-3.1 -2.1,-1.6 h -2.9 l .1,8 -30.9,-.4 z"],"MS":["m 623.8,468.6 -5,.1 -2.4,-1.5 -7.9,2.5 -.9,-.7 -.5,.2 -.1,1.6 -.6,.1 -2.6,2.7 -.7,-.1 -.6,-.7 -1.2,-1.8 .3,-1.3 -4.8,-6.8 .9,-4.6 1,-1.4 .1,-1.4 -36,2 1.7,-11.9 2.4,-4.8 6,-8.4 -1.8,-2.5 h 2 v -3.3 l -2.4,-2.5 .5,-1.7 -1.2,-1 -1.6,-7.1 .6,-1.4 1.2,-1.5 .5,-3 -1.5,-2.3 -.5,-2.2 .9,-.7 v -.8 l -1.7,-1.1 -.1,-.7 1.6,-.9 -1.2,-1.1 1.7,-7.1 3.4,-1.6 v -.8 l -1.1,-1.4 2.9,-5.4 h 1.9 l 1.5,-1.2 -.3,-5.2 3.1,-4.5 1.8,-.6 -.5,-3.1 38.3,-2.6 1.3,2 -1.3,67 4.4,33.2 z"],"MO":["m 555.3,248.9 -1.1,-1.1 -.6,-1.6 -1.7,-1.3 -14.3,.8 -27.2,1.2 -25.9,-.1 1.3,1.3 -.3,1.4 2.1,3.7 3.9,6.3 2.9,3 2,.6 .9,-1 1.5,2.1 -.1,1.2 -2.7,2.6 -.5,2.3 2.5,2.5 2.6,4.7 3.2,.7 .5,48.1 .2,10.8 39.1,-.7 39.8,-2 1.6,2.5 v 2.2 l -1.7,1.5 -2.8,5.1 11.2,-.8 1,-2 1.2,-.5 v -.7 l -1.2,-1.1 -.6,-1 1.7,.2 .8,-.7 -1.4,-1.5 1.4,-.5 .1,-1 -.6,-1 v -1.3 l -.7,-.7 .2,-1 h 1.1 l .7,.7 -.3,1 .8,.7 .8,-1 1,-2.7 1.4,.9 .7,-.4 1.2,-4.1 -1,-1 1,-2 .2,-.9 -1.3,-.8 h -2.8 l -1.4,-1.5 -1.8,-3.8 v -1.9 l .8,-.6 .1,-1.3 -1.7,-1.9 -.9,-2.5 -2.7,-4.1 -4.8,-1.3 -7.4,-7.1 -.4,-2.4 2.8,-7.6 -.4,-1.9 1.2,-1.1 v -1.3 l -2.8,-1.5 -3,-.7 -3.4,1.2 -1.3,-2.3 .6,-1.9 -.7,-2.4 -8.6,-8.4 -2.2,-1.5 -2.5,-5.9 -1.2,-5.4 1.4,-3.7 z"],"MT":["m 247,130.5 57.3,7.9 51,5.3 2,-20.7 5.2,-66.7 -53.5,-5.6 -54.3,-7.7 -65.9,-12.5 -4.8,22 3.7,7.4 -1.6,4.8 3.6,4.8 1.9,.7 3.9,8.3 v 2.1 l 2.3,3 h .9 l 1.4,2.1 h 3.2 v 1.6 l -7.1,17 -.5,4.1 1.4,.5 1.6,2.6 2.8,-1.4 3.6,-2.4 1.9,1.9 .5,2.5 -.5,3.2 2.5,9.7 2.6,3.5 2.3,1.4 .4,3 v 4.1 l 2.3,2.3 1.6,-2.3 6.9,1.6 2.1,-1.2 9,1.7 2.8,-3.3 1.8,-.6 1.2,1.8 1.6,4.1 .9,.1 z"],"NE":["m 402.5,191.1 38,1.6 3.4,3.2 1.7,.2 2.1,2 1.8,-.1 1.8,-2 1.5,.6 1,-.7 .7,.5 .9,-.4 .7,.4 .9,-.4 1,.5 1.4,-.6 2,.6 .6,1.1 6.1,2.2 1.2,1.3 .9,2.6 1.8,.7 1.5,-.2 .5,.9 v 2.3 l .6,1.7 v 1.4 l 1.3,3.7 2.2,4.3 .2,3.7 2.8,5 .4,6.1 1.3,.7 -.2,2.9 .8,3.3 -.7,2.2 1.8,4.4 1.3,1.3 -.3,1.4 2.1,3.7 3.9,6.3 h -32.4 l -43.7,-1.2 -36,-2 1.4,-22.1 -33.1,-2.4 3.7,-44.2 z"],"NV":["m 167.6,296.8 -3.4,17.5 -2.4,2.9 h -2 l -1.2,-2.7 -3.7,-1.4 -3.5,.6 -1,13.6 .5,4.9 -.5,2.9 -1.4,3 -70.4,-105 -1.1,-3.5 16.4,-63.1 47,11.2 24.4,5.4 23.3,4.7 z"],"NH":["m 862.6,93.6 -1.3,.1 -1,-1.1 -1.9,1.4 -.5,6.1 1.2,2.3 -1.1,3.5 2.1,2.8 -.4,1.7 .1,1.3 -1.1,2.1 -1.4,.4 -.6,1.3 -2.1,1 -.7,1.5 1.4,3.4 -.5,2.5 .5,1.5 -1,1.9 .4,1.9 -1.3,1.9 .2,2.2 -.7,1.1 .7,4.5 .7,1.5 -.5,2.6 .9,1.8 -.2,2.5 -.5,1.3 -.1,1.4 2.1,2.6 18.4,-3.8 1,-1.5 .3,-1.7 1.9,-.6 .5,-1.1 1.7,-1.1 1.3,.3 .8,-4.8 -2.3,-1.4 -.8,-2.2 -3.2,-2 -.6,-4 -11.9,-36.8 z"],"NJ":["m 842.5,195.4 -14.6,-4.9 -1.8,2.5 .1,2.2 -3,5.4 1.5,1.8 -.7,2 -1,1 .5,3.6 2.7,.9 1,2.8 2.1,1.1 4.2,3.2 -3.3,2.6 -1.6,2.3 -1.8,3 -1.6,.6 -1.4,1.7 -1,2.2 -.3,2.1 .8,.9 .4,2.3 1.2,.6 2.4,1.5 1.8,.8 1.6,.8 .1,1.1 .8,.1 1.1,-1.2 .8,.4 2.1,.2 -.2,2.9 .2,2.5 1.8,-.7 1.5,-3.9 1.6,-4.8 2.9,-2.8 .6,-3.5 -.6,-1.2 1.7,-2.9 v -1.2 l -.7,-1.1 1.2,-2.7 -.3,-3.6 -.6,-8.2 -1.2,-1.4 v 1.4 l .5,.6 h -1.1 l -.6,-.4 -1.3,-.2 -.9,.6 -1.2,-1.6 .7,-1.7 v -1 l 1.7,-.7 .8,-2.1 z"],"NM":["m 357.5,332.9 h -.8 l -7.9,99.3 -31.8,-2.6 -34.4,-3.6 -.3,3 2,2.2 -30.8,-4.1 -1.4,10.2 -15.7,-2.2 17.4,-124.1 52.6,6.5 51.7,4.8 z"],"NY":["m 872.9,181.6 -1.3,.1 -.5,1 z m -30.6,22.7 .7,.6 1.3,-.3 1.1,.3 .9,-1.3 h 1.9 l 2.4,-.9 5.1,-2.1 -.5,-.5 -1.9,.8 -2,.9 .2,-.8 2.6,-1.1 .8,-1 1.2,.1 4.1,-2.3 v .7 l -4.2,3 4.5,-2.8 1.7,-2.2 1.5,-.1 4.5,-3.1 3.2,-3.1 3,-2.3 1,-1.2 -1.7,-.1 -1,1.2 -.2,.7 -.9,.7 -.8,-1.1 -1.7,1 -.1,.9 -.9,-.2 .5,-.9 -1.2,-.7 -.6,.9 .9,.3 .2,.5 -.3,.5 -1.4,2.6 h -1.9 l .9,-1.8 .9,-.6 .3,-1.7 1.4,-1.6 .9,-.8 1.5,-.7 -1.2,-.2 -.7,.9 h -.7 l -1.1,.8 -.2,1 -2.2,2.1 -.4,.9 -1.4,.9 -7.7,1.9 .2,.9 -.9,.7 -2,.3 -1,-.6 -.2,1.1 -1.1,-.4 .1,1 -1.2,-.1 -1.2,.5 -.2,1.1 h -1 l .2,1 h -.7 l .2,1 -1.8,.4 -1.5,2.3 z m -.8,-.4 -1.6,.4 v 1 l -.7,1.6 .6,.7 2.4,-2.3 -.1,-.9 z m -10.1,-95.2 -.6,1.9 1.4,.9 -.4,1.5 .5,3.2 2.2,2.3 -.4,2.2 .6,2 -.4,1 -.3,3.8 3.1,6.7 -.8,1.8 .9,2.2 .9,-1.6 1.9,1.5 3,14.2 -.5,2 1.1,1 -.5,15 .7,1 2.8,16.3 1.8,1.5 -3.5,3.4 1.7,2.2 -1.3,3.3 -1.5,1.7 -1.5,2.3 -.2,-.7 .4,-5.9 -14.6,-4.9 -1.6,-1.1 -1.9,.3 -3,-2.2 -3,-5.8 h -2 l -.4,-1.5 -1.7,-1.1 -70.5,13.9 -.8,-6 4.3,-3.9 .6,-1.7 3.9,-2.5 .6,-2.4 2.3,-2 .8,-1.1 -1.7,-3.3 -1.7,-.5 -1.8,-3 -.2,-3.2 7.6,-3.9 8.2,-1.6 h 4.4 l 3.2,1.6 .9,-.1 1.8,-1.6 3.4,-.7 h 3 l 2.6,-1.3 2.5,-2.6 2.4,-3.1 1.9,-.4 1.1,-.5 .4,-3.2 -1.4,-2.7 -1.2,-.7 2,-1.3 -.1,-1.8 h -1.5 l -2.3,-1.4 -.1,-3.1 6.2,-6.1 .7,-2.4 3.7,-6.3 5.9,-6.4 2.1,-1.7 2.5,.1 20.6,-5.2 z"],"NC":["m 829,300.1 -29.1,6.1 -39.4,7.3 -29.4,3.5 v 5.2 l -1.5,-.1 -1.4,1.2 -2.4,5.2 -2.6,-1.1 -3.5,2.5 -.7,2.1 -1.5,1.2 -.8,-.8 -.1,-1.5 -.8,-.2 -4,3.3 -.6,3.4 -4.7,2.4 -.5,1.2 -3.2,2.6 -3.6,.5 -4.6,3 -.8,4.1 -1.3,.9 -1.5,-.1 -1.4,1.3 -.1,4.9 21.4,-3 4.4,-1.9 1.3,-.1 7.3,-4.3 23.2,-2.2 .4,.5 -.2,1.4 .7,.3 1.2,-1.5 3.3,3 .1,2.6 19.7,-2.8 24.5,17.1 4,-2.2 3,-.7 h 1.7 l 1.1,1.1 .8,-2 .6,-5 1.7,-3.9 5.4,-6.1 4.1,-3.5 5.4,-2.3 2.5,-.4 1.3,.4 .7,1.1 3.3,-6.6 3.3,-5.3 -.7,-.3 -4.4,6.8 -.5,-.8 2,-2.2 -.4,-1.5 -2,-.5 1,1.3 -1.2,.1 -1.2,-1.8 -1.2,2 -1.6,.2 1,-2.7 .7,-1.7 -.2,-2.9 -2.2,-.1 .9,-.9 1.1,.3 2.7,.1 .8,-.5 h 2.3 l 2,-1.9 .2,-3.2 1.3,-1.4 1.2,-.2 1.3,-1 -.5,-3.7 -2.2,-3.8 -2.7,-.2 -.9,1.6 -.5,-1 -2.7,.2 -1.2,.4 -1.9,1.2 -.3,-.4 h -.9 l -1.8,1.2 -2.6,.5 v -1.3 l .8,-1 1,.7 h 1 l 1.7,-2.1 3.7,-1.7 2,-2.2 h 2.4 l .8,1.3 1.7,.8 -.5,-1.5 -.3,-1.6 -2.8,-3.1 -.3,-1.4 -.4,1 -.9,-1.3 z m 7,31 2.7,-2.5 4.6,-3.3 v -3.7 l -.4,-3.1 -1.7,-4.2 1.5,1.4 1,3.2 .4,7.6 -1.7,.4 -3.1,2.4 -3.2,3.2 z m 1.9,-19.3 -.9,-.2 v 1 l 2.5,2.2 -.2,-1.4 z m 2.9,2.1 -1.4,-2.8 -2.2,-3.4 -2.4,-3 -2.2,-4.3 -.8,-.7 2.2,4.3 .3,1.3 3.4,5.5 1.8,2.1 z"],"ND":["m 464.7,68.6 -1.1,2.8 .8,1.4 -.3,5.1 -.5,1.1 2.7,9.1 1.3,2.5 .7,14 1,2.7 -.4,5.8 2.9,7.4 .3,5.8 -.1,2.1 -29.5,-.4 -46,-2.1 -39.2,-2.9 5.2,-66.7 44.5,3.4 55.3,1.6 z"],"OH":["m 685.7,208.8 1.9,-.4 3,1.3 2.1,.6 .7,.9 h 1 l 1,-1.5 1.3,.8 h 1.5 l -.1,1 -3.1,.5 -2,1.1 1.9,.8 1.6,-1.5 2.4,-.4 2.2,1.5 1.5,-.1 2.5,-1.7 3.6,-2.1 5.2,-.3 4.9,-5.9 3.8,-3.1 9.3,-5.1 4.9,29.9 -2.2,1.2 1.4,2.1 -.1,2.2 .6,2 -1.1,3.4 -.1,5.4 -1,3.6 .5,1.1 -.4,2.2 -1.1,.5 -2,3.3 -1.8,2 h -.6 l -1.8,1.7 -1.3,-1.2 -1.5,1.8 -.3,1.2 h -1.3 l -1.3,2.2 .1,2.1 -1,.5 1.4,1.1 v 1.9 l -1,.2 -.7,.8 -1,.5 -.6,-2.1 -1.6,-.5 -1,2.3 -.3,2.2 -1.1,1.3 1.3,3.6 -1.5,.8 -.4,3.5 h -1.5 l -3.2,1.4 -1.2,-2.1 -3.5,-1.4 -.8,-2.9 -.5,-.8 -3.4,1.8 -.6,1.7 h -.9 l -1.3,.7 -1.2,-.8 -3,-.8 -1.9,.8 v 1 l -2.2,-.2 -1.9,-2.1 -2.3,.2 -4.1,-.7 v -1 l -2.2,-3.4 -2.9,-1.2 -1.9,.8 -2.2,-.1 -1.3,-.5 -6.6,-57.2 21.4,-3.5 z"],"OK":["m 501.5,398.6 -4.6,-3.8 -2.2,-.9 -.5,1.6 -5.1,.3 -.6,-1.5 -5,2.5 -1.6,-.7 -3.7,.3 -.6,1.7 -3.6,.9 -1.3,-1.2 -1.2,.1 -2,-1.8 -2.1,.7 -2,-.5 -1.8,-2 -2.5,4.2 -1.2,.8 -1,-1.8 .3,-2 -1.2,-.7 -2.3,2.5 -1.7,-1.2 -.1,-1.5 -1.3,.5 -2.6,-1.7 -3,2.6 -2.3,-1.1 .7,-2.1 -2.3,.1 -1.9,-3 -3.5,-1.1 -2,2.3 -2.3,-2.2 -1.4,.4 -2,.1 -3.5,-1.9 -2.3,.1 -1.2,-.7 -.5,-2.9 -2.3,-1.7 -1.1,1.5 -1.4,-1 -1.2,-.4 -1.1,1 -1.5,-.3 -2.5,-3 -2.7,-1.3 1.4,-42.7 -52.6,-3.2 .6,-10.6 16.5,1 67.7,2.9 62,.1 .2,10.8 4.1,24.4 -.7,39 z"],"OR":["m 93.9,166.5 47,11.2 8.5,-37.3 2.9,-5.8 .4,-2.1 .8,-.9 -.9,-2 -2.9,-1.2 .2,-4.2 4,-5.8 2.5,-.8 1.6,-2.3 -.1,-1.6 1.8,-1.6 3.2,-5.5 4.2,-4.8 -.5,-3.2 -3.5,-3.1 -1.6,-3.6 -30.3,-7.3 -2.8,1 -5.4,-.9 -1.8,-.9 -1.5,1.2 -3.3,-.4 -4.5,.5 -.9,.7 -4.2,-.4 -.8,-1.6 -1.2,-.2 -4.4,1.3 -1.6,-1.1 -2.2,.8 -.2,-1.8 -2.3,-1.2 -1.5,-.2 -1,-1.1 -3,.3 -1.2,-.8 h -1.2 l -1.2,.9 -5.5,.7 -6.6,-4.2 1.1,-5.6 -.4,-4.1 -3.2,-3.7 -3.7,.1 -.4,-1.1 .4,-1.2 -.7,-.8 -1,.1 -1.1,1.3 -1.5,-.2 -.5,-1.1 -1,-.1 -.7,.6 -2,-1.9 v 4.3 l -1.3,1.3 -1.1,3.5 -.1,2.3 -4.5,12.3 -13.2,31.3 -3.2,4.6 -1.6,-.1 .1,2.1 -5.2,7.1 -.3,3.3 1,1.3 .1,2.4 -1.2,1.1 -1.2,3 .1,5.7 1.2,2.9 z"],"PA":["m 826.3,189.4 -1.9,.3 -3,-2.2 -3,-5.8 h -2 l -.4,-1.5 -1.7,-1.1 -70.5,13.9 -.8,-6 -4.2,3.4 -.9,.1 -2.7,3 -3.3,1.7 4.9,29.9 3.2,19.7 17.4,-2.9 60.5,-11.8 1.2,-2.1 1.5,-1.1 1.6,-.3 1.6,.6 1.4,-1.7 1.6,-.6 1.8,-3 1.6,-2.3 3.3,-2.6 -4.2,-3.2 -2.1,-1.1 -1,-2.8 -2.7,-.9 -.5,-3.6 1,-1 .7,-2 -1.5,-1.8 3,-5.4 -.1,-2.2 1.8,-2.5 z"],"RI":["m 883.2,170.7 -1.3,-1.1 -2.6,-1.3 -.6,-2.2 h -.8 l -.7,-2.6 -6.5,2 3.2,12.3 -.4,1.1 .4,1.8 5.6,-3.6 .1,-3 -.8,-.8 .4,-.6 -.1,-1.3 -.9,-.7 1.2,-.4 -.9,-1.6 1.8,.7 .3,1.4 .7,1.2 -1.4,-.8 1.1,1.7 -.3,1.2 -.6,-1.1 v 2.5 l .6,-.9 .4,.9 1.3,-1.5 -.2,-2.5 1.4,3.1 1,-.9 z m -4.7,12.2 h .9 l .5,-.6 -.8,-1.3 -.7,.7 z"],"SC":["m 772.3,350.2 -19.7,2.8 -.1,-2.6 -3.3,-3 -1.2,1.5 -.7,-.3 .2,-1.4 -.4,-.5 -23.2,2.2 -7.3,4.3 -1.3,.1 -4.4,1.9 -.1,1.9 -1.9,1 -1.4,3.2 .2,1.3 6.1,3.8 2.6,-.3 3.1,4 .4,1.7 4.2,5.1 2.6,1.7 1.4,.2 2.2,1.6 1.1,2.2 2,1.6 1.8,.5 2.7,2.7 .1,1.4 2.6,2.8 5,2.3 3.6,6.7 .3,2.7 3.9,2.1 2.5,4.8 .8,3.1 4.2,.4 .8,-1.5 h .6 l 1.8,-1.5 .5,-2 3.2,-2.1 .3,-2.4 -1.2,-.9 .8,-.7 .8,.4 1.3,-.4 1.8,-2.1 3.8,-1.8 1.6,-2.4 .1,-.7 4.8,-4.4 -.1,-.5 -.9,-.8 1.1,-1.5 h .8 l .4,.5 .7,-.8 h 1.3 l .6,-1.5 2.3,-2.1 -.3,-5.4 .8,-2.3 3.6,-6.2 2.4,-2.2 2.2,-1.1 z"],"SD":["m 396.5,125.9 46,2.1 29.5,.4 -.1,2.2 -.9,2 -3.1,1.9 -.3,1.2 1.7,2.5 .4,1.8 2.6,.6 1.5,1.9 -.2,39.5 -2.2,-.1 -.1,1.6 1.3,1.5 -.1,1.1 -1,.5 .4,1.6 1.3,.4 .7,2 -1.7,5.1 -1,4.3 1.3,1.2 .3,1.3 .7,1.7 -1.5,.2 -1.8,-.7 -.9,-2.6 -1.2,-1.3 -6.1,-2.2 -.6,-1.1 -2,-.6 -1.4,.6 -1,-.5 -.9,.4 -.7,-.4 -.9,.4 -.7,-.5 -1,.7 -1.5,-.6 -1.8,2 -1.8,.1 -2.1,-2 -1.7,-.2 -3.4,-3.2 -38,-1.6 -51.1,-3.5 3.9,-43.9 2,-20.7 z"],"TN":["m 620.9,365.1 45.7,-4 22.9,-2.9 .1,-4.9 1.4,-1.3 1.5,.1 1.3,-.9 .8,-4.1 4.6,-3 3.6,-.5 3.2,-2.6 .5,-1.2 4.7,-2.4 .6,-3.4 4,-3.3 .8,.2 .1,1.5 .8,.8 1.5,-1.2 .7,-2.1 3.5,-2.5 2.6,1.1 2.4,-5.2 1.4,-1.2 1.5,.1 0,-5.2 .3,-.7 -4.6,.5 -.2,1 -28.9,3.3 -5.6,1.4 -20.5,1.4 -5.2,.8 -17.4,1 -2.6,.8 -22.6,2 -.7,-.6 h -3.7 l 1.2,3.2 -.6,.9 -23.3,1.5 -.8,1 -.8,-.7 h -1 v 1.3 l .6,1 -.1,1 -1.4,.5 1.4,1.5 -.8,.7 -1.7,-.2 .6,1 1.2,1.1 v .7 l -1.2,.5 -1,2 .1,.6 1.4,1 -.4,.7 h -1.5 v .5 l .9,.9 .1,.8 -1.4,.2 -.5,.8 -1.6,.2 -.9,.9 .6,.9 1.1,-.1 .5,.9 -1.6,1.3 .4,1.5 -2,-.6 -.1,.7 .4,1.1 -.3,1.4 -1.3,-.8 -.8,.8 1.1,.1 .1,1.5 -.6,1 1.1,.9 -.3,1.5 .8,.7 -.7,1 -1.2,-.5 -.9,2.2 -1.6,.7 z"],"TX":["m 282.3,429 .3,-3 34.4,3.6 31.8,2.6 7.9,-99.3 .8,0 52.6,3.2 -1.4,42.7 2.7,1.3 2.5,3 1.5,.3 1.1,-1 1.2,.4 1.4,1 1.1,-1.5 2.3,1.7 .5,2.9 1.2,.7 2.3,-.1 3.5,1.9 2,-.1 1.4,-.4 2.3,2.2 2,-2.3 3.5,1.1 1.9,3 2.3,-.1 -.7,2.1 2.3,1.1 3,-2.6 2.6,1.7 1.3,-.5 .1,1.5 1.7,1.2 2.3,-2.5 1.2,.7 -.3,2 1,1.8 1.2,-.8 2.5,-4.2 1.8,2 2,.5 2.1,-.7 2,1.8 1.2,-.1 1.3,1.2 3.6,-.9 .6,-1.7 3.7,-.3 1.6,.7 5,-2.5 .6,1.5 5.1,-.3 .5,-1.6 2.2,.9 4.6,3.8 6.4,1.9 2.6,2.3 2.8,-1.3 3.2,.8 .2,11.9 .5,19.9 .7,3.4 2.6,2.8 .7,5.4 3.8,4.6 .8,4.3 h 1 l -.1,7.3 -3.3,6.4 1.3,2.3 -1.3,1.5 .7,3 -.1,4.3 -2.2,3.5 -.1,.8 -1.7,1.2 1,1.8 1.2,1.1 -3.5,.3 -8.4,3.9 -3.5,1.4 -1.8,1.8 -.7,-.5 2.1,-2.3 1.8,-.7 .5,-.9 -2.9,-.1 -.7,-.8 .8,-2 -.9,-1.8 h -.6 l -2.4,1.3 -1.9,2.6 .3,1.7 3.3,3.4 1.3,.3 v .8 l -2.3,1.6 -4.9,4 -4,3.9 -3.2,1.4 -5,3 -3.7,2 -4.5,1.9 -4.1,2.5 3.2,-3 v -1.1 l .6,-.8 -.2,-1.8 -1.5,-.1 -1.1,1.5 -2.6,1.3 -1.8,-1.2 -.3,-1.7 h -1.5 l .8,2.2 1.4,.7 1.2,.9 1.8,1.6 -.7,.8 -3.9,1.7 -1.7,.1 -1.2,-1.2 -.5,2.1 .5,1.1 -2.7,2 -1.5,.2 -.8,.7 -.4,1.7 -1.8,3.3 -1.6,.7 -1.6,-.6 -1.8,1.1 .3,1.4 1.3,.8 1,.8 -1.8,3.5 -.3,2.8 -1,1.7 -1.4,1 -2.9,.4 1.8,.6 1.9,-.6 -.4,3.2 -1.1,-.1 .2,1.2 .3,1.4 -1.3,.9 v 3.1 l 1.6,1.4 .6,3.1 -.4,2.2 -1,.4 .4,1.5 1.1,.4 .8,1.7 v 2.6 l 1.1,2.1 2.2,2.6 -.1,.7 -2.2,-.2 -1.6,1.4 .2,1.4 -.9,-.3 -1.4,-.2 -3.4,-3.7 -2.3,-.6 h -7.1 l -2.8,-.8 -3.6,-3 -1.7,-1 -2.1,.1 -3.2,-2.6 -5.4,-1.6 v -1.3 l -1.4,-1.8 -.9,-4.7 -1.1,-1.7 -1.7,-1.4 v -1.6 l -1.4,-.6 .6,-2.6 -.3,-2.2 -1.3,-1.4 .7,-3 -.8,-3.2 -1.7,-1.4 h -1.1 l -4,-3.5 .1,-1.9 -.8,-1.7 -.8,-.2 -.9,-2.4 -2,-1.6 -2.9,-2.5 -.2,-2.1 -1,-.7 .2,-1.6 .5,-.7 -1.4,-1.5 .1,-.7 -2,-2.2 .1,-2.1 -2.7,-4.9 -.1,-1.7 -1.8,-3.1 -5.1,-4.8 v -1.1 l -3.3,-1.7 -.1,-1.8 -1.2,-.4 v -.7 l -.8,-.2 -2.1,-2.8 h -.8 l -.7,-.6 -1.3,1.1 h -2.2 l -2.6,-1.1 h -4.6 l -4.2,-2.1 -1.3,1.9 -2.2,-.6 -3.3,1.2 -1.7,2.8 -2,3.2 -1.1,4.4 -1.4,1.2 -1.1,.1 -.9,1.6 -1.3,.6 -.1,1.8 -2.9,.1 -1.8,-1.5 h -1 l -2,-2.9 -3.6,-.5 -1.7,-2.3 -1.3,-.2 -2.1,-.8 -3.4,-3.4 .2,-.8 -1.6,-1.2 -1,-.1 -3.4,-3.1 -.1,-2 -2.3,-4 .2,-1.6 -.7,-1.3 .8,-1.5 -.1,-2.4 -2.6,-4.1 -.6,-4.2 -1.6,-1.6 v -1 l -1.2,-.2 -.7,-1.1 -2.4,-1.7 -.9,-.1 -1.9,-1.6 v -1.1 l -2.9,-1.8 -.6,-2.1 -2.6,-2.3 -3.2,-4.4 -3,-1.3 -2.1,-1.8 .2,-1.2 -1.3,-1.4 -1.7,-3.7 -2.4,-1 z m 174.9,138.3 .8,.1 -.6,-4.8 -3.5,-12.3 -.2,-8.1 4.9,-10.5 6.1,-8.2 7.2,-5.1 v -.7 h -.8 l -2.6,1 -3.6,2.3 -.7,1.5 -8.2,11.6 -2.8,7.9 v 8.8 l 3.6,12 z"],"UT":["m 233.2,217.9 3.3,-21.9 -47.9,-8.2 -21,109 46.2,8.2 40,6 11.5,-88.3 z"],"VT":["m 859.1,102.4 -1.1,3.5 2.1,2.8 -.4,1.7 .1,1.3 -1.1,2.1 -1.4,.4 -.6,1.3 -2.1,1 -.7,1.5 1.4,3.4 -.5,2.5 .5,1.5 -1,1.9 .4,1.9 -1.3,1.9 .2,2.2 -.7,1.1 .7,4.5 .7,1.5 -.5,2.6 .9,1.8 -.2,2.5 -.5,1.3 -.1,1.4 2.1,2.6 -12.4,2.7 -1.1,-1 .5,-2 -3,-14.2 -1.9,-1.5 -.9,1.6 -.9,-2.2 .8,-1.8 -3.1,-6.7 .3,-3.8 .4,-1 -.6,-2 .4,-2.2 -2.2,-2.3 -.5,-3.2 .4,-1.5 -1.4,-.9 .6,-1.9 -.8,-1.7 27.3,-6.9 z"],"VA":["m 834.7,265.4 -1.1,2.8 .5,1.1 .4,-1.1 .8,-3.1 z m -34.6,-7 -.7,-1 1,-.1 1,-.9 .4,-1.8 -.2,-.5 .1,-.5 -.3,-.7 -.6,-.5 -.4,-.1 -.5,-.4 -.6,-.6 h -1 l -.6,-.1 -.4,-.4 .1,-.5 -1.7,-.6 -.8,.3 -1.2,-.1 -.7,-.7 -.5,-.2 -.2,-.7 .6,-.8 v -.9 l -1.2,-.2 -1,-.9 -.9,.1 -1.6,-.3 -.4,.7 -.4,1.6 -.5,2.3 -10,-5.2 -.2,.9 .9,1.6 -.8,2.3 .1,2.9 -1.2,.8 -.5,2.1 -.9,.8 -1.4,1.8 -.9,.8 -1,2.5 -2.4,-1.1 -2.3,8.5 -1.3,1.6 -2.8,-.5 -1.3,-1.9 -2.3,-.7 -.1,4.7 -1.4,1.7 .4,1.5 -2.1,2.2 .4,1.9 -3.7,6.3 -1,3.3 1.5,1.2 -1.5,1.9 .1,1.4 -2.3,2 -.7,-1.1 -4.3,3.1 -1.5,-1 -.6,1.4 .8,.5 -.5,.9 -5.5,2.4 -3,-1.8 -.8,1.7 -1.9,1.8 -2.3,.1 -4.4,-2.3 -.1,-1.5 -1.5,-.7 .8,-1.2 -.7,-.6 -4.9,6.6 -2.9,1 -3,3 -.4,2.2 -2.1,1.3 -.1,1.7 -1.4,1.4 -1.8,.5 -.5,1.9 -1,.4 -6.9,4.2 28.9,-3.3 .2,-1 4.6,-.5 -.3,.7 29.4,-3.5 39.4,-7.3 29.1,-6.1 -.6,-1.2 .4,-.1 .9,.9 -.1,-1.4 -.3,-1.9 1.6,1.2 .9,2.1 v -1.3 l -3.4,-5.5 v -1.2 l -.7,-.8 -1.3,.7 .5,1.4 h -.8 l -.4,-1 -.6,.9 -.9,-1.1 -2.1,-.1 -.2,.7 1.5,2.1 -1.4,-.7 -.5,-1 -.4,.8 -.8,.1 -1.5,1.7 .3,-1.6 v -1.4 l -1.5,-.7 -1.8,-.5 -.2,-1.7 -.6,-1.3 -.6,1.1 -1.7,-1 -2,.3 .2,-.9 1.5,-.2 .9,.5 1.7,-.8 .9,.4 .5,1 v .7 l 1.9,.4 .3,.9 .9,.4 .9,1.2 1.4,-1.6 h .6 l -.1,-2.1 -1.3,1 -.6,-.9 1.5,-.2 -1.2,-.9 -1.2,.6 -.1,-1.7 -1.7,.2 -2.2,-1.1 -1.8,-2.2 3.6,2.2 .9,.3 1.7,-.8 -1.7,-.9 .6,-.6 -1,-.5 .8,-.2 -.3,-.9 1.1,.9 .4,-.8 .4,1.3 1.2,.8 .6,-.5 -.5,-.6 -.1,-2.5 -1.1,-.1 -1.6,-.8 .9,-1.1 -2,-.1 -.4,-.5 -1.4,.6 -1.4,-.8 -.5,-1.2 -2.1,-1.2 -2.1,-1.8 -2.2,-1.9 3,1.3 .9,1.2 2.1,.7 2.3,2.5 .2,-1.7 .6,1.3 2.3,.5 v -4 l -.8,-1.1 1.1,.4 .1,-1.6 -3.1,-1.4 -1.6,-.2 -1.3,-.2 .3,-1.2 -1.5,-.3 -.1,-.6 h -1.8 l -.2,.8 -.7,-1 h -2.7 l -1,-.4 -.2,-1 -1.2,-.6 -.4,-1.5 -.6,-.4 -.7,1.1 -.9,.2 -.9,.7 h -1.5 l -.9,-1.3 .4,-3.1 .5,-2.4 .6,.5 z m 21.9,11.6 .9,-.1 0,-.6 -.8,.1 z m 7.5,14.2 -1,2.7 1.2,-1.3 z m -1.8,-15.3 .7,.3 -.2,1.9 -.5,-.5 -1.3,1 1,.4 -1.8,4.4 .1,8.1 1.9,3.1 .5,-1.5 .4,-2.7 -.3,-2.3 .7,-.9 -.2,-1.4 1.2,-.6 -.6,-.5 .5,-.7 .8,1.1 -.2,1.1 -.4,3.9 1.1,-2.2 .4,-3.1 .1,-3 -.3,-2 .6,-2.3 1.1,-1.8 .1,-2.2 .3,-.9 -4.6,1.6 -.7,.8 z"],"WA":["m 161.9,83.6 .7,4 -1.1,4.3 -30.3,-7.3 -2.8,1 -5.4,-.9 -1.8,-.9 -1.5,1.2 -3.3,-.4 -4.5,.5 -.9,.7 -4.2,-.4 -.8,-1.6 -1.2,-.2 -4.4,1.3 -1.6,-1.1 -2.2,.8 -.2,-1.8 -2.3,-1.2 -1.5,-.2 -1,-1.1 -3,.3 -1.2,-.8 h -1.2 l -1.2,.9 -5.5,.7 -6.6,-4.2 1.1,-5.6 -.4,-4.1 -3.2,-3.7 -3.7,.1 -.4,-1.1 .4,-1.2 -.7,-.8 -1,.1 -2.1,-1.5 -1.2,.4 -2,-.1 -.7,-1.5 -1.6,-.3 2.5,-7.5 -.7,6 .5,.5 v -2 l .8,-.2 1.1,2.3 -.5,-2.2 1.2,-4.2 1.8,.4 -1.1,-2 -1,.3 -1.5,-.4 .2,-4.2 .2,1.5 .9,.5 .6,-1.6 h 3.2 l -2.2,-1.2 -1.7,-1.9 -1.4,1.6 1.2,-3.1 -.3,-4.6 -.2,-3.6 .9,-6.1 -.5,-2 -1.4,-2.1 .1,-4 .4,-2.7 2,-2.3 -.7,-1.4 .2,-.6 .9,.1 7.8,7.6 4.7,1.9 5.1,2.5 3.2,-.1 .2,3 1,-1.6 h .7 l .6,2.7 .5,-2.6 1.4,-.2 .5,.7 -1.1,.6 .1,1.6 .7,-1.5 h 1.1 l -.4,2.6 -1.1,-.8 .4,1.4 -.1,1.5 -.8,.7 -2.5,2.9 1.2,-3.4 -1.6,.4 -.4,2.1 -3.8,2.8 -.4,1 -2.1,2.2 -.1,1 h 2.2 l 2.4,-.2 .5,-.9 -3.9,.5 v -.6 l 2.6,-2.8 1.8,-.8 1.9,-.2 1,-1.6 3,-2.3 v -1.4 h 1.1 l .1,4 h -1.5 l -.6,.8 -1.1,-.9 .3,1.1 v 1.7 l -.7,.7 -.3,-1.6 -.8,.8 .7,.6 -.9,1.1 h 1.3 l .7,-.5 .1,2 -1,1.9 -.9,1 -.1,1.8 -1,-.2 -.2,-1.4 .9,-1.1 -.8,-.5 -.8,.7 -.7,2.2 -.8,.9 -.1,-2 .8,-1.1 -.2,-1.1 -1.2,1.2 .1,2.2 -.6,.4 -2.1,-.4 -1.3,1.2 2.2,-.6 -.2,2.2 1,-1.8 .4,1.4 .5,-1 .7,1.8 h .7 l .7,-.8 .6,-.1 2,-1.9 .2,-1.2 .8,.6 .3,.9 .7,-.3 .1,-1.2 h 1.3 l .2,-2.9 -.1,-2.7 .9,.3 -.7,-2.1 1.4,-.8 .2,-2.4 2.3,-2.2 1,.1 .3,-1.4 -1.2,-1.4 -.1,-3.5 -.8,.9 .7,2.9 -.6,.1 -.6,-1.9 -.6,-.5 .3,-2.3 1.8,-.1 .3,.7 .3,-1.6 -1.6,-1.7 -.6,-1.6 -.2,2 .9,1.1 -.7,.4 -1,-.8 -1.8,1.3 1.5,.5 .2,2.4 -.3,1.8 .9,-1.3 1.4,2.3 -.4,1.9 h -1.5 v -1.2 l -1.5,-1.2 .5,-3 -1.9,-2.6 2.7,-3 .6,-4.1 h .9 l 1.4,3.2 v -2.6 l 1.2,.3 v -3.3 l -.9,-.8 -1.2,2.5 -1,-3 1.3,-.1 -1.5,-4.9 1.9,-.6 25.4,7.5 31.7,8 23.6,5.5 z m -78.7,-39.4 h .5 l .1,.8 -.5,.3 .1,.6 -.7,.4 -.2,-.9 .5,-.4 z m 5,-4.3 -1.2,1.9 -.1,.8 .4,.2 .5,-.6 1.1,.1 z m -.4,-21.6 .5,.6 1.3,-.3 .2,-1 1.2,-1.8 -1,-.4 -.7,1.6 -.1,-1.6 -1.1,.2 -.7,1.4 z m 3.2,-5.5 .7,1.5 -.9,.2 -.8,.4 -.2,-2.4 z m -2.7,-1.6 -1.1,-.2 .5,1.4 z m -1,2.5 .8,.4 -.4,1.1 1.7,-.5 -.2,-2.2 -.9,-.2 z m -2.7,-.4 .3,2.7 1.6,1.3 .6,-1.9 -1.1,-2.2 z m 1.9,-1.1 -1.1,-1 -.9,.1 1.8,1.5 z m 3.2,-7 h -1.2 v .8 l 1.2,.6 z m -.9,32.5 .4,-2.7 h -1.1 l -.2,1.9 z"],"WV":["m 723.4,297.5 -.8,1.2 1.5,.7 .1,1.5 4.4,2.3 2.3,-.1 1.9,-1.8 .8,-1.7 3,1.8 5.5,-2.4 .5,-.9 -.8,-.5 .6,-1.4 1.5,1 4.3,-3.1 .7,1.1 2.3,-2 -.1,-1.4 1.5,-1.9 -1.5,-1.2 1,-3.3 3.7,-6.3 -.4,-1.9 2.1,-2.2 -.4,-1.5 1.4,-1.7 .1,-4.7 2.3,.7 1.3,1.9 2.8,.5 1.3,-1.6 2.3,-8.5 2.4,1.1 1,-2.5 .9,-.8 1.4,-1.8 .9,-.8 .5,-2.1 1.2,-.8 -.1,-2.9 .8,-2.3 -.9,-1.6 .2,-.9 10,5.2 .5,-2.3 .4,-1.6 .4,-.7 -.9,-.4 .2,-1.6 -1,-.5 -.2,-.7 h -.7 l -.8,-1.2 .2,-1 -2.6,.4 -2.2,-1.6 -1.4,.3 -.9,1.4 h -1.3 l -1.7,2.9 -3.3,.4 -1.9,-1 -2.6,3.8 -2.2,-.3 -3.1,3.9 -.9,1.6 -1.8,1.6 -1.7,-11.4 -17.4,2.9 -3.2,-19.7 -2.2,1.2 1.4,2.1 -.1,2.2 .6,2 -1.1,3.4 -.1,5.4 -1,3.6 .5,1.1 -.4,2.2 -1.1,.5 -2,3.3 -1.8,2 h -.6 l -1.8,1.7 -1.3,-1.2 -1.5,1.8 -.3,1.2 h -1.3 l -1.3,2.2 .1,2.1 -1,.5 1.4,1.1 v 1.9 l -1,.2 -.7,.8 -1,.5 -.6,-2.1 -1.6,-.5 -1,2.3 -.3,2.2 -1.1,1.3 1.3,3.6 -1.5,.8 -.4,3.5 h -1.5 l -3.2,1.4 -.1,1.1 .6,1 -.6,3.6 1.9,1.6 .8,1.1 1,.6 -.1,.9 4.4,5.6 h 1.4 l 1.5,1.8 1.2,.3 1.4,-.1 z"],"WI":["m 611,144 -2.9,.8 .2,2.3 -2.4,3.4 -.2,3.1 .6,.7 .8,-.7 .5,-1.6 2,-1.1 1.6,-4.2 3.5,-1.1 .8,-3.3 .7,-.9 .4,-2.1 1.8,-1.1 v -1.5 l 1,-.9 1.4,.1 v 2 l -1,.1 .5,1.2 -.7,2.2 -.6,.1 -1.2,4.5 -.7,.5 -2.8,7.2 -.3,4.2 .6,2 .1,1.3 -2.4,1.9 .3,1.9 -.9,3.1 .3,1.6 .4,3.7 -1.1,4.1 -1.5,5 1,1.5 -.3,.3 .8,1.7 -.5,1.1 1.1,.9 v 2.7 l 1.3,1.5 -.4,3 .3,4 -45.9,2.8 -1.3,-2.8 -3.3,-.7 -2.7,-1.5 -2,-5.5 .1,-2.5 1.6,-3.3 -.6,-1.1 -2.1,-1.6 -.2,-2.6 -1.1,-4.5 -.2,-3 -2.2,-3 -2.8,-.7 -5.2,-3.6 -.6,-3.3 -6.3,-3.1 -.2,-1.3 h -3.3 l -2.2,-2.6 -2,-1.3 .7,-5.1 -.9,-1.6 .5,-5.4 1,-1.8 -.3,-2.7 -1.2,-1.3 -1.8,-.3 v -1.7 l 2.8,-5.8 5.9,-3.9 -.4,-13 .9,.4 .6,-.5 .1,-1.1 .9,-.6 1.4,1.2 .7,-.1 h 2.6 l 6.8,-2.6 .3,-1 h 1.2 l .7,-1.2 .4,.8 1.8,-.9 1.8,-1.7 .3,.5 1,-1 2.2,1.6 -.8,1.6 -1.2,1.4 .5,1.5 -1.4,1.6 .4,.9 2.3,-1.1 v -1.4 l 3.3,1.9 1.9,.7 1.9,.7 3,3.8 17,3.8 1.4,1 4,.8 .7,.5 2.8,-.2 4.9,.8 1.4,1.5 -1,1 .8,.8 3.8,.7 1.2,1.2 .1,4.4 -1.3,2.8 2,.1 1,-.8 .9,.8 -1.1,3.1 1,1.6 1.2,.3 z m -49.5,-37.3 -.5,.1 -1.5,1.6 .2,.5 1.5,-.6 v -.6 l .9,-.3 z m 1.6,-1.1 -1,.3 -.2,.7 .9,-.1 z m -1.3,-1.6 -.2,.9 h 1.7 l .6,-.4 .1,-1 z m 2.8,-3 -.3,1.9 1.2,-.5 .1,-1.4 z m 58.3,31.9 -2,.3 -.4,1.3 1.3,1.7 z"],"WY":["m 355.3,143.7 -51,-5.3 -57.3,-7.9 -2,10.7 -8.5,54.8 -3.3,21.9 32.1,4.8 44.9,5.7 37.5,3.4 3.7,-44.2 z"],"DC":["m 803.5,252 -2.6,-1.8 -1,1.7 .5,.4 .4,.1 .6,.5 .3,.7 -.1,.5 .2,.5 z"]};</script>
 <script>
@@ -1048,17 +1163,27 @@ let state = { events: [], period: { type: "QTD", from: null, to: null }, mode: "
   chipsOpen: new Set(), // dims whose condensed chip is expanded
   filters: { state: null, drug: null, group: null, device: null } }; // each: null | array of values
 
-function renderStats(a) {
+function renderStats(a, prev) {
+  // TailAdmin-style trend badge vs. the previous equal-length window
+  const badge = (cur, pv) => {
+    if (!prev || !isFinite(cur) || !isFinite(pv) || pv <= 0) return "";
+    const d = ((cur - pv) / pv) * 100;
+    const up = d >= 0;
+    return `<span class="tbadge ${up ? "up" : "down"}" data-tip="vs previous period: ${fmt(Math.round(pv))}">` +
+      `${up ? "&#8599;" : "&#8600;"}&nbsp;${Math.abs(d).toFixed(1)}%</span>`;
+  };
   const items = [
-    [fmt(a.total), "Searches"],
-    [fmt(a.sessions), "Sessions"],
-    [fmt(a.uniqueDrugs), "Unique drugs"],
-    a.usState ? [esc(a.usState), "State"] : [fmt(a.uniqueStates), "States"],
-    [fmt(a.uniqueCities), "Cities"],
-    [a.perSession.toFixed(1), "Searches / session"],
+    [fmt(a.total), "Searches", "search", badge(a.total, prev && prev.total)],
+    [fmt(a.sessions), "Sessions", "users", badge(a.sessions, prev && prev.sessions)],
+    [fmt(a.uniqueDrugs), "Unique drugs", "pill", badge(a.uniqueDrugs, prev && prev.uniqueDrugs)],
+    a.usState ? [esc(a.usState), "State", "pin", ""] : [fmt(a.uniqueStates), "States", "pin", badge(a.uniqueStates, prev && prev.uniqueStates)],
+    [fmt(a.uniqueCities), "Cities", "city", badge(a.uniqueCities, prev && prev.uniqueCities)],
+    [a.perSession.toFixed(1), "Searches / session", "gauge", badge(a.perSession, prev && prev.perSession)],
   ];
-  $("stats").innerHTML = items.map(([v, k]) =>
-    `<div class="stat"><div class="v num">${v}</div><div class="k kicker">${k}</div></div>`).join("");
+  $("stats").innerHTML = items.map(([v, k, ico, bdg]) =>
+    `<div class="stat"><span class="s-ico">${ICONS[ico] || ""}</span>` +
+    `<div class="k kicker">${k}</div>` +
+    `<div class="s-row"><div class="v num">${v}</div>${bdg}</div></div>`).join("");
 }
 
 function renderTrend(a) {
@@ -1066,22 +1191,36 @@ function renderTrend(a) {
   const fmtD = (t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   $("trend-range").textContent = a.total ? `${fmtD(a.first)} – ${fmtD(a.anchor)}${a.weekly ? " · weekly" : ""}` : "no data";
 
+  // TailAdmin-style gradient area chart with a smoothed line
   const W = 640, H = 190, padL = 30, padB = 22, padT = 8;
   const data = a.trend;
   const max = Math.max(1, ...data.map(([, c]) => c));
-  const iw = (W - padL) / Math.max(1, data.length);
-  const bw = Math.max(2, Math.min(26, iw * 0.62));
+  const iw = (W - padL - 6) / Math.max(1, data.length - 1 || 1);
   const y = (c) => padT + (H - padB - padT) * (1 - c / max);
+  const px = (i) => padL + (data.length === 1 ? (W - padL) / 2 : i * iw);
+  const baseY = H - padB;
 
-  let bars = "", labels = "";
+  const pts = data.map(([, c], i) => [px(i), y(c)]);
+  let line = "";
+  if (pts.length > 1) {
+    line = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+    for (let i = 0; i < pts.length - 1; i++) { // Catmull-Rom → cubic bezier
+      const p0 = pts[Math.max(0, i - 1)], p1 = pts[i], p2 = pts[i + 1], p3 = pts[Math.min(pts.length - 1, i + 2)];
+      line += ` C${(p1[0] + (p2[0] - p0[0]) / 6).toFixed(1)} ${(p1[1] + (p2[1] - p0[1]) / 6).toFixed(1)}` +
+        ` ${(p2[0] - (p3[0] - p1[0]) / 6).toFixed(1)} ${(p2[1] - (p3[1] - p1[1]) / 6).toFixed(1)}` +
+        ` ${p2[0].toFixed(1)} ${p2[1].toFixed(1)}`;
+    }
+  }
+  const area = line ? `${line} L${pts[pts.length - 1][0].toFixed(1)} ${baseY} L${pts[0][0].toFixed(1)} ${baseY} Z` : "";
+
+  let labels = "", hovers = "";
   const labelEvery = Math.ceil(data.length / 7);
   data.forEach(([b, c], i) => {
-    const x = padL + i * iw + (iw - bw) / 2;
-    const h = (H - padB - padT) * (c / max);
-    bars += `<rect x="${x.toFixed(1)}" y="${y(c).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(h, c > 0 ? 2 : 0).toFixed(1)}" rx="2" fill="${i === data.length - 1 ? "var(--accent)" : "var(--secondary)"}" opacity="${i === data.length - 1 ? 1 : 0.85}"><title>${esc(new Date(b).toLocaleDateString("en-US", { month: "short", day: "numeric" }))}: ${c} searches</title></rect>`;
-    if (i % labelEvery === 0) {
-      labels += `<text x="${(x + bw / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(new Date(b).toLocaleDateString("en-US", { month: "short", day: "numeric" }))}</text>`;
-    }
+    const dLbl = new Date(b).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    if (i % labelEvery === 0)
+      labels += `<text x="${px(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(dLbl)}</text>`;
+    // invisible hover targets so every point carries a tooltip
+    hovers += `<rect x="${(px(i) - iw / 2).toFixed(1)}" y="${padT}" width="${iw.toFixed(1)}" height="${(H - padB - padT).toFixed(1)}" fill="transparent" data-tip="${esc(dLbl)}: ${c} searches"/>`;
   });
 
   const grid = [0.25, 0.5, 0.75, 1].map((f) => {
@@ -1089,7 +1228,17 @@ function renderTrend(a) {
     return `<line x1="${padL}" y1="${gy}" x2="${W}" y2="${gy}" stroke="var(--hair)" stroke-dasharray="2 4" stroke-width="1"/><text x="0" y="${gy + 3.5}">${Math.round(max * f)}</text>`;
   }).join("");
 
-  $("trend").innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">${grid}${bars}${labels}</svg>`;
+  const last = pts[pts.length - 1];
+  $("trend").innerHTML = `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet">
+    <defs><linearGradient id="tgrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" style="stop-color:var(--chart-coll)" stop-opacity="0.28"/>
+      <stop offset="100%" style="stop-color:var(--chart-coll)" stop-opacity="0.02"/>
+    </linearGradient></defs>
+    ${grid}
+    ${area ? `<path class="tarea" d="${area}" fill="url(#tgrad)"/>` : ""}
+    ${line ? `<path class="tline" pathLength="1" d="${line}" fill="none" stroke="var(--chart-coll)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` : ""}
+    ${last ? `<circle class="tdot" cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="4.5" fill="var(--accent)" stroke="var(--card)" stroke-width="2" style="transform-box: fill-box; transform-origin: center"/>` : ""}
+    ${hovers}${labels}</svg>`;
 }
 
 function renderFunnel(a) {
@@ -1121,12 +1270,16 @@ function renderBars(el, entries, nameFn, dim) {
     `<span style="color:var(--ink-mute);font-size:13px">No data in this window</span>`;
 }
 
-/* choropleth: slate→indigo ramp, sqrt scale so low-volume states stay visible */
+/* choropleth: light→deep-teal ramp (dark mode: navy→bright teal), sqrt scale
+   so low-volume states stay visible */
 function heatColor(count, max) {
-  if (!count) return "#EDF2F7";
+  const dark = isDark();
+  if (!count) return dark ? "#16303F" : "#EDF2F7";
   const t = Math.sqrt(count / max);
   const mix = (a, b) => Math.round(a + (b - a) * t);
-  return `rgb(${mix(226, 60)},${mix(232, 80)},${mix(240, 224)})`;
+  return dark
+    ? `rgb(${mix(28, 92)},${mix(58, 177)},${mix(78, 222)})`
+    : `rgb(${mix(226, 10)},${mix(236, 76)},${mix(243, 112)})`;
 }
 
 function renderMap(a) {
@@ -1301,7 +1454,17 @@ function renderAll() {
     $("date-from").value = iso(Number.isFinite(pf) ? pf : dataMin);
     $("date-to").value = iso(Math.min(Number.isFinite(pt) ? pt - DAY : Date.now(), Date.now()));
   }
-  renderStats(a);
+  // previous equal-length window feeds the stat cards' up/down badges
+  let prevA = null;
+  if (a.total && Number.isFinite(a.first) && Number.isFinite(a.anchor)) {
+    const span = Math.max(a.anchor - a.first, DAY);
+    const isoD = (t) => new Date(t).toLocaleDateString("sv-SE");
+    prevA = aggregate(state.events, { type: "CUSTOM", from: isoD(a.first - span - DAY), to: isoD(a.first - DAY) }, f);
+    if (!prevA.total) prevA = null;
+  }
+  const mdy = (s) => s ? new Date(s + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
+  $("date-btn-label").textContent = `${mdy($("date-from").value)} – ${mdy($("date-to").value)}`;
+  renderStats(a, prevA);
   renderTrend(a);
   renderFunnel(a);
   renderGroups(a);
@@ -1392,8 +1555,30 @@ async function sync() {
 // quarterly claims .xlsx is dropped into the Avalon Reports folder).
 let util = { loaded: false, data: null, period: null, trend: { measure: "money" }, tf: { gran: "Q", sel: null } };
 
-const COL_COLLECTED = "#3C50E0"; // primary indigo (--primary)
-const COL_REVERSED  = "#80CAEE"; // sky           (--accent)
+// apply the saved theme before anything renders (charts read theme at render)
+if (localStorage.getItem("mrx-theme") === "dark") document.documentElement.classList.add("dark");
+const isDark = () => document.documentElement.classList.contains("dark");
+
+// outline icon set (TailAdmin-style), keyed for stat/KPI tiles
+const ICON = (paths) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+const ICONS = {
+  search: ICON('<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>'),
+  users: ICON('<path d="M17 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9.5" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M15.5 3.13a4 4 0 0 1 0 7.75"/>'),
+  pill: ICON('<rect x="2.5" y="9" width="19" height="6.5" rx="3.25" transform="rotate(-40 12 12)"/><path d="M8.5 8.6l6.5 6.5"/>'),
+  pin: ICON('<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0z"/><circle cx="12" cy="10" r="3"/>'),
+  city: ICON('<path d="M4 21V7l6-4v18"/><path d="M10 9h10v12"/><path d="M2 21h20"/><path d="M14 12h.01M17 12h.01M14 15h.01M17 15h.01M14 18h.01M17 18h.01"/>'),
+  gauge: ICON('<path d="M12 15l4-6"/><circle cx="12" cy="14" r="8"/>'),
+  dollar: ICON('<path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>'),
+  undo: ICON('<path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/>'),
+  check: ICON('<circle cx="12" cy="12" r="9"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>'),
+  percent: ICON('<path d="M19 5L5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>'),
+  sun: ICON('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
+  moon: ICON('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'),
+};
+
+// series colors resolve through CSS variables so both themes chart correctly
+const COL_COLLECTED = "var(--chart-coll)";
+const COL_REVERSED  = "var(--chart-rev)";
 
 const money0 = (n) => "$" + Math.round(n).toLocaleString("en-US");
 const int0   = (n) => Math.round(n).toLocaleString("en-US");
@@ -1433,13 +1618,15 @@ async function loadUtil() {
   util.loaded = true;
 }
 
+const KPI_ICONS = { paid: "dollar", reversed: "undo", collected: "check", pct: "percent" };
 function kpi(cls, v, k) {
-  return `<div class="kpi ${cls}"><div class="v num">${v}</div><div class="k">${k}</div></div>`;
+  return `<div class="kpi ${cls}"><span class="k-ico">${ICONS[KPI_ICONS[cls]] || ""}</span>` +
+    `<div class="k">${k}</div><div class="v num">${v}</div></div>`;
 }
 
-// Two-segment donut. segs: [{v,color}]. Total is their sum.
+// Two-segment donut ring. segs: [{v,color}]. Total is their sum.
 function donutSVG(segs, size) {
-  const r = size / 2, ir = r * 0.60, cx = r, cy = r;
+  const r = size / 2, ir = r * 0.70, cx = r, cy = r;
   const total = segs.reduce((a, s) => a + s.v, 0) || 1;
   let a = -Math.PI / 2, paths = "";
   for (const s of segs) {
@@ -1459,6 +1646,12 @@ function legendHTML(items) {
   return items.map((it) =>
     `<div class="li"><span class="sw" style="background:${it.color}"></span>` +
     `<span><b>${it.label}</b> ${it.val} <span class="p">${it.pct}</span></span></div>`).join("");
+}
+
+// column with rounded top corners and a flat baseline — TailAdmin columns
+function colPath(x, y, w, h, r) {
+  r = Math.max(0, Math.min(r, h, w / 2));
+  return `M${x.toFixed(1)} ${(y + h).toFixed(1)} v${(-(h - r)).toFixed(1)} q0 ${(-r).toFixed(1)} ${r.toFixed(1)} ${(-r).toFixed(1)} h${(w - 2 * r).toFixed(1)} q${r.toFixed(1)} 0 ${r.toFixed(1)} ${r.toFixed(1)} v${(h - r).toFixed(1)} z`;
 }
 
 function pharmChartSVG(data, selSet) {
@@ -1483,10 +1676,13 @@ function pharmChartSVG(data, selSet) {
     const yC = baseY - ch, yR = yC - rh;
     const sel = selSet && selSet.has(p.pi) ? " sel" : "";
     const title = `<title>${esc(p.name)} · collected ${money0(coll)} · reversed ${money0(rev)}</title>`;
-    if (ch > 0)
-      s += `<rect class="bar${sel}" data-pi="${p.pi}" x="${x}" y="${yC.toFixed(1)}" width="${bw}" height="${ch.toFixed(1)}" rx="1.5">${title}</rect>`;
-    if (rh > 0.4)
-      s += `<rect class="bar barrev${sel}" data-pi="${p.pi}" x="${x}" y="${yR.toFixed(1)}" width="${bw}" height="${rh.toFixed(1)}" rx="1.5">${title}</rect>`;
+    if (rh > 0.4) { // reversed rides on top and carries the rounded cap
+      if (ch > 0)
+        s += `<rect class="bar${sel}" data-pi="${p.pi}" x="${x}" y="${yC.toFixed(1)}" width="${bw}" height="${ch.toFixed(1)}">${title}</rect>`;
+      s += `<path class="bar barrev${sel}" data-pi="${p.pi}" d="${colPath(x, yR, bw, rh, 3.5)}">${title}</path>`;
+    } else if (ch > 0) {
+      s += `<path class="bar${sel}" data-pi="${p.pi}" d="${colPath(x, yC, bw, ch, 3.5)}">${title}</path>`;
+    }
     if (coll / max > 0.045)
       s += `<text class="val" x="${x + bw / 2}" y="${(yR - 5).toFixed(1)}" text-anchor="middle" font-size="9.5">${shortMoney(coll)}</text>`;
     const cx = x + bw / 2, cy = baseY + 9;
@@ -1747,7 +1943,7 @@ function renderUtilTf() {
 function renderUtilDates(p) {
   const dom = utilDayDomain(p);
   util.dayDomain = dom;
-  $("util-daterange").hidden = !dom;
+  $("util-date-btn").hidden = !dom;
   if (!dom) return;
   // inputs mirror the active drill-down (or custom range), clamped to the data
   let a = dom.a, b = dom.b;
@@ -1767,6 +1963,7 @@ function renderUtilDates(p) {
   $("util-from").max = $("util-to").max = ymdToInput(dom.b);
   $("util-from").value = ymdToInput(a);
   $("util-to").value = ymdToInput(b);
+  $("util-date-label").textContent = `${shortDay(a)} – ${shortDay(b)}`;
 }
 
 function togglePharm(pi) {
@@ -1998,6 +2195,45 @@ function hbars(el, entries, fmtVal, revStyle) {
     `<span class="n num">${fmtVal(e.v)}</span></div>`).join("");
 }
 
+/* --- shared range calendar (TailAdmin-style picker) --- */
+let cal = null;
+function openCal(btn, opts) {
+  const start = opts.a ? ymdToDate(opts.a) : new Date();
+  cal = { view: new Date(start.getFullYear(), start.getMonth(), 1), a: opts.a || null, b: opts.b || null,
+          min: opts.min || null, max: opts.max || null, apply: opts.apply, picking: false };
+  const pop = $("cal-pop");
+  pop.hidden = false;
+  calRender();
+  const r = btn.getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(r.left, innerWidth - 328)) + "px";
+  pop.style.top = (r.bottom + 390 > innerHeight ? Math.max(8, r.top - 396) : r.bottom + 8) + "px";
+}
+function closeCal() { $("cal-pop").hidden = true; cal = null; }
+function calRender() {
+  const y = cal.view.getFullYear(), mo = cal.view.getMonth();
+  const first = new Date(y, mo, 1);
+  const gridStart = addDays(first, -first.getDay()); // Sunday-led grid
+  const lo = cal.b ? Math.min(cal.a, cal.b) : cal.a;
+  const hi = cal.b ? Math.max(cal.a, cal.b) : cal.a;
+  const cells = [];
+  for (let i = 0; i < 42; i++) {
+    const d = addDays(gridStart, i);
+    const n = dateToYmd(d);
+    let cls = d.getMonth() !== mo ? "out" : "";
+    if ((cal.min && n < cal.min) || (cal.max && n > cal.max)) cls += " dis";
+    if (lo && hi && n > lo && n < hi) cls += " inr";
+    if (n === lo || n === hi) cls += " cap" + (lo !== hi ? (n === lo ? " a" : " b") : "");
+    cells.push(`<button type="button" data-day="${n}" class="${cls.trim()}">${d.getDate()}</button>`);
+  }
+  $("cal-pop").innerHTML =
+    `<div class="cal-head"><button type="button" data-cal="-1">&#8249;</button>` +
+    `<span class="cal-title">${first.toLocaleDateString("en-US", { month: "long", year: "numeric" })}</span>` +
+    `<button type="button" data-cal="1">&#8250;</button></div>` +
+    `<div class="cal-grid">` +
+    ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => `<span class="dow">${d}</span>`).join("") +
+    cells.join("") + `</div>`;
+}
+
 /* --- motion helpers --- */
 // reveal-on-scroll: a panel gets .vis (and its numbers roll up) the first
 // time it enters the viewport; panels revealed together stagger slightly
@@ -2107,14 +2343,15 @@ function renderUtilTrend(p, hasCube) {
   mOrder.forEach((mi, k) => {
     const x = padL + k * (bw + gap);
     let y = baseY;
-    for (const sr of series) {
-      const v = sr.vals[k];
-      if (v <= 0) continue;
-      const bh = chartH * (v / max);
+    const segs = series.map((sr) => ({ sr, v: sr.vals[k] })).filter((sg) => sg.v > 0);
+    segs.forEach((sg, si) => {
+      const bh = chartH * (sg.v / max);
       y -= bh;
-      s += `<rect x="${x}" y="${y.toFixed(1)}" width="${bw}" height="${Math.max(bh, 0.5).toFixed(1)}" fill="${sr.color}" rx="1">` +
-           `<title>${esc(monthLabel(p.dims.months[mi]))} · ${esc(sr.name)} · ${fmtFull(v)}</title></rect>`;
-    }
+      const t = `<title>${esc(monthLabel(p.dims.months[mi]))} · ${esc(sg.sr.name)} · ${fmtFull(sg.v)}</title>`;
+      s += si === segs.length - 1 // topmost segment gets the rounded cap
+        ? `<path class="seg" d="${colPath(x, y, bw, bh, 5)}" fill="${sg.sr.color}">${t}</path>`
+        : `<rect x="${x}" y="${y.toFixed(1)}" width="${bw}" height="${Math.max(bh, 0.5).toFixed(1)}" fill="${sg.sr.color}">${t}</rect>`;
+    });
     if (colTotal[k] > 0)
       s += `<text class="val" x="${x + bw / 2}" y="${(y - 5).toFixed(1)}" text-anchor="middle" font-size="10">${fmtV(colTotal[k])}</text>`;
     s += `<text class="cat" x="${x + bw / 2}" y="${baseY + 16}" text-anchor="middle" font-size="9.5">${esc(monthLabel(p.dims.months[mi]))}</text>`;
@@ -2353,6 +2590,64 @@ async function boot() {
     if (!cb) return;
     if (cb.dataset.state === "") { state.filters.state = null; history.replaceState(null, "", location.pathname); renderAll(); }
     else toggleState(cb.dataset.state);
+  });
+  // shared range calendar: month nav, then first click = start, second = end
+  $("cal-pop").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!cal) return;
+    const nav = e.target.closest("[data-cal]");
+    if (nav) { cal.view.setMonth(cal.view.getMonth() + Number(nav.dataset.cal)); calRender(); return; }
+    const day = e.target.closest("[data-day]");
+    if (!day) return;
+    const n = Number(day.dataset.day);
+    if (!cal.picking) { cal.a = n; cal.b = null; cal.picking = true; calRender(); }
+    else {
+      const a = Math.min(cal.a, n), b = Math.max(cal.a, n), apply = cal.apply;
+      closeCal();
+      apply(a, b);
+    }
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#cal-pop") && !e.target.closest(".datebtn")) closeCal();
+  });
+  $("date-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!$("cal-pop").hidden) { closeCal(); return; }
+    openCal($("date-btn"), {
+      a: inputToYmd($("date-from").value), b: inputToYmd($("date-to").value),
+      apply: (a, b) => {
+        $("date-from").value = ymdToInput(a);
+        $("date-to").value = ymdToInput(b);
+        state.period = { type: "CUSTOM", from: ymdToInput(a), to: ymdToInput(b) };
+        $("period-select").value = "CUSTOM";
+        renderAll();
+      },
+    });
+  });
+  $("util-date-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (!$("cal-pop").hidden) { closeCal(); return; }
+    const dom = util.dayDomain || {};
+    openCal($("util-date-btn"), {
+      a: inputToYmd($("util-from").value), b: inputToYmd($("util-to").value),
+      min: dom.a, max: dom.b,
+      apply: (a, b) => {
+        util.tf.sel = null;
+        applyTimeframe();
+        util.range = { a, b };
+        renderUtil();
+      },
+    });
+  });
+  // light/dark toggle — charts recompute their theme-dependent colors
+  const themeIcon = () => { $("theme-btn").innerHTML = isDark() ? ICONS.sun : ICONS.moon; };
+  themeIcon();
+  $("theme-btn").addEventListener("click", () => {
+    document.documentElement.classList.toggle("dark");
+    localStorage.setItem("mrx-theme", isDark() ? "dark" : "light");
+    themeIcon();
+    if (state.events.length) renderAll();
+    if (util.loaded && util.data && state.tab === "util") renderUtil();
   });
   $("pdf-btn").addEventListener("click", () => window.print());
   // styled instant tooltips: on first hover, any element's title attribute (or
