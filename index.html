@@ -841,6 +841,12 @@
       <div class="kicker" id="trend-kicker">Searches per week</div>
       <div class="trend-head">
         <span class="big num" id="trend-total"></span>
+        <div class="segbtns" id="trend-gran">
+          <button type="button" data-tval="D">DAY</button>
+          <button type="button" data-tval="W" class="on">WEEK</button>
+          <button type="button" data-tval="M">MONTH</button>
+          <button type="button" data-tval="Y">YEAR</button>
+        </div>
         <span class="kicker" id="trend-range"></span>
       </div>
       <div id="trend"></div>
@@ -1161,21 +1167,30 @@ function aggregate(all, period, filters, ranges) {
   const startD = dayStart(first), endD = dayStart(anchor);
   const days = [];
   for (let c = new Date(startD); c.getTime() <= endD; c.setDate(c.getDate() + 1)) days.push(c.getTime());
-  const weekly = days.length > 14; // weekly columns; day-level only for short windows
+  // trend buckets follow the user-selected granularity (default: weekly)
+  const gran = state.trendGran || "W";
   const buckets = new Map();
-  if (weekly) {
-    for (let i = 0; i < days.length; i += 7) buckets.set(days[i], 0);
-    for (const e of ev) {
-      const w = Math.min(Math.floor((dayStart(e.t) - startD) / (7 * DAY)), Math.floor((days.length - 1) / 7));
-      const key = days[w * 7];
-      buckets.set(key, (buckets.get(key) || 0) + 1);
-    }
-  } else {
+  if (gran === "D") {
     for (const d of days) buckets.set(d, 0);
-    for (const e of ev) {
-      const key = dayStart(e.t);
-      buckets.set(key, (buckets.get(key) || 0) + 1);
-    }
+  } else if (gran === "W") {
+    for (let i = 0; i < days.length; i += 7) buckets.set(days[i], 0);
+  } else if (gran === "M") {
+    let c = new Date(startD); c = new Date(c.getFullYear(), c.getMonth(), 1);
+    while (c.getTime() <= endD) { buckets.set(c.getTime(), 0); c = new Date(c.getFullYear(), c.getMonth() + 1, 1); }
+  } else {
+    let c = new Date(new Date(startD).getFullYear(), 0, 1);
+    while (c.getTime() <= endD) { buckets.set(c.getTime(), 0); c = new Date(c.getFullYear() + 1, 0, 1); }
+  }
+  const bucketOf = (t) => {
+    const d0 = new Date(t);
+    if (gran === "D") return dayStart(t);
+    if (gran === "W") { const w = Math.min(Math.floor((dayStart(t) - startD) / (7 * DAY)), Math.floor((days.length - 1) / 7)); return days[Math.max(w, 0) * 7]; }
+    if (gran === "M") return new Date(d0.getFullYear(), d0.getMonth(), 1).getTime();
+    return new Date(d0.getFullYear(), 0, 1).getTime();
+  };
+  for (const e of ev) {
+    const key = bucketOf(e.t);
+    if (key !== undefined) buckets.set(key, (buckets.get(key) || 0) + 1);
   }
 
   // best price spread in window
@@ -1205,7 +1220,7 @@ function aggregate(all, period, filters, ranges) {
     allStates: top(states, 99),
     groups: [...groups.entries()].sort((a, b) => b[1].count - a[1].count),
     devices: top(devices, 4),
-    trend: [...buckets.entries()], weekly,
+    trend: [...buckets.entries()].sort((x, y) => x[0] - y[0]), trendGran: gran,
     spread,
     recent: ev.slice(-20).reverse(),
   };
@@ -1217,6 +1232,7 @@ const PERIOD_LABELS = { MTD: "Month to date", QTD: "Quarter to date", YTD: "Year
 let state = { events: [], period: { type: "QTD", from: null, to: null }, mode: "live", lastSync: null, tab: "search",
   chipsOpen: new Set(), // dims whose condensed chip is expanded
   tf: { gran: "Q", sel: null }, // timeframe drill-down (mirrors utilization)
+  trendGran: "W", // searches-trend bucketing (boss default: weekly)
   ranges: null,   // [[fromTs, toTs)] when a multi-selection is active
   tfLabel: null,  // human label for print-meta ("Q2 2026 + Q3 2026")
   filters: { state: null, drug: null, group: null, device: null } }; // each: null | array of values
@@ -1336,10 +1352,17 @@ function renderStats(a, prev) {
 function renderTrend(a) {
   $("trend-total").textContent = fmt(a.total) + " searches";
   const fmtD = (t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-  $("trend-range").textContent = a.total ? `${fmtD(a.first)} – ${fmtD(a.anchor)}${a.weekly ? " · weekly" : ""}` : "no data";
+  $("trend-range").textContent = a.total ? `${fmtD(a.first)} – ${fmtD(a.anchor)}` : "no data";
 
-  // weekly (or short-window daily) column chart, TailAdmin rounded tops
-  $("trend-kicker").textContent = a.weekly ? "Searches per week" : "Searches per day";
+  // column chart bucketed by the selected granularity, TailAdmin rounded tops
+  const G_NAME = { D: "day", W: "week", M: "month", Y: "year" };
+  $("trend-kicker").textContent = `Searches per ${G_NAME[a.trendGran] || "week"}`;
+  const gLbl = (t) => {
+    const d0 = new Date(t);
+    if (a.trendGran === "M") return d0.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+    if (a.trendGran === "Y") return String(d0.getFullYear());
+    return d0.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
   const W = 640, H = 190, padL = 30, padB = 22, padT = 8;
   const data = a.trend;
   const max = Math.max(1, ...data.map(([, c]) => c));
@@ -1352,8 +1375,8 @@ function renderTrend(a) {
   const labelEvery = Math.ceil(data.length / 7);
   data.forEach(([b, c], i) => {
     const x = padL + i * iw + (iw - bw) / 2;
-    const lbl = new Date(b).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    const tip = `data-tip="${a.weekly ? "Wk of " : ""}${esc(lbl)}: ${fmt(c)} searches"`;
+    const lbl = gLbl(b);
+    const tip = `data-tip="${a.trendGran === "W" ? "Wk of " : ""}${esc(lbl)}: ${fmt(c)} searches"`;
     bars += c > 0
       ? `<path class="tbar" style="--i:${i}" d="${colPath(x, y(c), bw, Math.max(baseY - y(c), 2), 3)}" fill="${i === data.length - 1 ? "var(--accent)" : "var(--chart-coll)"}" ${tip}/>`
       : `<rect x="${x.toFixed(1)}" y="${baseY - 1.5}" width="${bw.toFixed(1)}" height="1.5" fill="var(--track)" ${tip}/>`;
@@ -2833,6 +2856,13 @@ async function boot() {
     if (!inside("group-slicer")) $("group-pop").hidden = true;
     if (!inside("state-slicer")) $("state-pop").hidden = true;
     if (!inside("stf-slicer")) $("stf-pop").hidden = true;
+  });
+  $("trend-gran").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-tval]");
+    if (!b) return;
+    state.trendGran = b.dataset.tval;
+    for (const x of $("trend-gran").querySelectorAll("button")) x.classList.toggle("on", x === b);
+    renderAll();
   });
   $("search-gran").addEventListener("change", (e) => {
     state.tf = { gran: e.target.value, sel: null };
