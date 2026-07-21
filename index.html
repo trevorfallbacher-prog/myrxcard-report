@@ -450,13 +450,14 @@
   [data-uslicer="states"] > button:hover { border-color: var(--secondary); }
   [data-uslicer="brands"] > button { background: #FCF0E1; border-color: #EBC894; color: #A96A14; }
   [data-uslicer="brands"] > button:hover { border-color: #A96A14; }
-  #tf-btn { background: #E8F6FB; border-color: #A5D8EC; color: #1F7292; }
-  #tf-btn:hover { border-color: #1F7292; }
+  #tf-btn, #stf-btn { background: #E8F6FB; border-color: #A5D8EC; color: #1F7292; }
+  #tf-btn:hover, #stf-btn:hover { border-color: #1F7292; }
+  #tf-btn.on, #stf-btn.on { border-width: 2px; font-weight: 700; }
   html.dark [data-uslicer="groups"] > button { background: #0F2E23; border-color: #1E5C44; color: #7ED0AC; }
   html.dark [data-uslicer="pharmacies"] > button { background: #241B3A; border-color: #4A3A70; color: #BFA8F0; }
   html.dark [data-uslicer="states"] > button { background: #122C3E; border-color: #2C516A; }
   html.dark [data-uslicer="brands"] > button { background: #33250E; border-color: #6B570F; color: #E9C558; }
-  html.dark #tf-btn { background: #0E2C3A; border-color: #26586E; color: #7CC4E4; }
+  html.dark #tf-btn, html.dark #stf-btn { background: #0E2C3A; border-color: #26586E; color: #7CC4E4; }
   /* EXPORT CSV mirrors EXPORT PDF */
   #util-csv-btn { background: var(--primary); border-color: var(--primary); color: #F2F8FF; }
   #util-csv-btn:hover { background: var(--secondary); border-color: var(--secondary); color: #FFFFFF; }
@@ -730,7 +731,18 @@
         <button class="iconbtn" id="group-btn" type="button">GROUPS &#9662;</button>
         <div class="pop" id="group-pop" hidden></div>
       </div>
-      <select class="periodsel" id="period-select" aria-label="Date range">
+      <select class="periodsel" id="search-gran" aria-label="Report granularity">
+        <option value="Y">Yearly</option>
+        <option value="Q" selected>Quarterly</option>
+        <option value="M">Monthly</option>
+        <option value="W">Weekly</option>
+        <option value="D">Daily</option>
+      </select>
+      <div class="slicer" id="stf-slicer">
+        <button class="iconbtn" id="stf-btn" type="button">QUARTERS &#9662;</button>
+        <div class="pop" id="stf-pop" hidden></div>
+      </div>
+      <select id="period-select" style="display:none" aria-hidden="true">
         <option value="MTD">Month to date</option>
         <option value="QTD" selected>Quarter to date</option>
         <option value="YTD">Year to date</option>
@@ -1091,9 +1103,11 @@ function periodBounds(p) {
 const dimMatch = (filters, e, d) =>
   !filters[d] || !filters[d].length || filters[d].includes(e[d]);
 
-function aggregate(all, period, filters) {
+function aggregate(all, period, filters, ranges) {
   const [fromTs, toTs] = periodBounds(period);
-  const evRange = all.filter((e) => e.t >= fromTs && e.t < toTs);
+  let evRange = all.filter((e) => e.t >= fromTs && e.t < toTs);
+  if (ranges && ranges.length) // non-contiguous timeframe picks (e.g. two quarters)
+    evRange = evRange.filter((e) => ranges.some(([a, b]) => e.t >= a && e.t < b));
   evRange.sort((a, b) => a.t - b.t);
   const anchor = evRange.length ? evRange[evRange.length - 1].t : Date.now();
 
@@ -1187,7 +1201,99 @@ const PERIOD_LABELS = { MTD: "Month to date", QTD: "Quarter to date", YTD: "Year
   LM: "Last month", LQ: "Last quarter", LY: "Last year", ALL: "All time", CUSTOM: "Custom range" };
 let state = { events: [], period: { type: "QTD", from: null, to: null }, mode: "live", lastSync: null, tab: "search",
   chipsOpen: new Set(), // dims whose condensed chip is expanded
+  tf: { gran: "Q", sel: null }, // timeframe drill-down (mirrors utilization)
+  ranges: null,   // [[fromTs, toTs)] when a multi-selection is active
+  tfLabel: null,  // human label for print-meta ("Q2 2026 + Q3 2026")
   filters: { state: null, drug: null, group: null, device: null } }; // each: null | array of values
+
+/* --- search timeframe drill-down: same two-dropdown treatment as the
+       utilization tab, over the live events' date domain --- */
+function searchDayDomain() {
+  if (!state.events.length) return null;
+  let a = Infinity;
+  for (const e of state.events) if (e.t < a) a = e.t;
+  return { a: dateToYmd(new Date(a)), b: dateToYmd(new Date()) };
+}
+
+function sTfOptions(gran) {
+  const dom = searchDayDomain();
+  if (!dom) return [];
+  const out = [];
+  const first = ymdToDate(dom.a), last = ymdToDate(dom.b);
+  if (gran === "Y") {
+    for (let y = last.getFullYear(); y >= first.getFullYear(); y--)
+      out.push({ key: `y|${y}`, label: String(y) });
+  } else if (gran === "Q") {
+    let d = new Date(last.getFullYear(), Math.floor(last.getMonth() / 3) * 3, 1);
+    const stop = new Date(first.getFullYear(), Math.floor(first.getMonth() / 3) * 3, 1);
+    while (d >= stop) {
+      const q = Math.floor(d.getMonth() / 3) + 1;
+      out.push({ key: `q|${d.getFullYear()}-${q}`, label: `Q${q} ${d.getFullYear()}` });
+      d = new Date(d.getFullYear(), d.getMonth() - 3, 1);
+    }
+  } else if (gran === "M") {
+    let d = new Date(last.getFullYear(), last.getMonth(), 1);
+    const stop = new Date(first.getFullYear(), first.getMonth(), 1);
+    while (d >= stop) {
+      const mk = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      out.push({ key: `m|${mk}`, label: monthLabel(mk) });
+      d = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+    }
+  } else if (gran === "W") {
+    let w = addDays(last, -((last.getDay() + 6) % 7));
+    const stop = addDays(first, -((first.getDay() + 6) % 7));
+    for (let n = 0; w >= stop && n < 80; n++, w = addDays(w, -7))
+      out.push({ key: `w|${dateToYmd(w)}`, label: `Wk of ${w.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}` });
+  } else if (gran === "D") {
+    let d = last;
+    for (let n = 0; d >= first && n < 180; n++, d = addDays(d, -1))
+      out.push({ key: `d|${dateToYmd(d)}`, label: d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }) });
+  }
+  return out;
+}
+
+// key -> [startYmd, endYmd] (inclusive)
+function sTfRange(key) {
+  const [kind, val] = key.split("|");
+  if (kind === "y") { const y = +val; return [y * 10000 + 101, y * 10000 + 1231]; }
+  if (kind === "q") { const [y, q] = val.split("-").map(Number); return [dateToYmd(new Date(y, (q - 1) * 3, 1)), dateToYmd(new Date(y, q * 3, 0))]; }
+  if (kind === "m") { const [y, m] = val.split("-").map(Number); return [y * 10000 + m * 100 + 1, dateToYmd(new Date(y, m, 0))]; }
+  if (kind === "w") { return [+val, dateToYmd(addDays(ymdToDate(+val), 6))]; }
+  return [+val, +val];
+}
+
+function applySearchTf() {
+  const sel = state.tf.sel;
+  state.ranges = null;
+  state.tfLabel = null;
+  if (!sel || !sel.size) { state.period = { type: "ALL", from: null, to: null }; return; }
+  const rs = [...sel].map(sTfRange).sort((x, y) => x[0] - y[0]);
+  state.ranges = rs.map(([a, b]) => [ymdToDate(a).getTime(), addDays(ymdToDate(b), 1).getTime()]);
+  state.period = { type: "CUSTOM", from: ymdToInput(rs[0][0]), to: ymdToInput(rs[rs.length - 1][1]) };
+  const opts = sTfOptions(state.tf.gran);
+  const labs = [...sel].map((k) => { const o = opts.find((x) => x.key === k); return o ? o.label : k; });
+  state.tfLabel = labs.length <= 2 ? labs.join(" + ") : `${labs.length} ${TF_NAMES[state.tf.gran]}`;
+}
+
+function renderSearchTf() {
+  const gran = state.tf.gran, sel = state.tf.sel, n = sel ? sel.size : 0;
+  $("search-gran").value = gran;
+  $("stf-btn").innerHTML = `${TF_NAMES[gran]}${n ? ` (${n})` : ""} &#9662;`;
+  $("stf-btn").classList.toggle("on", !!n);
+  const pop = $("stf-pop");
+  if (!pop.hidden && pop.children.length && pop.dataset.gran === gran) {
+    for (const inp of pop.querySelectorAll("input[data-stf]"))
+      inp.checked = inp.dataset.stf === "" ? !n : !!(sel && sel.has(inp.dataset.stf));
+    return;
+  }
+  pop.dataset.gran = gran;
+  const opts = sTfOptions(gran);
+  pop.innerHTML = opts.length
+    ? (opts.length > 20 ? `<input class="popsearch" type="text" data-popsearch placeholder="Search…">` : "") +
+      `<label class="allrow"><input type="checkbox" data-stf=""${n ? "" : " checked"}> All (full history)</label>` +
+      opts.map((o) => `<label><input type="checkbox" data-stf="${o.key}"${sel && sel.has(o.key) ? " checked" : ""}> ${o.label}</label>`).join("")
+    : `<div style="color:var(--ink-mute);font-size:13px;padding:4px">No data yet</div>`;
+}
 
 function renderStats(a, prev) {
   // TailAdmin-style trend badge vs. the previous equal-length window
@@ -1446,7 +1552,17 @@ const FILTER_LABELS = { state: (v) => STATE_NAMES[v] || v, drug: (v) => v, group
 
 function renderAll() {
   const f = state.filters;
-  const a = aggregate(state.events, state.period, f);
+  // first data landing: convert the QTD default into "current quarter selected"
+  if (!state.tfInit && state.events.length) {
+    state.tfInit = true;
+    if (state.period.type === "QTD") {
+      const now = new Date();
+      state.tf.sel = new Set([`q|${now.getFullYear()}-${Math.floor(now.getMonth() / 3) + 1}`]);
+      applySearchTf();
+    }
+  }
+  renderSearchTf();
+  const a = aggregate(state.events, state.period, f, state.ranges);
   // chips: condensed by default — 3+ selections in one dimension roll up
   const SDIM_LABEL = { state: "States", drug: "Drugs", group: "Groups", device: "Devices" };
   const chips = [];
@@ -1511,7 +1627,7 @@ function renderAll() {
   $("print-meta").textContent =
     `LIVE SEARCH REPORT · GENERATED ${gen.toUpperCase()}` +
     (a.total ? ` · WINDOW ${fd(a.first).toUpperCase()} – ${fd(a.anchor).toUpperCase()}` : "") +
-    ` · PERIOD: ${PERIOD_LABELS[state.period.type].toUpperCase()}` +
+    ` · PERIOD: ${(state.tfLabel || PERIOD_LABELS[state.period.type]).toUpperCase()}` +
     DIMS.filter((d) => (f[d] || []).length).map((d) =>
       ` · ${d.toUpperCase()}S: ${f[d].map((v) => FILTER_LABELS[d](v).toUpperCase()).join(", ")}`).join("") +
     (state.mode === "sample" ? " · SAMPLE DATA" : "");
@@ -2595,21 +2711,52 @@ async function boot() {
   }
   $("group-btn").addEventListener("click", (e) => {
     e.stopPropagation();
-    $("state-pop").hidden = true;
+    $("state-pop").hidden = true; $("stf-pop").hidden = true;
     $("group-pop").hidden = !$("group-pop").hidden;
     clampPop($("group-pop"));
   });
   $("state-btn").addEventListener("click", (e) => {
     e.stopPropagation();
-    $("group-pop").hidden = true;
+    $("group-pop").hidden = true; $("stf-pop").hidden = true;
     $("state-pop").hidden = !$("state-pop").hidden;
     clampPop($("state-pop"));
+  });
+  $("stf-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    $("group-pop").hidden = true; $("state-pop").hidden = true;
+    $("stf-pop").hidden = !$("stf-pop").hidden;
+    clampPop($("stf-pop"));
   });
   document.addEventListener("click", (e) => {
     const path = e.composedPath ? e.composedPath() : [e.target];
     const inside = (id) => path.some((n) => n.nodeType === 1 && n.id === id);
     if (!inside("group-slicer")) $("group-pop").hidden = true;
     if (!inside("state-slicer")) $("state-pop").hidden = true;
+    if (!inside("stf-slicer")) $("stf-pop").hidden = true;
+  });
+  $("search-gran").addEventListener("change", (e) => {
+    state.tf = { gran: e.target.value, sel: null };
+    applySearchTf();
+    renderAll();
+  });
+  $("stf-pop").addEventListener("change", (e) => {
+    const cb = e.target.closest("input[data-stf]");
+    if (!cb) return;
+    if (cb.dataset.stf === "") state.tf.sel = null;
+    else {
+      if (!state.tf.sel) state.tf.sel = new Set();
+      cb.checked ? state.tf.sel.add(cb.dataset.stf) : state.tf.sel.delete(cb.dataset.stf);
+      if (!state.tf.sel.size) state.tf.sel = null;
+    }
+    applySearchTf();
+    renderAll(); // the open pop is updated in place, so the menu stays open
+  });
+  $("stf-pop").addEventListener("input", (e) => {
+    const inp = e.target.closest("input.popsearch");
+    if (!inp) return;
+    const q = inp.value.toLowerCase();
+    for (const lbl of inp.parentElement.querySelectorAll("label:not(.allrow)"))
+      lbl.style.display = !q || lbl.textContent.toLowerCase().includes(q) ? "" : "none";
   });
   $("group-pop").addEventListener("change", (e) => {
     const cb = e.target.closest("input[data-group]");
@@ -2648,6 +2795,9 @@ async function boot() {
     openCal($("date-btn"), {
       a: inputToYmd($("date-from").value), b: inputToYmd($("date-to").value),
       apply: (a, b) => {
+        state.tf.sel = null; // a hand-picked range replaces the drill-down
+        state.ranges = null;
+        state.tfLabel = null;
         $("date-from").value = ymdToInput(a);
         $("date-to").value = ymdToInput(b);
         state.period = { type: "CUSTOM", from: ymdToInput(a), to: ymdToInput(b) };
