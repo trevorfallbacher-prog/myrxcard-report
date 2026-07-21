@@ -970,6 +970,11 @@
         <div class="donut-legend trend-legend" id="util-trend-legend"></div>
       </div>
 
+      <div class="panel span12" id="xover-panel">
+        <div class="kicker">Search &#8594; claim crossover <span class="hint">· heuristic: a claim for the same drug + state within 30 days of a website search — no patient-level link</span></div>
+        <div id="xover"></div>
+      </div>
+
       <div class="panel span12" id="util-geo-panel">
         <div class="kicker">Pharmacy locations <span class="hint">· tap a pin or row to filter</span></div>
         <div class="geo-wrap">
@@ -2811,6 +2816,62 @@ function utilViewDesc(p) {
   return `${tfPart}${parts.length ? " · " + parts.join(" · ") : " (All)"}`;
 }
 
+/* --- search → claim crossover: for each website search, did a claim for the
+       same drug in the same state process within 30 days? Correlational only
+       (no patient identity in either dataset) — labeled as such in the UI. --- */
+function renderCrossover(p, hasCube) {
+  const panel = $("xover-panel");
+  const dom = hasCube ? utilDayDomain(p) : null;
+  const evs = state.events || [];
+  if (!dom || !evs.length) { panel.style.display = "none"; return; }
+  panel.style.display = "";
+  const base = (s) => String(s).split(" · ")[0].trim().toUpperCase();
+  // claim days per DRUG|STATE under the current filters (net-paid facts only)
+  const claims = new Map();
+  for (const f of p.facts) {
+    if (!f[12] || f[10] <= f[11] || !factPass(f)) continue;
+    const key = base(p.dims.drugs[f[6]]) + "|" + p.dims.states[f[2]];
+    if (!claims.has(key)) claims.set(key, new Set());
+    claims.get(key).add(f[12]);
+  }
+  let considered = 0, matchedN = 0;
+  const gaps = [], byDrug = new Map();
+  for (const e of evs) {
+    if (!e.drug || !e.state) continue;
+    const sd = dateToYmd(new Date(e.t));
+    if (sd < dom.a || sd > dom.b) continue;
+    considered++;
+    const b = base(e.drug);
+    let rec = byDrug.get(b);
+    if (!rec) { rec = { s: 0, m: 0 }; byDrug.set(b, rec); }
+    rec.s++;
+    const days = claims.get(b + "|" + e.state);
+    if (!days) continue;
+    for (let k = 0; k <= 30; k++) {
+      if (days.has(dateToYmd(addDays(ymdToDate(sd), k)))) { matchedN++; rec.m++; gaps.push(k); break; }
+    }
+  }
+  if (!considered) {
+    $("xover").innerHTML = `<div style="color:var(--ink-mute)">No website searches fall inside the claims window (${shortDay(dom.a)} – ${shortDay(dom.b)}).</div>`;
+    return;
+  }
+  gaps.sort((x, y2) => x - y2);
+  const median = gaps.length ? gaps[Math.floor(gaps.length / 2)] : null;
+  const top = [...byDrug.entries()].filter(([, r]) => r.m > 0).sort((x, y2) => y2[1].m - x[1].m).slice(0, 12);
+  $("xover").innerHTML =
+    `<div class="pdrill-stats" style="margin:4px 0 20px">
+      <div><div class="v num">${fmt(considered)}</div><div class="k kicker">Searches in window</div></div>
+      <div><div class="v num">${fmt(matchedN)}</div><div class="k kicker">With claim &#8804;30d</div></div>
+      <div><div class="v num">${(100 * matchedN / considered).toFixed(1)}%</div><div class="k kicker">Likely conversion</div></div>
+      <div><div class="v num">${median == null ? "—" : median + "d"}</div><div class="k kicker">Median search &#8594; claim</div></div>
+    </div>` +
+    (top.length
+      ? `<div class="table-wrap"><table><thead><tr><th>Drug searched</th><th class="r">Searches</th><th class="r">Claimed &#8804;30d</th><th class="r">Rate</th></tr></thead><tbody>` +
+        top.map(([b2, r]) => `<tr><td class="drug">${esc(b2)}</td><td class="r num">${fmt(r.s)}</td><td class="r num">${fmt(r.m)}</td><td class="r num">${(100 * r.m / r.s).toFixed(0)}%</td></tr>`).join("") +
+        `</tbody></table></div>`
+      : `<div style="color:var(--ink-mute)">No searched drug matched a same-state claim within 30 days.</div>`);
+}
+
 function renderUtil() {
   const d = util.data;
   const has = d && d.periods && Object.keys(d.periods).length;
@@ -2877,6 +2938,7 @@ function renderUtil() {
     ? pharmDrillHTML(p, util.drill)
     : pharmChartSVG(a.pharmacies, util.f ? util.f.pharmacies : null);
   renderUtilTrend(p, hasCube);
+  renderCrossover(p, hasCube);
   renderUtilGeo(p, a);
 
   // drug-level visuals (need the cube)
