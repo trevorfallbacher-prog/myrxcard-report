@@ -1146,7 +1146,7 @@ function aggregate(all, period, filters, ranges) {
   const startD = dayStart(first), endD = dayStart(anchor);
   const days = [];
   for (let c = new Date(startD); c.getTime() <= endD; c.setDate(c.getDate() + 1)) days.push(c.getTime());
-  const weekly = days.length > 90;
+  const weekly = days.length > 400; // stay day-level up to ~13 months so hover shows every day
   const buckets = new Map();
   if (weekly) {
     for (let i = 0; i < days.length; i += 7) buckets.set(days[i], 0);
@@ -1352,7 +1352,7 @@ function renderTrend(a) {
     if (i % labelEvery === 0)
       labels += `<text x="${px(i).toFixed(1)}" y="${H - 6}" text-anchor="middle">${esc(dLbl)}</text>`;
     // invisible hover targets so every point carries a tooltip
-    hovers += `<rect x="${(px(i) - iw / 2).toFixed(1)}" y="${padT}" width="${iw.toFixed(1)}" height="${(H - padB - padT).toFixed(1)}" fill="transparent" data-tip="${esc(dLbl)}: ${c} searches"/>`;
+    hovers += `<rect x="${(px(i) - iw / 2).toFixed(1)}" y="${padT}" width="${iw.toFixed(1)}" height="${(H - padB - padT).toFixed(1)}" fill="transparent" data-tip="${a.weekly ? "Wk of " : ""}${esc(dLbl)}: ${c} searches"/>`;
   });
 
   const grid = [0.25, 0.5, 0.75, 1].map((f) => {
@@ -1736,6 +1736,7 @@ const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 async function loadUtil() {
   util.data = null;
+  util.merged = null;
   util.error = null;
   // 1) encrypted store (published by the watcher) — decrypt with the gate passphrase
   try {
@@ -1939,13 +1940,17 @@ function utilFilterReset() {
   util.psearch = {};
   util.chipsOpen = new Set();
   util.range = null; // {a, b} yyyymmdd, from hand-edited date inputs
+  util.rangeMonths = null;
   util.tf = { gran: (util.tf && util.tf.gran) || "Q", sel: null };
   util.tfMonths = util.tfRanges = util.tfDays = null;
 }
 
 // pass check, optionally ignoring one dimension (for slicer counts)
 function factPass(f, skipDim) {
-  if (util.range && f[12] && (f[12] < util.range.a || f[12] > util.range.b)) return false;
+  if (util.range) {
+    if (f[12]) { if (f[12] < util.range.a || f[12] > util.range.b) return false; }
+    else if (util.rangeMonths && !util.rangeMonths.has(f[0])) return false; // no day stamp: month overlap
+  }
   if (util.tfMonths && !util.tfMonths.has(f[0])) return false;
   if (util.tfRanges && !(f[12] && util.tfRanges.some(([a, b]) => f[12] >= a && f[12] <= b))) return false;
   if (util.tfDays && !(f[12] && util.tfDays.has(f[12]))) return false;
@@ -1972,59 +1977,98 @@ function utilDayDomain(p) {
   return a <= b ? { a, b } : null;
 }
 
-/* --- timeframe drill-down: granularity select (Quarterly/Monthly/Weekly/
-       Daily) + a multi-select pop of matching entries across every stored
-       period. Selections resolve to month/day predicates in factPass. --- */
+/* --- merged dataset: every stored workbook (2025 full year, 2026-Q2, …)
+       combines into one continuous fact space, so years/quarters span across
+       drops instead of living in per-workbook silos --- */
+function mergedPeriod(d) {
+  const keys = Object.keys(d.periods).sort();
+  const usable = keys.filter((k) => d.periods[k].dims && Array.isArray(d.periods[k].facts));
+  if (!usable.length) return null;
+  if (usable.length === 1) return d.periods[usable[0]];
+  const dims = { months: [], groups: [], states: [], pharmacies: [], brands: [], classes: [], drugs: [] };
+  const idx = {}; for (const k in dims) idx[k] = new Map();
+  const pharmMeta = [], facts = [], labels = [];
+  let rowCount = 0, client = "";
+  const intern = (dim, label, key = label) => {
+    let i = idx[dim].get(key);
+    if (i === undefined) { i = dims[dim].length; dims[dim].push(label); idx[dim].set(key, i); }
+    return i;
+  };
+  // months claimed newest-period-first so an overlapping re-drop can't double count
+  const monthOwner = new Map();
+  for (const k of [...usable].reverse())
+    for (const m of d.periods[k].dims.months) if (!monthOwner.has(m)) monthOwner.set(m, k);
+  for (const k of usable) {
+    const p = d.periods[k];
+    rowCount += p.rowCount || 0;
+    client = client || p.client;
+    labels.push(p.periodLabel || k);
+    const pmap = p.dims.pharmacies.map((name, i) => {
+      const m = (p.pharmMeta || [])[i] || {};
+      const pi = intern("pharmacies", name, `${name}|${m.npi4 || i}|${m.st || ""}`);
+      if (pi === pharmMeta.length) pharmMeta.push(m);
+      else if (m.addr && !pharmMeta[pi].addr) pharmMeta[pi] = m; // newer meta wins
+      return pi;
+    });
+    const maps = {};
+    for (const dim of ["months", "groups", "states", "brands", "classes", "drugs"])
+      maps[dim] = p.dims[dim].map((v) => intern(dim, v));
+    for (const f of p.facts) {
+      if (monthOwner.get(p.dims.months[f[0]]) !== k) continue;
+      facts.push([maps.months[f[0]], maps.groups[f[1]], maps.states[f[2]], pmap[f[3]],
+        maps.brands[f[4]], maps.classes[f[5]], maps.drugs[f[6]], f[7], f[8], f[9], f[10], f[11], f[12] || 0]);
+    }
+  }
+  return { periodKey: "all", periodLabel: labels.join(" · "), client, rowCount, dims, pharmMeta, facts };
+}
+
+/* --- timeframe drill-down: granularity select (Yearly…Daily) + a
+       multi-select pop over the merged dataset. Selections resolve to
+       month/day predicates in factPass. --- */
 const TF_NAMES = { Y: "YEARS", Q: "QUARTERS", M: "MONTHS", W: "WEEKS", D: "DAYS" };
 
-// entries for one granularity, newest period first (keys: "period|kind|value")
+// entries for one granularity across the merged data, newest first ("kind|value")
 function tfOptions(gran) {
-  const d = util.data, out = [];
-  if (!d || !d.periods) return out;
-  for (const pk of Object.keys(d.periods).sort().reverse()) {
-    const p = d.periods[pk];
-    if (!p.dims) continue;
-    const months = p.dims.months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
-    const dom = utilDayDomain(p);
-    if (gran === "Y") {
-      const ys = new Set(months.map((m) => m.slice(0, 4)));
-      for (const y of [...ys].reverse()) out.push({ key: `${pk}|y|${y}`, label: y });
-    } else if (gran === "Q") {
-      const qs = new Map();
-      for (const m of months) {
-        const [y, mo] = m.split("-").map(Number), q = Math.ceil(mo / 3);
-        qs.set(`${y}-${q}`, `Q${q} ${y}`);
-      }
-      for (const [val, label] of [...qs.entries()].reverse()) out.push({ key: `${pk}|q|${val}`, label });
-    } else if (gran === "M") {
-      for (const m of [...months].reverse()) out.push({ key: `${pk}|m|${m}`, label: monthLabel(m) });
-    } else if (gran === "W" && dom) {
-      const first = ymdToDate(dom.a), last = ymdToDate(dom.b);
-      let w = addDays(first, -((first.getDay() + 6) % 7)); // Monday on/before the period start
-      for (let n = 1; w <= last; w = addDays(w, 7), n++) {
-        const a = Math.max(dateToYmd(w), dom.a), b = Math.min(dateToYmd(addDays(w, 6)), dom.b);
-        out.push({ key: `${pk}|w|${dateToYmd(w)}`, label: `Week ${n} · ${shortDay(a)}–${shortDay(b)}` });
-      }
-    } else if (gran === "D" && dom) {
-      for (let d0 = ymdToDate(dom.a); dateToYmd(d0) <= dom.b; d0 = addDays(d0, 1))
-        out.push({ key: `${pk}|d|${dateToYmd(d0)}`, label: d0.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }) });
+  const p = util.merged, out = [];
+  if (!p || !p.dims) return out;
+  const months = p.dims.months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
+  const dom = utilDayDomain(p);
+  if (gran === "Y") {
+    const ys = new Set(months.map((m) => m.slice(0, 4)));
+    for (const y of [...ys].sort().reverse()) out.push({ key: `y|${y}`, label: y });
+  } else if (gran === "Q") {
+    const qs = new Map();
+    for (const m of months) {
+      const [y, mo] = m.split("-").map(Number), q = Math.ceil(mo / 3);
+      qs.set(`${y}-${q}`, `Q${q} ${y}`);
     }
+    for (const [val, label] of [...qs.entries()].reverse()) out.push({ key: `q|${val}`, label });
+  } else if (gran === "M") {
+    for (const m of [...months].reverse()) out.push({ key: `m|${m}`, label: monthLabel(m) });
+  } else if (gran === "W" && dom) {
+    const first = ymdToDate(dom.a), last = ymdToDate(dom.b);
+    let w = addDays(last, -((last.getDay() + 6) % 7));
+    while (addDays(w, 6) >= first) {
+      out.push({ key: `w|${dateToYmd(w)}`, label: `Wk of ${w.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" })}` });
+      w = addDays(w, -7);
+    }
+  } else if (gran === "D" && dom) {
+    for (let d0 = ymdToDate(dom.b); dateToYmd(d0) >= dom.a; d0 = addDays(d0, -1))
+      out.push({ key: `d|${dateToYmd(d0)}`, label: d0.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }) });
   }
   return out;
 }
 
-// resolve the current selection into fact predicates (months by index for the
-// active period, day ranges for weeks, exact days for daily picks)
+// resolve the current selection into fact predicates (month indices for
+// year/quarter/month picks, day ranges for weeks, exact days for daily)
 function applyTimeframe() {
   util.range = null;
   util.tfMonths = util.tfRanges = util.tfDays = null;
-  const sel = util.tf.sel, d = util.data;
-  const p = d && d.periods && d.periods[util.period];
+  const sel = util.tf.sel, p = util.merged;
   if (!sel || !sel.size || !p || !p.dims) return;
   const months = new Set(), ranges = [], days = new Set();
   for (const key of sel) {
-    const [pk, kind, val] = key.split("|");
-    if (pk !== util.period) continue;
+    const [kind, val] = key.split("|");
     if (kind === "y") {
       p.dims.months.forEach((m, idx) => { if (String(m).startsWith(val + "-")) months.add(idx); });
     } else if (kind === "q") {
@@ -2047,20 +2091,29 @@ function applyTimeframe() {
   if (days.size) util.tfDays = days;
 }
 
+// custom day range: facts without day stamps (older workbooks) fall back to a
+// month-overlap test, so a 2026 range can't accidentally include all of 2025
+function setUtilRange(a, b) {
+  util.range = { a, b };
+  util.rangeMonths = null;
+  const p = util.merged;
+  if (!p || !p.dims) return;
+  const ms = new Set();
+  p.dims.months.forEach((m, idx) => {
+    if (!/^\d{4}-\d{2}$/.test(m)) return;
+    const [y, mo] = m.split("-").map(Number);
+    const mStart = y * 10000 + mo * 100 + 1, mEnd = dateToYmd(new Date(y, mo, 0));
+    if (mStart <= b && mEnd >= a) ms.add(idx);
+  });
+  util.rangeMonths = ms;
+}
+
 function toggleTf(key, on) {
-  if (key === "") { util.tf.sel = null; }
+  if (key === "") util.tf.sel = null;
   else {
-    const pk = key.split("|")[0];
-    if (pk !== util.period) {
-      // entries live in one stored period at a time: switch and start fresh
-      util.period = pk;
-      utilFilterReset();
-      util.tf.sel = new Set([key]);
-    } else {
-      if (!util.tf.sel) util.tf.sel = new Set();
-      on ? util.tf.sel.add(key) : util.tf.sel.delete(key);
-      if (!util.tf.sel.size) util.tf.sel = null;
-    }
+    if (!util.tf.sel) util.tf.sel = new Set();
+    on ? util.tf.sel.add(key) : util.tf.sel.delete(key);
+    if (!util.tf.sel.size) util.tf.sel = null;
   }
   applyTimeframe();
   renderUtil();
@@ -2513,10 +2566,9 @@ function renderUtilTrend(p, hasCube) {
 // pharmacy × brand × class × drug × U&C) that passes the active filters, so
 // the file matches exactly what the charts are showing.
 function downloadUtilCsv() {
-  const d = util.data;
-  const p = d && d.periods && d.periods[util.period];
+  const p = util.merged;
   if (!p) return;
-  if (!Array.isArray(p.facts)) { alert("This period was stored without row-level data — re-run the watcher to rebuild it."); return; }
+  if (!Array.isArray(p.facts)) { alert("This store has no row-level data — re-run the watcher to rebuild it."); return; }
   const filtered = util.range || (util.tf && util.tf.sel && util.tf.sel.size) || Object.values(util.f || {}).some(Boolean);
   const q = (s) => { s = String(s ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const r2 = (v) => Math.round(v * 100) / 100;
@@ -2537,7 +2589,7 @@ function downloadUtilCsv() {
   const blob = new Blob(["﻿" + rows.map((r) => r.map(q).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `myrxcard-utilization-${util.period}${filtered ? "-filtered" : ""}.csv`;
+  a.download = `myrxcard-utilization${filtered ? "-filtered" : ""}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -2556,10 +2608,8 @@ function renderUtil() {
     return;
   }
 
-  const keys = Object.keys(d.periods).sort().reverse();
-  if (!util.period || !d.periods[util.period]) { util.period = d.latest || keys[0]; utilFilterReset(); }
-
-  const p = d.periods[util.period];
+  if (!util.merged) { util.merged = mergedPeriod(d); utilFilterReset(); }
+  const p = util.merged || d.periods[Object.keys(d.periods).sort().pop()];
   if (!util.f) utilFilterReset();
   const hasCube = Array.isArray(p.facts) && p.dims;
   for (const el of $("util-slicers").querySelectorAll("[data-uslicer]")) el.style.display = hasCube ? "" : "none";
@@ -2816,7 +2866,7 @@ async function boot() {
       apply: (a, b) => {
         util.tf.sel = null;
         applyTimeframe();
-        util.range = { a, b };
+        setUtilRange(a, b);
         renderUtil();
       },
     });
@@ -2894,7 +2944,7 @@ async function boot() {
     if (!a || !b) return;
     util.tf.sel = null;
     applyTimeframe();
-    util.range = a <= b ? { a, b } : { a: b, b: a };
+    setUtilRange(Math.min(a, b), Math.max(a, b));
     renderUtil();
   });
   // utilization slicers: button toggles pop; checkbox changes update filters;
