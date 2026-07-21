@@ -609,7 +609,16 @@
         </div>
         <div class="util-period">
           <span class="kicker">Timeframe</span>
-          <select id="util-timeframe" aria-label="Timeframe"></select>
+          <select id="util-gran" aria-label="Report granularity">
+            <option value="Q" selected>Quarterly</option>
+            <option value="M">Monthly</option>
+            <option value="W">Weekly</option>
+            <option value="D">Daily</option>
+          </select>
+        </div>
+        <div class="slicer" id="tf-slicer">
+          <button class="iconbtn" id="tf-btn" type="button">QUARTERS &#9662;</button>
+          <div class="pop" id="tf-pop" hidden></div>
         </div>
         <span class="daterange" id="util-daterange" hidden>
           <input type="date" id="util-from" aria-label="From date">
@@ -1273,7 +1282,7 @@ async function sync() {
 /* ---------------- utilization tab ---------------- */
 // Reads utilization.json (published by tools/watch-utilization.mjs when a
 // quarterly claims .xlsx is dropped into the Avalon Reports folder).
-let util = { loaded: false, data: null, period: null, trend: { measure: "money" } };
+let util = { loaded: false, data: null, period: null, trend: { measure: "money" }, tf: { gran: "Q", sel: null } };
 
 const COL_COLLECTED = "#0A4C70"; // brand navy  (--primary)
 const COL_REVERSED  = "#E9AE2E"; // brand gold  (--accent)
@@ -1483,12 +1492,17 @@ function utilFilterReset() {
   util.f = { groups: null, pharmacies: null, months: null, states: null, brands: null };
   util.psearch = {};
   util.chipsOpen = new Set();
-  util.range = null; // {a, b} as yyyymmdd, from the date slider / quick picks
+  util.range = null; // {a, b} yyyymmdd, from hand-edited date inputs
+  util.tf = { gran: (util.tf && util.tf.gran) || "Q", sel: null };
+  util.tfMonths = util.tfRanges = util.tfDays = null;
 }
 
 // pass check, optionally ignoring one dimension (for slicer counts)
 function factPass(f, skipDim) {
   if (util.range && f[12] && (f[12] < util.range.a || f[12] > util.range.b)) return false;
+  if (util.tfMonths && !util.tfMonths.has(f[0])) return false;
+  if (util.tfRanges && !(f[12] && util.tfRanges.some(([a, b]) => f[12] >= a && f[12] <= b))) return false;
+  if (util.tfDays && !(f[12] && util.tfDays.has(f[12]))) return false;
   const F = util.f;
   for (const dim in USLICER_DIMS) {
     if (dim === skipDim) continue;
@@ -1512,49 +1526,135 @@ function utilDayDomain(p) {
   return a <= b ? { a, b } : null;
 }
 
-// TIMEFRAME dropdown: one pulldown spanning every stored period, grouped
-// Period / Month / Week (weeks only where facts carry day stamps). Picking an
-// entry switches the period if needed and auto-fills the date inputs.
-function buildTimeframe() {
-  const d = util.data;
-  const qs = [], ms = [], ws = [];
-  for (const k of Object.keys(d.periods).sort().reverse()) {
-    const p = d.periods[k];
-    qs.push(`<option value="${esc(k)}|full|">${esc(p.periodLabel || k)}</option>`);
+/* --- timeframe drill-down: granularity select (Quarterly/Monthly/Weekly/
+       Daily) + a multi-select pop of matching entries across every stored
+       period. Selections resolve to month/day predicates in factPass. --- */
+const TF_NAMES = { Q: "QUARTERS", M: "MONTHS", W: "WEEKS", D: "DAYS" };
+
+// entries for one granularity, newest period first (keys: "period|kind|value")
+function tfOptions(gran) {
+  const d = util.data, out = [];
+  if (!d || !d.periods) return out;
+  for (const pk of Object.keys(d.periods).sort().reverse()) {
+    const p = d.periods[pk];
     if (!p.dims) continue;
-    for (const m of p.dims.months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort().reverse())
-      ms.push(`<option value="${esc(k)}|m|${m}">${monthLabel(m)}</option>`);
+    const months = p.dims.months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
     const dom = utilDayDomain(p);
-    if (dom) {
-      const first = ymdToDate(dom.a), last = ymdToDate(dom.b);
-      let w = addDays(last, -((last.getDay() + 6) % 7)); // Monday of the last week
-      while (addDays(w, 6) >= first) {
-        ws.push(`<option value="${esc(k)}|w|${dateToYmd(w)}">Wk of ${shortDay(dateToYmd(w))}</option>`);
-        w = addDays(w, -7);
+    if (gran === "Q") {
+      const qs = new Map();
+      for (const m of months) {
+        const [y, mo] = m.split("-").map(Number), q = Math.ceil(mo / 3);
+        qs.set(`${y}-${q}`, `Q${q} ${y}`);
       }
+      for (const [val, label] of [...qs.entries()].reverse()) out.push({ key: `${pk}|q|${val}`, label });
+    } else if (gran === "M") {
+      for (const m of [...months].reverse()) out.push({ key: `${pk}|m|${m}`, label: monthLabel(m) });
+    } else if (gran === "W" && dom) {
+      const first = ymdToDate(dom.a), last = ymdToDate(dom.b);
+      let w = addDays(first, -((first.getDay() + 6) % 7)); // Monday on/before the period start
+      for (let n = 1; w <= last; w = addDays(w, 7), n++) {
+        const a = Math.max(dateToYmd(w), dom.a), b = Math.min(dateToYmd(addDays(w, 6)), dom.b);
+        out.push({ key: `${pk}|w|${dateToYmd(w)}`, label: `Week ${n} · ${shortDay(a)}–${shortDay(b)}` });
+      }
+    } else if (gran === "D" && dom) {
+      for (let d0 = ymdToDate(dom.a); dateToYmd(d0) <= dom.b; d0 = addDays(d0, 1))
+        out.push({ key: `${pk}|d|${dateToYmd(d0)}`, label: d0.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" }) });
     }
   }
-  $("util-timeframe").innerHTML =
-    `<optgroup label="Period">${qs.join("")}</optgroup>` +
-    (ms.length ? `<optgroup label="Month">${ms.join("")}</optgroup>` : "") +
-    (ws.length ? `<optgroup label="Week">${ws.join("")}</optgroup>` : "");
-  $("util-timeframe").dataset.built = "y";
+  return out;
+}
+
+// resolve the current selection into fact predicates (months by index for the
+// active period, day ranges for weeks, exact days for daily picks)
+function applyTimeframe() {
+  util.range = null;
+  util.tfMonths = util.tfRanges = util.tfDays = null;
+  const sel = util.tf.sel, d = util.data;
+  const p = d && d.periods && d.periods[util.period];
+  if (!sel || !sel.size || !p || !p.dims) return;
+  const months = new Set(), ranges = [], days = new Set();
+  for (const key of sel) {
+    const [pk, kind, val] = key.split("|");
+    if (pk !== util.period) continue;
+    if (kind === "q") {
+      const [y, q] = val.split("-").map(Number);
+      for (let m = (q - 1) * 3 + 1; m <= q * 3; m++) {
+        const idx = p.dims.months.indexOf(`${y}-${String(m).padStart(2, "0")}`);
+        if (idx >= 0) months.add(idx);
+      }
+    } else if (kind === "m") {
+      const idx = p.dims.months.indexOf(val);
+      if (idx >= 0) months.add(idx);
+    } else if (kind === "w") {
+      ranges.push([+val, dateToYmd(addDays(ymdToDate(+val), 6))]);
+    } else if (kind === "d") {
+      days.add(+val);
+    }
+  }
+  if (months.size) util.tfMonths = months;
+  if (ranges.length) util.tfRanges = ranges;
+  if (days.size) util.tfDays = days;
+}
+
+function toggleTf(key, on) {
+  if (key === "") { util.tf.sel = null; }
+  else {
+    const pk = key.split("|")[0];
+    if (pk !== util.period) {
+      // entries live in one stored period at a time: switch and start fresh
+      util.period = pk;
+      utilFilterReset();
+      util.tf.sel = new Set([key]);
+    } else {
+      if (!util.tf.sel) util.tf.sel = new Set();
+      on ? util.tf.sel.add(key) : util.tf.sel.delete(key);
+      if (!util.tf.sel.size) util.tf.sel = null;
+    }
+  }
+  applyTimeframe();
+  renderUtil();
+}
+
+function renderUtilTf() {
+  const gran = util.tf.gran, sel = util.tf.sel, n = sel ? sel.size : 0;
+  $("util-gran").value = gran;
+  $("tf-btn").innerHTML = `${TF_NAMES[gran]}${n ? ` (${n})` : ""} &#9662;`;
+  $("tf-btn").classList.toggle("on", !!n);
+  const pop = $("tf-pop");
+  if (!pop.hidden && pop.children.length && pop.dataset.gran === gran) {
+    // open pop: sync checkboxes in place so the menu survives re-renders
+    for (const inp of pop.querySelectorAll("input[data-tf]"))
+      inp.checked = inp.dataset.tf === "" ? !n : !!(sel && sel.has(inp.dataset.tf));
+    return;
+  }
+  pop.dataset.gran = gran;
+  const opts = tfOptions(gran);
+  pop.innerHTML = opts.length
+    ? (opts.length > 20 ? `<input class="popsearch" type="text" data-popsearch placeholder="Search…">` : "") +
+      `<label class="allrow"><input type="checkbox" data-tf=""${n ? "" : " checked"}> All ${TF_NAMES[gran].toLowerCase()}</label>` +
+      opts.map((o) => `<label><input type="checkbox" data-tf="${o.key}"${sel && sel.has(o.key) ? " checked" : ""}> ${o.label}</label>`).join("")
+    : `<div style="color:var(--ink-mute);font-size:13px;padding:4px">No day-level data in this store</div>`;
 }
 
 function renderUtilDates(p) {
   const dom = utilDayDomain(p);
   util.dayDomain = dom;
   $("util-daterange").hidden = !dom;
-  const tf = $("util-timeframe");
-  if (tf.dataset.built !== "y") buildTimeframe();
-  // no active drill-down -> the select shows the whole current period
-  if (!util.range && !(util.f.months && util.f.months.size)) {
-    const v = `${util.period}|full|`;
-    if ([...tf.options].some((o) => o.value === v)) tf.value = v;
-  }
   if (!dom) return;
-  const a = util.range ? Math.max(util.range.a, dom.a) : dom.a;
-  const b = util.range ? Math.min(util.range.b, dom.b) : dom.b;
+  // inputs mirror the active drill-down (or custom range), clamped to the data
+  let a = dom.a, b = dom.b;
+  if (util.range) { a = util.range.a; b = util.range.b; }
+  else if (util.tfRanges) { a = Math.min(...util.tfRanges.map((r) => r[0])); b = Math.max(...util.tfRanges.map((r) => r[1])); }
+  else if (util.tfDays) { a = Math.min(...util.tfDays); b = Math.max(...util.tfDays); }
+  else if (util.tfMonths) {
+    const strs = [...util.tfMonths].map((i) => p.dims.months[i]).filter(Boolean).sort();
+    if (strs.length) {
+      const [y1, m1] = strs[strs.length - 1].split("-").map(Number);
+      a = +strs[0].replace("-", "") * 100 + 1;
+      b = dateToYmd(new Date(y1, m1, 0));
+    }
+  }
+  a = Math.max(a, dom.a); b = Math.min(b, dom.b);
   $("util-from").min = $("util-to").min = ymdToInput(dom.a);
   $("util-from").max = $("util-to").max = ymdToInput(dom.b);
   $("util-from").value = ymdToInput(a);
@@ -1692,6 +1792,17 @@ function renderUtilSlicers(p) {
       for (const i of items)
         chips.push(`<button class="badge-filter" type="button" data-uchip="${dim}" data-idx="${i}">${esc(clip(chipLabel(dim, i), 26)).toUpperCase()} <span class="x">&#215;</span></button>`);
     }
+  }
+  if (util.tf && util.tf.sel && util.tf.sel.size) {
+    any = true;
+    const n = util.tf.sel.size;
+    let lbl = `${n} ${TF_NAMES[util.tf.gran]}`;
+    if (n <= 2) {
+      const all = tfOptions(util.tf.gran);
+      lbl = [...util.tf.sel].map((k) => { const o = all.find((x) => x.key === k); return o ? o.label : k; }).join(" + ");
+    }
+    chips.push(`<button class="badge-filter" type="button" data-utfclear title="Clear timeframe">` +
+      `${esc(lbl).toUpperCase()} <span class="x">&#215;</span></button>`);
   }
   if (util.range) {
     any = true;
@@ -1855,7 +1966,7 @@ function downloadUtilCsv() {
   const p = d && d.periods && d.periods[util.period];
   if (!p) return;
   if (!Array.isArray(p.facts)) { alert("This period was stored without row-level data — re-run the watcher to rebuild it."); return; }
-  const filtered = util.range || Object.values(util.f || {}).some(Boolean);
+  const filtered = util.range || (util.tf && util.tf.sel && util.tf.sel.size) || Object.values(util.f || {}).some(Boolean);
   const q = (s) => { s = String(s ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const r2 = (v) => Math.round(v * 100) / 100;
   const rows = [["Month", "ProcessDate", "Client", "Pharmacy", "PharmacyAddress", "PharmacyCity", "PharmacyState", "PharmacyZip", "NPILast4", "PharmacyGroup",
@@ -1916,6 +2027,7 @@ function renderUtil() {
     (gen ? ` · UPDATED ${gen.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }).toUpperCase()}` : "");
 
   if (hasCube) renderUtilSlicers(p);
+  renderUtilTf();
   renderUtilDates(hasCube ? p : { facts: null });
 
   $("kpi-money").innerHTML =
@@ -2095,38 +2207,27 @@ async function boot() {
     if (b) setTab(b.dataset.tab);
   });
   $("util-csv-btn").addEventListener("click", downloadUtilCsv);
-  // TIMEFRAME: period entries switch the stored period; month/week entries
-  // drill into it (day range where facts carry dates, month filter otherwise)
-  $("util-timeframe").addEventListener("change", (e) => {
-    const [pk, kind, val] = e.target.value.split("|");
-    if (util.period !== pk) { util.period = pk; utilFilterReset(); }
-    util.range = null;
-    util.f.months = null;
-    const p = util.data.periods[pk];
-    if (kind === "m") {
-      const dom = utilDayDomain(p);
-      if (dom) {
-        const [y, mo] = val.split("-").map(Number);
-        util.range = { a: Math.max(y * 10000 + mo * 100 + 1, dom.a), b: Math.min(dateToYmd(new Date(y, mo, 0)), dom.b) };
-      } else {
-        const idx = p.dims.months.indexOf(val);
-        if (idx >= 0) util.f.months = new Set([idx]);
-      }
-    } else if (kind === "w") {
-      util.range = { a: +val, b: dateToYmd(addDays(ymdToDate(+val), 6)) };
-    }
+  // timeframe: granularity select resets the drill-down list; entries toggle
+  // through the checkbox pop (handled with the other slicer changes below)
+  $("util-gran").addEventListener("change", (e) => {
+    util.tf = { gran: e.target.value, sel: null };
+    applyTimeframe();
     renderUtil();
   });
-  // hand-edited dates become a custom range within the current period
+  // hand-edited dates become a custom range, replacing any drill-down picks
   for (const id of ["util-from", "util-to"]) $(id).addEventListener("change", () => {
     const a = inputToYmd($("util-from").value), b = inputToYmd($("util-to").value);
-    if (a && b) { util.range = a <= b ? { a, b } : { a: b, b: a }; renderUtil(); }
+    if (!a || !b) return;
+    util.tf.sel = null;
+    applyTimeframe();
+    util.range = a <= b ? { a, b } : { a: b, b: a };
+    renderUtil();
   });
   // utilization slicers: button toggles pop; checkbox changes update filters;
   // chips clear one filter; pharmacy bars cross-filter on click
   $("view-utilization").addEventListener("click", (e) => {
     if (e.target.closest("a")) return; // maps links open in a new tab, don't also filter
-    const sbtn = e.target.closest("[data-uslicer] > button");
+    const sbtn = e.target.closest("[data-uslicer] > button, #tf-slicer > button");
     if (sbtn) {
       e.stopPropagation();
       const pop = sbtn.parentElement.querySelector(".pop");
@@ -2140,6 +2241,7 @@ async function boot() {
     const xClear = e.target.closest("[data-uchipclear]");
     if (xClear) { util.f[xClear.dataset.uchipclear] = null; renderUtil(); return; }
     if (e.target.closest("[data-urangeclear]")) { util.range = null; renderUtil(); return; }
+    if (e.target.closest("[data-utfclear]")) { util.tf.sel = null; applyTimeframe(); renderUtil(); return; }
     const ex = e.target.closest("[data-uexpand]");
     if (ex) { util.chipsOpen.add(ex.dataset.uexpand); renderUtil(); return; }
     const col = e.target.closest("[data-ucollapse]");
@@ -2171,14 +2273,16 @@ async function boot() {
   });
   // slicer search boxes filter their pop's rows without re-rendering
   $("util-slicers").addEventListener("input", (e) => {
-    const inp = e.target.closest("input[data-usearch]");
+    const inp = e.target.closest("input.popsearch");
     if (!inp) return;
-    util.psearch[inp.dataset.usearch] = inp.value;
+    if (inp.dataset.usearch) util.psearch[inp.dataset.usearch] = inp.value;
     const q = inp.value.toLowerCase();
     for (const lbl of inp.parentElement.querySelectorAll("label:not(.allrow)"))
       lbl.style.display = !q || lbl.textContent.toLowerCase().includes(q) ? "" : "none";
   });
   $("util-slicers").addEventListener("change", (e) => {
+    const tcb = e.target.closest("input[data-tf]");
+    if (tcb) { toggleTf(tcb.dataset.tf, tcb.checked); return; }
     const gc = e.target.closest("input[data-uchain]");
     if (gc) {
       // chain header: add or drop every member location in one go
