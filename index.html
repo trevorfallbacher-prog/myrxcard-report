@@ -101,7 +101,7 @@
   .daterange input[type="date"]:focus { border-color: var(--secondary); }
   .slicer { position: relative; }
   .pop {
-    position: absolute; top: calc(100% + 6px); right: 0; z-index: 40;
+    position: absolute; top: calc(100% + 6px); left: 0; z-index: 40;
     background: var(--card); border: 1px solid var(--hair); border-radius: 10px;
     box-shadow: 0 8px 28px rgba(10,76,112,0.16); padding: 8px 10px; min-width: 230px;
     max-width: calc(100vw - 16px);
@@ -348,7 +348,6 @@
   /* utilization slicers: scrollable pops with sticky search, anchored under their button */
   #util-slicers .pop {
     max-height: 350px; overflow-y: auto; min-width: 240px; max-width: min(400px, 84vw);
-    left: 0; right: auto;
   }
   #util-slicers .pop label { white-space: nowrap; }
   .popsearch {
