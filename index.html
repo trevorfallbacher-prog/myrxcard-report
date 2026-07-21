@@ -282,6 +282,7 @@
     html, body { background: #fff !important; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .controls-stack, footer, #notice, .stack-controls, #util-csv-btn, #tip { display: none !important; }
+    * { animation: none !important; transition: none !important; }
     #app { padding: 0; max-width: none; }
     header.top { margin-bottom: 14px; }
     .print-meta { display: block; }
@@ -390,6 +391,48 @@
     background: var(--ink); color: #F2F8FF; font-family: var(--mono); font-size: 11.5px;
     line-height: 1.55; padding: 7px 10px; border-radius: 7px; max-width: 320px;
     box-shadow: 0 6px 18px rgba(10,30,45,0.3); white-space: pre-line;
+  }
+
+  /* ---------- Motion ----------
+     Entrance choreography: renders assign each sibling an index (--i) and
+     these rules turn it into staggered delays. Content is rebuilt on every
+     filter change, so the choreography replays as the data updates. */
+  @keyframes panelIn { from { opacity: 0; transform: translateY(16px) scale(0.985); } }
+  @keyframes fadeSlide { from { opacity: 0; transform: translateX(-12px); } }
+  @keyframes growX { from { width: 0; } }
+  @keyframes riseY { from { transform: scaleY(0.02); } }
+  @keyframes popIn { from { opacity: 0; transform: translateY(-6px) scale(0.96); } }
+  @keyframes pinPop { from { opacity: 0; transform: scale(0); } }
+  @keyframes sweepIn { from { opacity: 0; transform: rotate(-70deg) scale(0.8); } }
+  @keyframes softFade { from { opacity: 0; } }
+  .grid > .panel { animation: panelIn 0.55s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
+  .stats .stat { animation: panelIn 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: calc(var(--i, 0) * 55ms); }
+  .kpi { animation: fadeSlide 0.5s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
+  .bar-row { animation: fadeSlide 0.45s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; animation-delay: min(calc(var(--i, 0) * 35ms), 500ms); }
+  .bar-row .track i { animation: growX 0.65s cubic-bezier(0.25, 0.9, 0.3, 1) backwards; animation-delay: min(calc(var(--i, 0) * 35ms + 140ms), 640ms); }
+  .state-list button { animation: fadeSlide 0.4s backwards; animation-delay: min(calc(var(--i, 0) * 30ms), 400ms); }
+  #pharm-chart rect.bar, #util-trend rect {
+    /* scale about the chart baseline (--base set on the svg) so stacked
+       segments rise as one column instead of floating apart */
+    transform-box: view-box; transform-origin: center var(--base, bottom);
+    animation: riseY 0.55s cubic-bezier(0.22, 0.9, 0.28, 1) backwards;
+    animation-delay: min(calc(var(--i, 0) * 12ms), 480ms);
+  }
+  #pharm-chart text.val, #util-trend text.val { animation: softFade 0.45s backwards; animation-delay: min(calc(var(--i, 0) * 12ms + 320ms), 820ms); }
+  .donut-wrap svg { animation: sweepIn 0.7s cubic-bezier(0.2, 0.8, 0.25, 1) backwards; }
+  .donut-legend .li { animation: fadeSlide 0.5s backwards; animation-delay: calc(180ms + var(--i, 0) * 110ms); }
+  .geo-map .pin { animation: pinPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) backwards; animation-delay: min(calc(var(--i, 0) * 45ms), 650ms); }
+  .uc-table tbody tr, #recent tbody tr { animation: fadeSlide 0.4s backwards; animation-delay: min(calc(var(--i, 0) * 22ms), 450ms); }
+  .badge-filter { animation: popIn 0.25s ease-out backwards; }
+  .pop:not([hidden]) { animation: popIn 0.18s cubic-bezier(0.2, 0.8, 0.25, 1); }
+  #tip { animation: popIn 0.15s ease-out; }
+  .grid > .panel { transition: transform 0.25s ease-out, box-shadow 0.25s ease-out; }
+  .grid > .panel:hover { transform: translateY(-2px); box-shadow: 0 3px 6px rgba(10,76,112,0.06), 0 16px 36px rgba(10,76,112,0.11); }
+  .iconbtn { transition: border-color 150ms ease-out, color 150ms ease-out, transform 150ms ease-out, background 150ms ease-out; }
+  .iconbtn:hover { transform: translateY(-1px); }
+  .iconbtn:active { transform: translateY(0) scale(0.97); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; }
   }
   /* pharmacy locations: list + map */
   .geo-wrap { display: flex; gap: 22px; align-items: stretch; }
@@ -1208,6 +1251,11 @@ function renderAll() {
   renderDevices(a);
   renderSpread(a);
   renderRecent(a);
+  // entrance choreography for the search tab
+  for (const sel of ["#stats", "#top-drugs", "#drill", "#groups", "#recent tbody"])
+    setStagger(sel);
+  setStagger(".state-list");
+  for (const el of document.querySelectorAll("#stats .v")) countUp(el);
   const fd = (t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   $("foot-window").textContent = a.total ? `Window: ${fd(a.first)} – ${fd(a.anchor)}` : "";
   const gen = new Date().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
@@ -1384,7 +1432,7 @@ function pharmChartSVG(data, selSet) {
     const cx = x + bw / 2, cy = baseY + 9;
     s += `<text class="cat" x="${cx}" y="${cy}" text-anchor="end" font-size="9" transform="rotate(-55 ${cx} ${cy})">${esc(clip(p.name, 20))}</text>`;
   });
-  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${s}</svg>`;
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="--base:${baseY}px">${s}</svg>`;
 }
 
 /* --- slicer filtering over the fact cube --- */
@@ -1867,7 +1915,7 @@ function renderUtilGeo(p, agg) {
     vb = `${x0.toFixed(0)} ${y0.toFixed(0)} ${(x1 - x0).toFixed(0)} ${(y1 - y0).toFixed(0)}`;
     rScale = Math.max((x1 - x0) / 959, (y1 - y0) / 593);
   }
-  const pins = [...clusters.values()].sort((a, b) => b.v - a.v).map((c) => {
+  const pins = [...clusters.values()].sort((a, b) => b.v - a.v).map((c, idx) => {
     const cx = c.x / c.members.length, cy = c.y / c.members.length;
     const r = (4 + 11 * Math.sqrt(c.v / maxV)) * rScale;
     const isSel = sel && c.members.some((pi) => sel.has(pi));
@@ -1875,7 +1923,7 @@ function renderUtilGeo(p, agg) {
     const title = c.members.length === 1
       ? `${topName} · ${money0(c.v)}`
       : `${c.members.length} locations · ${money0(c.v)} · incl. ${topName}`;
-    return `<circle class="pin${isSel ? " sel" : ""}" data-pis="${c.members.join(",")}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(2)}"><title>${esc(title)}</title></circle>`;
+    return `<circle class="pin${isSel ? " sel" : ""}" style="--i:${idx}" data-pis="${c.members.join(",")}" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r.toFixed(2)}"><title>${esc(title)}</title></circle>`;
   }).join("");
   $("util-map").innerHTML = `<svg viewBox="${vb}" role="img" aria-label="Pharmacy locations">` +
     `<rect class="ocean" x="0" y="0" width="959" height="593"/>${base}${pins}</svg>`;
@@ -1888,6 +1936,39 @@ function hbars(el, entries, fmtVal, revStyle) {
     `<div class="bar-row" title="${esc(e.name)}"><span class="name">${esc(e.name)}</span>` +
     `<span class="track"><i${revStyle ? ' class="rev"' : ""} style="width:${(100 * e.v / max).toFixed(1)}%"></i></span>` +
     `<span class="n num">${fmtVal(e.v)}</span></div>`).join("");
+}
+
+/* --- motion helpers --- */
+// give each child its sibling index so the CSS stagger delays can key off it
+function setStagger(sel) {
+  for (const parent of document.querySelectorAll(sel))
+    [...parent.children].forEach((c, i) => { if (c.style) c.style.setProperty("--i", String(i)); });
+}
+
+// roll a formatted number up to its final value in place ($/%, thousands
+// separators and decimals preserved); short forms like $1.2M are left alone
+function countUp(el, ms = 650) {
+  if (!el) return;
+  const final = el.textContent;
+  if (/[KM]\b/.test(final)) return;
+  const m = final.match(/-?[\d,]+(\.\d+)?/);
+  if (!m) return;
+  const target = parseFloat(m[0].replace(/,/g, ""));
+  if (!isFinite(target) || Math.abs(target) < 2) return;
+  const dec = m[1] ? m[1].length - 1 : 0;
+  const pre = final.slice(0, m.index), post = final.slice(m.index + m[0].length);
+  const sep = m[0].includes(",");
+  const t0 = performance.now();
+  const step = (t) => {
+    if (!el.isConnected) return;
+    const k = Math.min((t - t0) / ms, 1);
+    const v = target * (1 - Math.pow(1 - k, 3)); // ease-out cubic
+    el.textContent = k >= 1 ? final : pre + v.toLocaleString("en-US", {
+      minimumFractionDigits: dec, maximumFractionDigits: dec, useGrouping: sep,
+    }) + post;
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
 
 // shrink KPI numbers to fit their grid cell (quarter totals in the millions
@@ -1952,7 +2033,7 @@ function renderUtilTrend(p, hasCube) {
       s += `<text class="val" x="${x + bw / 2}" y="${(y - 5).toFixed(1)}" text-anchor="middle" font-size="10">${fmtV(colTotal[k])}</text>`;
     s += `<text class="cat" x="${x + bw / 2}" y="${baseY + 16}" text-anchor="middle" font-size="9.5">${esc(monthLabel(p.dims.months[mi]))}</text>`;
   });
-  $("util-trend").innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${s}</svg>`;
+  $("util-trend").innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="--base:${baseY}px">${s}</svg>`;
   $("util-trend-legend").innerHTML = series.map((sr) =>
     `<div class="li"><span class="sw" style="background:${sr.color}"></span>` +
     `<span><b>${esc(sr.name)}</b> <span class="p">${fmtV(sr.vals.reduce((a, b) => a + b, 0))}</span></span></div>`).join("");
@@ -2064,12 +2145,28 @@ function renderUtil() {
   $("uc-drugs").innerHTML = a.ucDrugs.length
     ? a.ucDrugs.map((x) => `<tr><td class="drug">${esc(x.name)}</td><td class="r num">${fmt(x.v)}</td></tr>`).join("")
     : `<tr><td colspan="2" style="color:var(--ink-mute)">No U&amp;C claims under the current filters.</td></tr>`;
+
+  // entrance choreography: index the fresh content for staggered delays, then
+  // roll the headline numbers up to their values
+  for (const sel of ["#kpi-money", "#kpi-claims", "#legend-money", "#legend-claims", "#util-trend-legend",
+    "#pharm-chart svg", "#util-trend svg", "#util-locations", "#util-classes", "#util-revdrugs", "#uc-drugs"])
+    setStagger(sel);
+  for (const el of document.querySelectorAll("#kpi-money .v, #kpi-claims .v")) countUp(el);
+  countUp($("uc-count"));
 }
 
 async function setTab(name) {
+  const switching = state.tab !== name;
   state.tab = name;
   $("view-search").hidden = name !== "search";
   $("view-utilization").hidden = name !== "util";
+  if (switching) { // replay the panel entrance choreography for the new view
+    const view = $(name === "search" ? "view-search" : "view-utilization");
+    const els = view.querySelectorAll(".grid > .panel, .stats .stat");
+    for (const el of els) el.style.animation = "none";
+    void view.offsetWidth;
+    for (const el of els) el.style.animation = "";
+  }
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   $("search-only").style.display = name === "search" ? "contents" : "none";
   $("app-title").textContent = name === "search" ? "Search performance" : "Utilization";
@@ -2202,6 +2299,7 @@ async function boot() {
   });
   document.addEventListener("mousemove", (e) => { if (tipOn) moveTip(e); });
   document.addEventListener("mouseleave", () => { tipEl.style.display = "none"; tipOn = false; });
+  setStagger(".grid"); // panels keep their entrance order across tab switches
   $("tabs").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-tab]");
     if (b) setTab(b.dataset.tab);
