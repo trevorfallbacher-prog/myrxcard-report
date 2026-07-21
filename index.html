@@ -281,7 +281,7 @@
     @page { margin: 12mm; }
     html, body { background: #fff !important; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    .controls-stack, footer, #notice, .stack-controls, #util-csv-btn, .util-daterow { display: none !important; }
+    .controls-stack, footer, #notice, .stack-controls, #util-csv-btn, #tip { display: none !important; }
     #app { padding: 0; max-width: none; }
     header.top { margin-bottom: 14px; }
     .print-meta { display: block; }
@@ -384,25 +384,13 @@
   #util-trend .axis { stroke: var(--hair); stroke-width: 1; }
   #util-trend .axlbl { font-family: var(--mono); fill: var(--ink-mute); font-size: 10px; }
   .trend-legend { flex-direction: row; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
-  /* utilization date range: quick-pick + inputs + dual-thumb day slider */
-  .util-daterow { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 14px 0 4px; }
-  .util-daterow[hidden] { display: none; }
-  .dslider { position: relative; flex: 1; min-width: 240px; max-width: 560px; height: 38px; }
-  .dslider .ds-track { position: absolute; left: 0; right: 0; top: 10px; height: 4px; background: var(--hair); border-radius: 2px; }
-  .dslider .ds-fill { position: absolute; top: 10px; height: 4px; background: var(--secondary); border-radius: 2px; }
-  .dslider input[type="range"] {
-    position: absolute; left: 0; top: 1px; width: 100%; margin: 0; height: 22px;
-    -webkit-appearance: none; appearance: none; background: transparent; pointer-events: none; outline: none;
+  /* floating hover tooltip (replaces the browser's delayed native title tips) */
+  #tip {
+    position: fixed; z-index: 90; display: none; pointer-events: none;
+    background: var(--ink); color: #F2F8FF; font-family: var(--mono); font-size: 11.5px;
+    line-height: 1.55; padding: 7px 10px; border-radius: 7px; max-width: 320px;
+    box-shadow: 0 6px 18px rgba(10,30,45,0.3); white-space: pre-line;
   }
-  .dslider input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none; pointer-events: auto; width: 16px; height: 16px; border-radius: 50%;
-    background: var(--card); border: 2px solid var(--secondary); cursor: grab; box-shadow: 0 1px 4px rgba(10,76,112,0.25);
-  }
-  .dslider input[type="range"]::-moz-range-thumb {
-    pointer-events: auto; width: 13px; height: 13px; border-radius: 50%;
-    background: var(--card); border: 2px solid var(--secondary); cursor: grab;
-  }
-  .ds-labels { position: absolute; top: 22px; left: 0; right: 0; display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10.5px; color: var(--ink-mute); }
   /* pharmacy locations: list + map */
   .geo-wrap { display: flex; gap: 22px; align-items: stretch; }
   .geo-list { flex: 0 0 400px; max-height: 430px; overflow-y: auto; padding-right: 6px; }
@@ -611,10 +599,6 @@
           <button class="iconbtn" type="button">PHARMACIES &#9662;</button>
           <div class="pop" hidden></div>
         </div>
-        <div class="slicer" data-uslicer="months">
-          <button class="iconbtn" type="button">MONTHS &#9662;</button>
-          <div class="pop" hidden></div>
-        </div>
         <div class="slicer" data-uslicer="states">
           <button class="iconbtn" type="button">STATES &#9662;</button>
           <div class="pop" hidden></div>
@@ -624,24 +608,15 @@
           <div class="pop" hidden></div>
         </div>
         <div class="util-period">
-          <span class="kicker">Quarter</span>
-          <select id="util-select" aria-label="Reporting period"></select>
+          <span class="kicker">Timeframe</span>
+          <select id="util-timeframe" aria-label="Timeframe"></select>
         </div>
-        <button class="iconbtn" id="util-csv-btn" type="button" title="Download this period's data as CSV">CSV &#8595;</button>
-      </div>
-    </div>
-    <div class="util-daterow" id="util-daterow" hidden>
-      <select class="periodsel" id="util-quick" aria-label="Quick date range"></select>
-      <span class="daterange">
-        <input type="date" id="util-from" aria-label="From date">
-        <span style="color:var(--ink-mute)">&#8211;</span>
-        <input type="date" id="util-to" aria-label="To date">
-      </span>
-      <div class="dslider" id="util-dslider">
-        <div class="ds-track"></div><div class="ds-fill" id="ds-fill"></div>
-        <input type="range" id="ds-a" aria-label="Range start">
-        <input type="range" id="ds-b" aria-label="Range end">
-        <div class="ds-labels"><span id="ds-la"></span><span id="ds-lb"></span></div>
+        <span class="daterange" id="util-daterange" hidden>
+          <input type="date" id="util-from" aria-label="From date">
+          <span style="color:var(--ink-mute)">&#8211;</span>
+          <input type="date" id="util-to" aria-label="To date">
+        </span>
+        <button class="iconbtn" id="util-csv-btn" type="button" title="Download the current filtered view as CSV">CSV &#8595;</button>
       </div>
     </div>
     <div id="util-chips"></div>
@@ -1527,7 +1502,6 @@ function factPass(f, skipDim) {
 const ymdToDate = (n) => new Date(Math.floor(n / 10000), Math.floor(n / 100) % 100 - 1, n % 100);
 const dateToYmd = (d) => d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
-const dayDiff = (a, b) => Math.round((b - a) / 86400000);
 const ymdToInput = (n) => `${String(n).slice(0, 4)}-${String(n).slice(4, 6)}-${String(n).slice(6)}`;
 const inputToYmd = (s) => (s ? +s.replace(/-/g, "") : null);
 const shortDay = (n) => ymdToDate(n).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -1538,66 +1512,53 @@ function utilDayDomain(p) {
   return a <= b ? { a, b } : null;
 }
 
-function updateSliderViz() {
-  if (!util.dayDomain) return;
-  const max = Math.max(+$("ds-a").max, 1);
-  const lo = Math.min(+$("ds-a").value, +$("ds-b").value), hi = Math.max(+$("ds-a").value, +$("ds-b").value);
-  $("ds-fill").style.left = (100 * lo / max) + "%";
-  $("ds-fill").style.width = (100 * (hi - lo) / max) + "%";
-  const d0 = ymdToDate(util.dayDomain.a);
-  $("ds-la").textContent = shortDay(dateToYmd(addDays(d0, lo)));
-  $("ds-lb").textContent = shortDay(dateToYmd(addDays(d0, hi)));
-}
-
-function sliderRange() {
-  const d0 = ymdToDate(util.dayDomain.a);
-  const lo = Math.min(+$("ds-a").value, +$("ds-b").value), hi = Math.max(+$("ds-a").value, +$("ds-b").value);
-  return { a: dateToYmd(addDays(d0, lo)), b: dateToYmd(addDays(d0, hi)) };
-}
-
-function buildQuickOptions(dom) {
-  const qs = new Map(), ms = new Map(), ws = new Map();
-  let d = ymdToDate(dom.a);
-  const end = ymdToDate(dom.b);
-  while (d <= end) {
-    const y = d.getFullYear(), mo = d.getMonth(), q0 = Math.floor(mo / 3) * 3;
-    const qk = `Q${q0 / 3 + 1} ${y}`;
-    if (!qs.has(qk)) qs.set(qk, [dateToYmd(new Date(y, q0, 1)), dateToYmd(new Date(y, q0 + 3, 0))]);
-    const mk = `${y}-${String(mo + 1).padStart(2, "0")}`;
-    if (!ms.has(mk)) ms.set(mk, [dateToYmd(new Date(y, mo, 1)), dateToYmd(new Date(y, mo + 1, 0))]);
-    const wStart = addDays(d, -((d.getDay() + 6) % 7)); // Monday
-    const wk = dateToYmd(wStart);
-    if (!ws.has(wk)) ws.set(wk, [wk, dateToYmd(addDays(wStart, 6))]);
-    d = addDays(d, 1);
+// TIMEFRAME dropdown: one pulldown spanning every stored period, grouped
+// Period / Month / Week (weeks only where facts carry day stamps). Picking an
+// entry switches the period if needed and auto-fills the date inputs.
+function buildTimeframe() {
+  const d = util.data;
+  const qs = [], ms = [], ws = [];
+  for (const k of Object.keys(d.periods).sort().reverse()) {
+    const p = d.periods[k];
+    qs.push(`<option value="${esc(k)}|full|">${esc(p.periodLabel || k)}</option>`);
+    if (!p.dims) continue;
+    for (const m of p.dims.months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort().reverse())
+      ms.push(`<option value="${esc(k)}|m|${m}">${monthLabel(m)}</option>`);
+    const dom = utilDayDomain(p);
+    if (dom) {
+      const first = ymdToDate(dom.a), last = ymdToDate(dom.b);
+      let w = addDays(last, -((last.getDay() + 6) % 7)); // Monday of the last week
+      while (addDays(w, 6) >= first) {
+        ws.push(`<option value="${esc(k)}|w|${dateToYmd(w)}">Wk of ${shortDay(dateToYmd(w))}</option>`);
+        w = addDays(w, -7);
+      }
+    }
   }
-  const opts = (m, lbl) => [...m.entries()].map(([k, [a, b]]) =>
-    `<option value="${a}:${b}">${lbl ? lbl(k) : k}</option>`).join("");
-  $("util-quick").innerHTML = `<option value="">Full period</option>` +
-    `<optgroup label="Quarter">${opts(qs)}</optgroup>` +
-    `<optgroup label="Month">${opts(ms, monthLabel)}</optgroup>` +
-    `<optgroup label="Week">${opts(ws, (k) => "Wk of " + shortDay(+k))}</optgroup>`;
-  $("util-quick").dataset.built = util.period;
+  $("util-timeframe").innerHTML =
+    `<optgroup label="Period">${qs.join("")}</optgroup>` +
+    (ms.length ? `<optgroup label="Month">${ms.join("")}</optgroup>` : "") +
+    (ws.length ? `<optgroup label="Week">${ws.join("")}</optgroup>` : "");
+  $("util-timeframe").dataset.built = "y";
 }
 
 function renderUtilDates(p) {
   const dom = utilDayDomain(p);
   util.dayDomain = dom;
-  $("util-daterow").hidden = !dom;
+  $("util-daterange").hidden = !dom;
+  const tf = $("util-timeframe");
+  if (tf.dataset.built !== "y") buildTimeframe();
+  // no active drill-down -> the select shows the whole current period
+  if (!util.range && !(util.f.months && util.f.months.size)) {
+    const v = `${util.period}|full|`;
+    if ([...tf.options].some((o) => o.value === v)) tf.value = v;
+  }
   if (!dom) return;
-  if ($("util-quick").dataset.built !== util.period) buildQuickOptions(dom);
   const a = util.range ? Math.max(util.range.a, dom.a) : dom.a;
   const b = util.range ? Math.min(util.range.b, dom.b) : dom.b;
   $("util-from").min = $("util-to").min = ymdToInput(dom.a);
   $("util-from").max = $("util-to").max = ymdToInput(dom.b);
   $("util-from").value = ymdToInput(a);
   $("util-to").value = ymdToInput(b);
-  const d0 = ymdToDate(dom.a), span = Math.max(dayDiff(d0, ymdToDate(dom.b)), 1);
-  $("ds-a").min = $("ds-b").min = 0;
-  $("ds-a").max = $("ds-b").max = span;
-  $("ds-a").value = dayDiff(d0, ymdToDate(a));
-  $("ds-b").value = dayDiff(d0, ymdToDate(b));
-  if (!util.range) $("util-quick").value = "";
-  updateSliderViz();
 }
 
 function togglePharm(pi) {
@@ -1886,20 +1847,22 @@ function renderUtilTrend(p, hasCube) {
     `<span><b>${esc(sr.name)}</b> <span class="p">${fmtV(sr.vals.reduce((a, b) => a + b, 0))}</span></span></div>`).join("");
 }
 
-// Fact-level export of the selected period — every row of the cube (month ×
-// client × pharmacy × brand × class × drug × U&C), ignoring active slicers so
-// the team always gets the complete dataset.
+// Fact-level export of the current view — every cube row (date × client ×
+// pharmacy × brand × class × drug × U&C) that passes the active filters, so
+// the file matches exactly what the charts are showing.
 function downloadUtilCsv() {
   const d = util.data;
   const p = d && d.periods && d.periods[util.period];
   if (!p) return;
   if (!Array.isArray(p.facts)) { alert("This period was stored without row-level data — re-run the watcher to rebuild it."); return; }
+  const filtered = util.range || Object.values(util.f || {}).some(Boolean);
   const q = (s) => { s = String(s ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const r2 = (v) => Math.round(v * 100) / 100;
   const rows = [["Month", "ProcessDate", "Client", "Pharmacy", "PharmacyAddress", "PharmacyCity", "PharmacyState", "PharmacyZip", "NPILast4", "PharmacyGroup",
     "Brand", "TherapeuticClass", "Drug", "PaidAtUC", "PaidDollars", "ReversedDollars", "CollectedDollars",
     "PaidClaims", "ReversedClaims", "CollectedClaims"]];
   for (const f of p.facts) {
+    if (!factPass(f)) continue;
     const meta = (p.pharmMeta && p.pharmMeta[f[3]]) || {};
     rows.push([
       p.dims.months[f[0]], f[12] ? ymdToInput(f[12]) : "", p.dims.groups[f[1]], p.dims.pharmacies[f[3]], meta.addr || "", meta.city || "", p.dims.states[f[2]],
@@ -1912,7 +1875,7 @@ function downloadUtilCsv() {
   const blob = new Blob(["﻿" + rows.map((r) => r.map(q).join(",")).join("\r\n")], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `myrxcard-utilization-${util.period}.csv`;
+  a.download = `myrxcard-utilization-${util.period}${filtered ? "-filtered" : ""}.csv`;
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -1927,14 +1890,12 @@ function renderUtil() {
       ? esc(util.error)
       : "No utilization report yet. Drop a quarterly claims workbook " +
         "(<code>MyRx … Claims … .xlsx</code>) into the <b>Avalon Reports</b> folder and it will appear here.";
-    $("util-select").innerHTML = ""; $("util-client").textContent = ""; $("util-window").textContent = "";
+    $("util-client").textContent = ""; $("util-window").textContent = "";
     return;
   }
 
   const keys = Object.keys(d.periods).sort().reverse();
   if (!util.period || !d.periods[util.period]) { util.period = d.latest || keys[0]; utilFilterReset(); }
-  $("util-select").innerHTML = keys.map((k) =>
-    `<option value="${esc(k)}"${k === util.period ? " selected" : ""}>${esc(d.periods[k].periodLabel || k)}</option>`).join("");
 
   const p = d.periods[util.period];
   if (!util.f) utilFilterReset();
@@ -2098,30 +2059,69 @@ async function boot() {
     else toggleState(cb.dataset.state);
   });
   $("pdf-btn").addEventListener("click", () => window.print());
+  // styled instant tooltips: on first hover, any element's title attribute (or
+  // an SVG shape's <title> child) migrates to data-tip and shows in #tip
+  const tipEl = document.createElement("div");
+  tipEl.id = "tip";
+  document.body.appendChild(tipEl);
+  let tipOn = false;
+  const moveTip = (e) => {
+    const r = tipEl.getBoundingClientRect(), pad = 14;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    if (x + r.width > innerWidth - 8) x = e.clientX - r.width - pad;
+    if (y + r.height > innerHeight - 8) y = e.clientY - r.height - pad;
+    tipEl.style.left = x + "px";
+    tipEl.style.top = y + "px";
+  };
+  document.addEventListener("mouseover", (e) => {
+    if (!(e.target instanceof Element)) return;
+    let src = e.target.closest("[data-tip], [title]");
+    if (src && src.hasAttribute("title")) {
+      src.setAttribute("data-tip", src.getAttribute("title"));
+      src.removeAttribute("title");
+    }
+    if (!src) {
+      const t = e.target.querySelector && e.target.querySelector(":scope > title");
+      if (t) { e.target.setAttribute("data-tip", t.textContent); t.remove(); src = e.target; }
+    }
+    const txt = src && src.getAttribute("data-tip");
+    if (txt) { tipEl.textContent = txt; tipEl.style.display = "block"; tipOn = true; moveTip(e); }
+    else if (tipOn) { tipEl.style.display = "none"; tipOn = false; }
+  });
+  document.addEventListener("mousemove", (e) => { if (tipOn) moveTip(e); });
+  document.addEventListener("mouseleave", () => { tipEl.style.display = "none"; tipOn = false; });
   $("tabs").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-tab]");
     if (b) setTab(b.dataset.tab);
   });
-  $("util-select").addEventListener("change", (e) => { util.period = e.target.value; utilFilterReset(); renderUtil(); });
   $("util-csv-btn").addEventListener("click", downloadUtilCsv);
-  // date range: quick picks fill the range; inputs and slider set it directly
-  $("util-quick").addEventListener("change", (e) => {
-    const v = e.target.value;
-    util.range = v ? { a: +v.split(":")[0], b: +v.split(":")[1] } : null;
+  // TIMEFRAME: period entries switch the stored period; month/week entries
+  // drill into it (day range where facts carry dates, month filter otherwise)
+  $("util-timeframe").addEventListener("change", (e) => {
+    const [pk, kind, val] = e.target.value.split("|");
+    if (util.period !== pk) { util.period = pk; utilFilterReset(); }
+    util.range = null;
+    util.f.months = null;
+    const p = util.data.periods[pk];
+    if (kind === "m") {
+      const dom = utilDayDomain(p);
+      if (dom) {
+        const [y, mo] = val.split("-").map(Number);
+        util.range = { a: Math.max(y * 10000 + mo * 100 + 1, dom.a), b: Math.min(dateToYmd(new Date(y, mo, 0)), dom.b) };
+      } else {
+        const idx = p.dims.months.indexOf(val);
+        if (idx >= 0) util.f.months = new Set([idx]);
+      }
+    } else if (kind === "w") {
+      util.range = { a: +val, b: dateToYmd(addDays(ymdToDate(+val), 6)) };
+    }
     renderUtil();
   });
+  // hand-edited dates become a custom range within the current period
   for (const id of ["util-from", "util-to"]) $(id).addEventListener("change", () => {
     const a = inputToYmd($("util-from").value), b = inputToYmd($("util-to").value);
-    if (a && b) { util.range = a <= b ? { a, b } : { a: b, b: a }; $("util-quick").value = ""; renderUtil(); }
+    if (a && b) { util.range = a <= b ? { a, b } : { a: b, b: a }; renderUtil(); }
   });
-  for (const id of ["ds-a", "ds-b"]) {
-    $(id).addEventListener("input", updateSliderViz);        // live labels while dragging
-    $(id).addEventListener("change", () => {                 // full re-render on release
-      util.range = sliderRange();
-      $("util-quick").value = "";
-      renderUtil();
-    });
-  }
   // utilization slicers: button toggles pop; checkbox changes update filters;
   // chips clear one filter; pharmacy bars cross-filter on click
   $("view-utilization").addEventListener("click", (e) => {
