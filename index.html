@@ -441,12 +441,30 @@
   .util-head .t em { color: var(--tertiary); font-style: italic; font-weight: 600; }
   .util-head .sub { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); letter-spacing: 0.05em; margin-top: 5px; }
   .util-period { display: flex; align-items: center; gap: 9px; }
-  .util-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  /* utilization filters (topbar): one color per filter so they read at a glance */
+  [data-uslicer="groups"] > button { background: #E7F3EE; border-color: #9ED0BC; color: #1E7A55; }
+  [data-uslicer="groups"] > button:hover { border-color: #1E7A55; }
+  [data-uslicer="pharmacies"] > button { background: #F1EDFA; border-color: #C7B5EA; color: #6B4FA5; }
+  [data-uslicer="pharmacies"] > button:hover { border-color: #6B4FA5; }
+  [data-uslicer="states"] > button { background: #EAF3F9; border-color: #A9CBDE; color: var(--secondary); }
+  [data-uslicer="states"] > button:hover { border-color: var(--secondary); }
+  [data-uslicer="brands"] > button { background: #FCF0E1; border-color: #EBC894; color: #A96A14; }
+  [data-uslicer="brands"] > button:hover { border-color: #A96A14; }
+  #tf-btn { background: #E8F6FB; border-color: #A5D8EC; color: #1F7292; }
+  #tf-btn:hover { border-color: #1F7292; }
+  html.dark [data-uslicer="groups"] > button { background: #0F2E23; border-color: #1E5C44; color: #7ED0AC; }
+  html.dark [data-uslicer="pharmacies"] > button { background: #241B3A; border-color: #4A3A70; color: #BFA8F0; }
+  html.dark [data-uslicer="states"] > button { background: #122C3E; border-color: #2C516A; }
+  html.dark [data-uslicer="brands"] > button { background: #33250E; border-color: #6B570F; color: #E9C558; }
+  html.dark #tf-btn { background: #0E2C3A; border-color: #26586E; color: #7CC4E4; }
+  /* EXPORT CSV mirrors EXPORT PDF */
+  #util-csv-btn { background: var(--primary); border-color: var(--primary); color: #F2F8FF; }
+  #util-csv-btn:hover { background: var(--secondary); border-color: var(--secondary); color: #FFFFFF; }
   /* active-filter chips live on their own row under the slicer buttons */
   #util-chips, #filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 18px; }
   #util-chips:empty, #filter-chips:empty { display: none; }
   #filter-chips { margin: 0 0 18px; }
-  .util-controls .slicer button.on { border-color: var(--secondary); color: var(--secondary); font-weight: 600; }
+  #util-slicers .slicer button.on { border-width: 2px; font-weight: 700; }
   #pharm-chart .bar { cursor: pointer; }
   #pharm-chart .bar.sel { stroke: var(--ink); stroke-width: 1.5; }
   .kicker .hint { text-transform: none; letter-spacing: 0.02em; color: var(--ink-mute); font-weight: 400; }
@@ -739,6 +757,45 @@
         <input type="date" id="date-to" aria-label="To date">
       </span>
       </span>
+      <span id="util-slicers" style="display:none">
+      <div class="slicer" data-uslicer="groups">
+        <button class="iconbtn" type="button">CLIENTS &#9662;</button>
+        <div class="pop" hidden></div>
+      </div>
+      <div class="slicer" data-uslicer="pharmacies">
+        <button class="iconbtn" type="button">PHARMACIES &#9662;</button>
+        <div class="pop" hidden></div>
+      </div>
+      <div class="slicer" data-uslicer="states">
+        <button class="iconbtn" type="button">STATES &#9662;</button>
+        <div class="pop" hidden></div>
+      </div>
+      <div class="slicer" data-uslicer="brands">
+        <button class="iconbtn" type="button">BRAND &#9662;</button>
+        <div class="pop" hidden></div>
+      </div>
+      <select class="periodsel" id="util-gran" aria-label="Report granularity">
+        <option value="Y">Yearly</option>
+        <option value="Q" selected>Quarterly</option>
+        <option value="M">Monthly</option>
+        <option value="W">Weekly</option>
+        <option value="D">Daily</option>
+      </select>
+      <div class="slicer" id="tf-slicer">
+        <button class="iconbtn" id="tf-btn" type="button">QUARTERS &#9662;</button>
+        <div class="pop" id="tf-pop" hidden></div>
+      </div>
+      <span class="daterange" id="util-daterange" hidden style="display:none">
+        <input type="date" id="util-from" aria-label="From date">
+        <span style="color:var(--ink-mute)">&#8211;</span>
+        <input type="date" id="util-to" aria-label="To date">
+      </span>
+      <button class="iconbtn datebtn" id="util-date-btn" type="button" hidden aria-label="Pick a date range">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
+        <span id="util-date-label">&#8212;</span>
+      </button>
+      <button class="iconbtn" id="util-csv-btn" type="button" title="Download the current filtered view as CSV">EXPORT CSV</button>
+      </span>
       <button class="iconbtn" id="pdf-btn" type="button">EXPORT PDF</button>
       <button class="iconbtn" id="theme-btn" type="button" aria-label="Toggle dark mode"></button>
     </div>
@@ -817,48 +874,6 @@
       <div>
         <div class="t">Performance summary <span id="util-client"></span></div>
         <div class="sub" id="util-window"></div>
-      </div>
-      <div class="util-controls" id="util-slicers">
-        <div class="slicer" data-uslicer="groups">
-          <button class="iconbtn" type="button">CLIENTS &#9662;</button>
-          <div class="pop" hidden></div>
-        </div>
-        <div class="slicer" data-uslicer="pharmacies">
-          <button class="iconbtn" type="button">PHARMACIES &#9662;</button>
-          <div class="pop" hidden></div>
-        </div>
-        <div class="slicer" data-uslicer="states">
-          <button class="iconbtn" type="button">STATES &#9662;</button>
-          <div class="pop" hidden></div>
-        </div>
-        <div class="slicer" data-uslicer="brands">
-          <button class="iconbtn" type="button">BRAND &#9662;</button>
-          <div class="pop" hidden></div>
-        </div>
-        <div class="util-period">
-          <span class="kicker">Timeframe</span>
-          <select id="util-gran" aria-label="Report granularity">
-            <option value="Y">Yearly</option>
-            <option value="Q" selected>Quarterly</option>
-            <option value="M">Monthly</option>
-            <option value="W">Weekly</option>
-            <option value="D">Daily</option>
-          </select>
-        </div>
-        <div class="slicer" id="tf-slicer">
-          <button class="iconbtn" id="tf-btn" type="button">QUARTERS &#9662;</button>
-          <div class="pop" id="tf-pop" hidden></div>
-        </div>
-        <span class="daterange" id="util-daterange" hidden style="display:none">
-          <input type="date" id="util-from" aria-label="From date">
-          <span style="color:var(--ink-mute)">&#8211;</span>
-          <input type="date" id="util-to" aria-label="To date">
-        </span>
-        <button class="iconbtn datebtn" id="util-date-btn" type="button" hidden aria-label="Pick a date range">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>
-          <span id="util-date-label">&#8212;</span>
-        </button>
-        <button class="iconbtn" id="util-csv-btn" type="button" title="Download the current filtered view as CSV">CSV &#8595;</button>
       </div>
     </div>
     <div id="util-chips"></div>
@@ -2522,7 +2537,8 @@ async function setTab(name) {
   }
   document.querySelectorAll("#tabs button, #side-nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   $("search-only").style.display = name === "search" ? "contents" : "none";
-  $("app-title").textContent = name === "search" ? "Search performance" : "Utilization";
+  $("util-slicers").style.display = name === "util" ? "contents" : "none";
+  $("app-title").textContent = name === "search" ? "Search performance" : "Performance Summary - MyRxCard";
   if (name === "util") {
     if (!util.loaded) { stamp(true, "LOADING…"); await loadUtil(); }
     renderUtil();
@@ -2746,17 +2762,19 @@ async function boot() {
   });
   // utilization slicers: button toggles pop; checkbox changes update filters;
   // chips clear one filter; pharmacy bars cross-filter on click
+  // utilization slicers live in the topbar now: their button clicks toggle
+  // pops from the header, everything else stays delegated on the view
+  $("util-slicers").addEventListener("click", (e) => {
+    const sbtn = e.target.closest(".slicer > button");
+    if (!sbtn) return;
+    e.stopPropagation();
+    const pop = sbtn.parentElement.querySelector(".pop");
+    for (const other of document.querySelectorAll("#util-slicers .pop")) if (other !== pop) other.hidden = true;
+    pop.hidden = !pop.hidden;
+    clampPop(pop);
+  });
   $("view-utilization").addEventListener("click", (e) => {
     if (e.target.closest("a")) return; // maps links open in a new tab, don't also filter
-    const sbtn = e.target.closest("[data-uslicer] > button, #tf-slicer > button");
-    if (sbtn) {
-      e.stopPropagation();
-      const pop = sbtn.parentElement.querySelector(".pop");
-      for (const other of document.querySelectorAll("#util-slicers .pop")) if (other !== pop) other.hidden = true;
-      pop.hidden = !pop.hidden;
-      clampPop(pop);
-      return;
-    }
     const tb = e.target.closest(".segbtns button");
     if (tb) { util.trend[tb.parentElement.dataset.tset] = tb.dataset.tval; renderUtil(); return; }
     const xClear = e.target.closest("[data-uchipclear]");
