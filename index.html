@@ -1062,6 +1062,13 @@
             <span class="docname" id="doc-logo-name">none</span>
           </label>
         </div>
+        <div class="docs-files">
+          <div class="segbtns" id="doc-mode">
+            <button type="button" data-tval="surgical" class="on">PRESERVE ORIGINAL</button>
+            <button type="button" data-tval="rebuild">REBUILD LAYOUT</button>
+          </div>
+          <span class="docstatus">preserve = original fonts/images stay, targeted changes only (PDFs) · rebuild = free restructuring, re-typeset</span>
+        </div>
         <textarea id="doc-req" rows="3" placeholder="e.g. Swap the logo for the attached one, delete the second paragraph on page 1, and move the pricing table onto its own page."></textarea>
         <div class="docs-actions">
           <button class="iconbtn" id="doc-run" type="button">RUN EDIT</button>
@@ -1077,7 +1084,7 @@
       <div class="kicker">Result <span class="hint">· follow-up requests keep editing this version</span></div>
       <div class="docs-actions" style="margin-bottom:12px">
         <button class="iconbtn" id="doc-print" type="button">EXPORT PDF</button>
-        <button class="iconbtn" id="doc-download" type="button">DOWNLOAD HTML</button>
+        <button class="iconbtn" id="doc-download" type="button">DOWNLOAD FILE</button>
         <button class="iconbtn" id="doc-reset" type="button">START OVER</button>
       </div>
       <iframe id="doc-frame" title="Edited document"></iframe>
@@ -3124,7 +3131,7 @@ async function setTab(name) {
 // Backend: the myrxcard-docs Cloudflare Worker (holds the AI + team-password
 // secrets). Set after deploy; empty = feature shows a "not deployed" notice.
 const DOCS_API = "https://myrxcard-docs.trevorfallbacher.workers.dev";
-let docs = { html: null, busy: false, template: null, templatesLoaded: false };
+let docs = { html: null, pdf: null, mode: "surgical", busy: false, template: null, templatesLoaded: false };
 
 const docsPw = () => gatePw || sessionStorage.getItem("mrx-pw") || prompt("Team password");
 
@@ -3199,14 +3206,18 @@ async function runDocEdit() {
   if (!req) { st.textContent = "describe the change first"; return; }
   const f = $("doc-file").files[0];
   const tpl = $("doc-template").value;
-  if (!docs.html && !f && !tpl) { st.textContent = "choose a document or pick a template first"; return; }
+  const iterating = docs.mode === "surgical" ? !!docs.pdf : !!docs.html;
+  if (!iterating && !f && !tpl) { st.textContent = "choose a document or pick a template first"; return; }
   docs.busy = true;
   $("doc-run").disabled = true;
   st.textContent = "working… (30–90s; big documents take longer)";
   try {
-    const body = { instruction: req };
-    if (docs.html) {
+    const body = { instruction: req, mode: docs.mode };
+    if (docs.mode === "rebuild" && docs.html) {
       body.html = docs.html; // iterate on the current working version
+    } else if (docs.mode === "surgical" && docs.pdf) {
+      body.file = docs.pdf; // iterate on the already-edited PDF
+      body.fileType = "application/pdf";
     } else if (f) {
       body.file = await fileToB64(f);
       body.fileType = f.type || "application/pdf";
@@ -3220,16 +3231,29 @@ async function runDocEdit() {
       body.file = docs.template.file;
       body.fileType = docs.template.fileType;
     }
+    if (docs.mode === "surgical" && body.fileType !== "application/pdf") {
+      st.textContent = "PRESERVE ORIGINAL works on PDFs — switch to REBUILD for images";
+      return;
+    }
     const lg = $("doc-logo").files[0];
     if (lg) body.logo = { data: await fileToB64(lg), type: lg.type || "image/png" };
     const out = await docsApi("/edit", body);
-    docs.html = out.html;
-    $("doc-frame").srcdoc = out.html;
+    if (out.pdf) { // surgical result: the same PDF with targeted changes
+      docs.pdf = out.pdf;
+      docs.html = null;
+      $("doc-frame").removeAttribute("srcdoc");
+      $("doc-frame").src = URL.createObjectURL(b64ToBlob(out.pdf, "application/pdf"));
+    } else {
+      docs.html = out.html;
+      docs.pdf = null;
+      $("doc-frame").removeAttribute("src");
+      $("doc-frame").srcdoc = out.html;
+    }
     $("doc-result").hidden = false;
     $("doc-result").classList.add("vis");
     layoutDocPanels();
     $("doc-req").value = "";
-    st.textContent = "done — describe another change to keep editing this version";
+    st.textContent = (out.note ? out.note + " · " : "") + "describe another change to keep editing this version";
   } catch (e) {
     st.textContent = "failed: " + e.message;
   } finally {
@@ -3530,17 +3554,42 @@ async function boot() {
     } catch (e) { $("doc-status").textContent = "delete failed: " + e.message; }
   });
   $("doc-run").addEventListener("click", runDocEdit);
-  $("doc-print").addEventListener("click", () => { const w = $("doc-frame").contentWindow; if (w) w.print(); });
+  $("doc-mode").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-tval]");
+    if (!b) return;
+    docs.mode = b.dataset.tval;
+    for (const x of $("doc-mode").querySelectorAll("button")) x.classList.toggle("on", x === b);
+    docs.html = null; docs.pdf = null; // switching modes restarts the session
+    $("doc-result").hidden = true;
+    layoutDocPanels();
+  });
+  $("doc-print").addEventListener("click", () => {
+    if (docs.pdf) { // surgical result IS a PDF — download it directly
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(b64ToBlob(docs.pdf, "application/pdf"));
+      a.download = "myrxcard-document.pdf";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      return;
+    }
+    const w = $("doc-frame").contentWindow;
+    if (w) w.print();
+  });
   $("doc-download").addEventListener("click", () => {
-    if (!docs.html) return;
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([docs.html], { type: "text/html" }));
-    a.download = "myrxcard-document.html";
+    if (docs.pdf) {
+      a.href = URL.createObjectURL(b64ToBlob(docs.pdf, "application/pdf"));
+      a.download = "myrxcard-document.pdf";
+    } else if (docs.html) {
+      a.href = URL.createObjectURL(new Blob([docs.html], { type: "text/html" }));
+      a.download = "myrxcard-document.html";
+    } else return;
     a.click();
     URL.revokeObjectURL(a.href);
   });
   $("doc-reset").addEventListener("click", () => {
     docs.html = null;
+    docs.pdf = null;
     docs.template = null;
     $("doc-result").hidden = true;
     $("doc-file").value = "";
