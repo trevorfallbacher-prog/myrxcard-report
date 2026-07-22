@@ -599,7 +599,10 @@
   #doc-run:hover, #doc-print:hover { background: var(--secondary); border-color: var(--secondary); color: #fff; }
   #doc-run:disabled { opacity: 0.55; cursor: wait; }
   .docstatus { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); }
-  #doc-frame { width: 100%; height: 76vh; border: 1px solid var(--hair); border-radius: 12px; background: #fff; }
+  #doc-frame, #doc-source-frame { width: 100%; height: 72vh; border: 1px solid var(--hair); border-radius: 12px; background: #fff; }
+  /* source + result sit side by side once a result exists */
+  #view-docs .half { grid-column: span 6; }
+  @media (max-width: 980px) { #view-docs .half { grid-column: span 12; } }
 
   /* floating hover tooltip (replaces the browser's delayed native title tips) */
   #tip {
@@ -1065,6 +1068,10 @@
           <span class="docstatus" id="doc-status"></span>
         </div>
       </div>
+    </div>
+    <div class="panel span12" id="doc-source" hidden>
+      <div class="kicker">Source preview <span class="hint">· this is what your edit request applies to</span></div>
+      <iframe id="doc-source-frame" title="Source document"></iframe>
     </div>
     <div class="panel span12" id="doc-result" hidden>
       <div class="kicker">Result <span class="hint">· follow-up requests keep editing this version</span></div>
@@ -3134,6 +3141,35 @@ async function docsApi(path, payload) {
   return out;
 }
 
+let srcUrl = null; // active blob URL for the source preview
+function showSourcePreview(blob) {
+  if (srcUrl) URL.revokeObjectURL(srcUrl);
+  srcUrl = URL.createObjectURL(blob);
+  $("doc-source-frame").src = srcUrl;
+  $("doc-source").hidden = false;
+  $("doc-source").classList.add("vis");
+  layoutDocPanels();
+}
+function hideSourcePreview() {
+  if (srcUrl) { URL.revokeObjectURL(srcUrl); srcUrl = null; }
+  $("doc-source").hidden = true;
+  layoutDocPanels();
+}
+const b64ToBlob = (b64, type) => {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type });
+};
+// side-by-side when both source and result are visible
+function layoutDocPanels() {
+  const both = !$("doc-source").hidden && !$("doc-result").hidden;
+  for (const id of ["doc-source", "doc-result"]) {
+    $(id).classList.toggle("half", both);
+    $(id).classList.toggle("span12", !both);
+  }
+}
+
 async function loadTemplates() {
   if (!DOCS_API) return;
   try {
@@ -3191,6 +3227,7 @@ async function runDocEdit() {
     $("doc-frame").srcdoc = out.html;
     $("doc-result").hidden = false;
     $("doc-result").classList.add("vis");
+    layoutDocPanels();
     $("doc-req").value = "";
     st.textContent = "done — describe another change to keep editing this version";
   } catch (e) {
@@ -3438,19 +3475,34 @@ async function boot() {
   $("search-csv-btn").addEventListener("click", downloadSearchCsv);
   // document studio
   $("doc-file").addEventListener("change", () => {
-    $("doc-file-name").textContent = $("doc-file").files[0] ? $("doc-file").files[0].name : "no file selected";
+    const f = $("doc-file").files[0];
+    $("doc-file-name").textContent = f ? f.name : "no file selected";
     docs.html = null; // a fresh source restarts the editing session
     $("doc-result").hidden = true;
+    if (f) {
+      $("doc-template").value = ""; // uploaded file becomes the source
+      $("doc-del-template").hidden = true;
+      showSourcePreview(f);
+    } else hideSourcePreview();
   });
   $("doc-logo").addEventListener("change", () => {
     $("doc-logo-name").textContent = $("doc-logo").files[0] ? $("doc-logo").files[0].name : "none";
   });
-  $("doc-template").addEventListener("change", () => {
+  $("doc-template").addEventListener("change", async () => {
     docs.html = null;
     docs.template = null;
     $("doc-result").hidden = true;
-    $("doc-del-template").hidden = !$("doc-template").value;
-    if ($("doc-template").value) $("doc-status").textContent = "template selected — describe the change and RUN EDIT";
+    const slug = $("doc-template").value;
+    $("doc-del-template").hidden = !slug;
+    if (!slug) { hideSourcePreview(); return; }
+    $("doc-file").value = ""; // the template becomes the source
+    $("doc-file-name").textContent = "no file selected";
+    try {
+      $("doc-status").textContent = "loading template preview…";
+      docs.template = { slug, ...(await docsApi("/templates/get", { slug })) };
+      showSourcePreview(b64ToBlob(docs.template.file, docs.template.fileType || "application/pdf"));
+      $("doc-status").textContent = "template loaded — describe the change and RUN EDIT";
+    } catch (e) { $("doc-status").textContent = "couldn't load template: " + e.message; }
   });
   $("doc-save-template").addEventListener("click", async () => {
     const f = $("doc-file").files[0];
@@ -3489,12 +3541,16 @@ async function boot() {
   });
   $("doc-reset").addEventListener("click", () => {
     docs.html = null;
+    docs.template = null;
     $("doc-result").hidden = true;
     $("doc-file").value = "";
     $("doc-logo").value = "";
     $("doc-file-name").textContent = "no file selected";
     $("doc-logo-name").textContent = "none";
+    $("doc-template").value = "";
+    $("doc-del-template").hidden = true;
     $("doc-status").textContent = "";
+    hideSourcePreview();
   });
   // timeframe: granularity select resets the drill-down list; entries toggle
   // through the checkbox pop (handled with the other slicer changes below)
