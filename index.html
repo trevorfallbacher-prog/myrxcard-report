@@ -1066,9 +1066,10 @@
           <div class="segbtns" id="doc-mode">
             <button type="button" data-tval="surgical" class="on">PRESERVE ORIGINAL</button>
             <button type="button" data-tval="illustrator">ILLUSTRATOR AGENT</button>
+            <button type="button" data-tval="generate">GENERATE (INDESIGN)</button>
             <button type="button" data-tval="rebuild">REBUILD LAYOUT</button>
           </div>
-          <span class="docstatus">preserve = targeted PDF changes · illustrator = real edits with reflow + true fonts (runs on the design PC) · rebuild = free restructuring</span>
+          <span class="docstatus">preserve = targeted PDF changes · illustrator = real edits, true fonts (design PC) · generate = brand-new doc from the brand template (design PC) · rebuild = free restructuring</span>
         </div>
         <textarea id="doc-req" rows="3" placeholder="e.g. Swap the logo for the attached one, delete the second paragraph on page 1, and move the pricing table onto its own page."></textarea>
         <div class="docs-actions">
@@ -3208,13 +3209,15 @@ async function runDocEdit() {
   const f = $("doc-file").files[0];
   const tpl = $("doc-template").value;
   const iterating = docs.mode === "rebuild" ? !!docs.html : !!docs.pdf;
-  if (!iterating && !f && !tpl) { st.textContent = "choose a document or pick a template first"; return; }
+  if (docs.mode !== "generate" && !iterating && !f && !tpl) { st.textContent = "choose a document or pick a template first"; return; }
   docs.busy = true;
   $("doc-run").disabled = true;
   st.textContent = "working… (30–90s; big documents take longer)";
   try {
     const body = { instruction: req, mode: docs.mode };
-    if (docs.mode === "rebuild" && docs.html) {
+    if (docs.mode === "generate") {
+      // no source needed — the brand template lives on the design PC
+    } else if (docs.mode === "rebuild" && docs.html) {
       body.html = docs.html; // iterate on the current working version
     } else if (docs.mode !== "rebuild" && docs.pdf) {
       body.file = docs.pdf; // iterate on the already-edited PDF
@@ -3239,8 +3242,9 @@ async function runDocEdit() {
     const lg = $("doc-logo").files[0];
     if (lg) body.logo = { data: await fileToB64(lg), type: lg.type || "image/png" };
     let out;
-    if (docs.mode === "illustrator") {
-      // queue for the design agent, then poll until Illustrator finishes
+    if (docs.mode === "illustrator" || docs.mode === "generate") {
+      // queue for the design agent, then poll until the design PC finishes
+      if (docs.mode === "generate") body.kind = "generate";
       const sub = await docsApi("/jobs/submit", body);
       const t0 = Date.now();
       st.textContent = "queued for the design agent…";
