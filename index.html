@@ -1039,6 +1039,14 @@
     <div class="panel span12">
       <div class="kicker">AI document editor <span class="hint">· upload a PDF (export decks to PDF first) or an image, describe the change, get a revised document back</span></div>
       <div class="docs-form">
+        <div class="docs-files" id="doc-templates-row">
+          <span class="kicker" style="align-self:center">Templates</span>
+          <select class="periodsel" id="doc-template" aria-label="Template">
+            <option value="">— pick a template —</option>
+          </select>
+          <button class="iconbtn" id="doc-save-template" type="button" title="Save the chosen document file as a team template">SAVE UPLOAD AS TEMPLATE</button>
+          <button class="iconbtn" id="doc-del-template" type="button" hidden title="Delete the selected template">DELETE</button>
+        </div>
         <div class="docs-files">
           <label class="docfile">
             <input type="file" id="doc-file" accept="application/pdf,image/png,image/jpeg" hidden>
@@ -3089,7 +3097,10 @@ async function setTab(name) {
   $("util-slicers").style.display = name === "util" ? "contents" : "none";
   $("app-title").textContent = name === "search" ? "Search performance"
     : name === "util" ? "Performance Summary - MyRxCard" : "Document Studio - MyRxCard";
-  if (name === "docs") $("view-desc").textContent = "AI document editing · team only";
+  if (name === "docs") {
+    $("view-desc").textContent = "AI document editing · team only";
+    if (!docs.templatesLoaded) loadTemplates();
+  }
   if (name === "util") {
     if (!util.loaded) { stamp(true, "LOADING…"); await ensureUtilData(); }
     renderUtil();
@@ -3106,7 +3117,37 @@ async function setTab(name) {
 // Backend: the myrxcard-docs Cloudflare Worker (holds the AI + team-password
 // secrets). Set after deploy; empty = feature shows a "not deployed" notice.
 const DOCS_API = "https://myrxcard-docs.trevorfallbacher.workers.dev";
-let docs = { html: null, busy: false };
+let docs = { html: null, busy: false, template: null, templatesLoaded: false };
+
+const docsPw = () => gatePw || sessionStorage.getItem("mrx-pw") || prompt("Team password");
+
+async function docsApi(path, payload) {
+  const pw = docsPw();
+  if (!pw) throw new Error("no password");
+  const resp = await fetch(DOCS_API + path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pw, ...payload }),
+  });
+  const out = await resp.json().catch(() => ({}));
+  if (!resp.ok || out.error) throw new Error(out.error || `HTTP ${resp.status}`);
+  return out;
+}
+
+async function loadTemplates() {
+  if (!DOCS_API) return;
+  try {
+    const out = await docsApi("/templates/list", {});
+    const sel = $("doc-template");
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">— pick a template —</option>` +
+      out.templates.map((t) => `<option value="${esc(t.slug)}">${esc(t.name)}${t.added ? ` (${t.added})` : ""}</option>`).join("");
+    if ([...sel.options].some((o) => o.value === cur)) sel.value = cur;
+    docs.templatesLoaded = true;
+  } catch (e) {
+    $("doc-status").textContent = "couldn't load templates: " + e.message;
+  }
+}
 const fileToB64 = (file) => new Promise((res, rej) => {
   const r = new FileReader();
   r.onload = () => res(String(r.result).split(",")[1]);
@@ -3121,29 +3162,31 @@ async function runDocEdit() {
   if (!DOCS_API) { st.textContent = "backend not deployed yet — ask Trevor"; return; }
   if (!req) { st.textContent = "describe the change first"; return; }
   const f = $("doc-file").files[0];
-  if (!docs.html && !f) { st.textContent = "choose a document first"; return; }
-  const pw = gatePw || sessionStorage.getItem("mrx-pw") || prompt("Team password");
-  if (!pw) return;
+  const tpl = $("doc-template").value;
+  if (!docs.html && !f && !tpl) { st.textContent = "choose a document or pick a template first"; return; }
   docs.busy = true;
   $("doc-run").disabled = true;
   st.textContent = "working… (30–90s; big documents take longer)";
   try {
-    const body = { pw, instruction: req };
-    if (docs.html) body.html = docs.html;
-    else {
+    const body = { instruction: req };
+    if (docs.html) {
+      body.html = docs.html; // iterate on the current working version
+    } else if (f) {
       body.file = await fileToB64(f);
       body.fileType = f.type || "application/pdf";
       body.filename = f.name;
+    } else {
+      if (!docs.template || docs.template.slug !== tpl) {
+        st.textContent = "fetching template…";
+        docs.template = { slug: tpl, ...(await docsApi("/templates/get", { slug: tpl })) };
+      }
+      st.textContent = "working… (30–90s; big documents take longer)";
+      body.file = docs.template.file;
+      body.fileType = docs.template.fileType;
     }
     const lg = $("doc-logo").files[0];
     if (lg) body.logo = { data: await fileToB64(lg), type: lg.type || "image/png" };
-    const resp = await fetch(DOCS_API + "/edit", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const out = await resp.json().catch(() => ({}));
-    if (!resp.ok || out.error) throw new Error(out.error || `HTTP ${resp.status}`);
+    const out = await docsApi("/edit", body);
     docs.html = out.html;
     $("doc-frame").srcdoc = out.html;
     $("doc-result").hidden = false;
@@ -3401,6 +3444,38 @@ async function boot() {
   });
   $("doc-logo").addEventListener("change", () => {
     $("doc-logo-name").textContent = $("doc-logo").files[0] ? $("doc-logo").files[0].name : "none";
+  });
+  $("doc-template").addEventListener("change", () => {
+    docs.html = null;
+    docs.template = null;
+    $("doc-result").hidden = true;
+    $("doc-del-template").hidden = !$("doc-template").value;
+    if ($("doc-template").value) $("doc-status").textContent = "template selected — describe the change and RUN EDIT";
+  });
+  $("doc-save-template").addEventListener("click", async () => {
+    const f = $("doc-file").files[0];
+    if (!f) { $("doc-status").textContent = "choose a document file first, then save it as a template"; return; }
+    const name = prompt("Template name for the team:", f.name.replace(/\.[^.]+$/, ""));
+    if (!name) return;
+    try {
+      $("doc-status").textContent = "saving template…";
+      const out = await docsApi("/templates/save", { name, file: await fileToB64(f), fileType: f.type || "application/pdf" });
+      await loadTemplates();
+      $("doc-template").value = out.slug;
+      $("doc-del-template").hidden = false;
+      $("doc-status").textContent = `saved "${name}" — it's now selectable for everyone`;
+    } catch (e) { $("doc-status").textContent = "save failed: " + e.message; }
+  });
+  $("doc-del-template").addEventListener("click", async () => {
+    const slug = $("doc-template").value;
+    if (!slug || !confirm("Delete this template for the whole team?")) return;
+    try {
+      await docsApi("/templates/delete", { slug });
+      await loadTemplates();
+      $("doc-template").value = "";
+      $("doc-del-template").hidden = true;
+      $("doc-status").textContent = "template deleted";
+    } catch (e) { $("doc-status").textContent = "delete failed: " + e.message; }
   });
   $("doc-run").addEventListener("click", runDocEdit);
   $("doc-print").addEventListener("click", () => { const w = $("doc-frame").contentWindow; if (w) w.print(); });
