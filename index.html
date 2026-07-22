@@ -583,6 +583,24 @@
   .pdrill-stats .v { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
   .pdrill-stats .k { margin-top: 3px; }
 
+  /* document studio */
+  .docs-form { display: flex; flex-direction: column; gap: 14px; }
+  .docs-files { display: flex; gap: 22px; flex-wrap: wrap; }
+  .docfile { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+  .docname { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #doc-req {
+    width: 100%; box-sizing: border-box; resize: vertical; min-height: 74px;
+    background: var(--card); color: var(--ink); border: 1px solid var(--hair); border-radius: 10px;
+    padding: 11px 13px; font: inherit; font-size: 13.5px; outline: none;
+  }
+  #doc-req:focus { border-color: var(--secondary); }
+  .docs-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  #doc-run, #doc-print { background: var(--primary); border-color: var(--primary); color: #F2F8FF; }
+  #doc-run:hover, #doc-print:hover { background: var(--secondary); border-color: var(--secondary); color: #fff; }
+  #doc-run:disabled { opacity: 0.55; cursor: wait; }
+  .docstatus { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); }
+  #doc-frame { width: 100%; height: 76vh; border: 1px solid var(--hair); border-radius: 12px; background: #fff; }
+
   /* floating hover tooltip (replaces the browser's delayed native title tips) */
   #tip {
     position: fixed; z-index: 90; display: none; pointer-events: none;
@@ -742,6 +760,10 @@
       <button type="button" data-tab="util">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
         Utilization
+      </button>
+      <button type="button" data-tab="docs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>
+        Documents
       </button>
     </nav>
     <div class="side-foot sync">
@@ -1011,6 +1033,42 @@
       </div>
     </div>
  </div><!-- /view-utilization -->
+
+ <div id="view-docs" hidden>
+  <div class="grid">
+    <div class="panel span12">
+      <div class="kicker">AI document editor <span class="hint">· upload a PDF (export decks to PDF first) or an image, describe the change, get a revised document back</span></div>
+      <div class="docs-form">
+        <div class="docs-files">
+          <label class="docfile">
+            <input type="file" id="doc-file" accept="application/pdf,image/png,image/jpeg" hidden>
+            <span class="iconbtn">CHOOSE DOCUMENT</span>
+            <span class="docname" id="doc-file-name">no file selected</span>
+          </label>
+          <label class="docfile">
+            <input type="file" id="doc-logo" accept="image/png,image/jpeg" hidden>
+            <span class="iconbtn">REPLACEMENT LOGO <span class="hint">(optional)</span></span>
+            <span class="docname" id="doc-logo-name">none</span>
+          </label>
+        </div>
+        <textarea id="doc-req" rows="3" placeholder="e.g. Swap the logo for the attached one, delete the second paragraph on page 1, and move the pricing table onto its own page."></textarea>
+        <div class="docs-actions">
+          <button class="iconbtn" id="doc-run" type="button">RUN EDIT</button>
+          <span class="docstatus" id="doc-status"></span>
+        </div>
+      </div>
+    </div>
+    <div class="panel span12" id="doc-result" hidden>
+      <div class="kicker">Result <span class="hint">· follow-up requests keep editing this version</span></div>
+      <div class="docs-actions" style="margin-bottom:12px">
+        <button class="iconbtn" id="doc-print" type="button">EXPORT PDF</button>
+        <button class="iconbtn" id="doc-download" type="button">DOWNLOAD HTML</button>
+        <button class="iconbtn" id="doc-reset" type="button">START OVER</button>
+      </div>
+      <iframe id="doc-frame" title="Edited document"></iframe>
+    </div>
+  </div>
+ </div><!-- /view-docs -->
 
   <footer>
     <span id="foot-src">Source: search_events via Xano</span>
@@ -3013,13 +3071,13 @@ function renderUtil() {
   $("view-desc").textContent = utilViewDesc(p);
 }
 
+const VIEW_IDS = { search: "view-search", util: "view-utilization", docs: "view-docs" };
 async function setTab(name) {
   const switching = state.tab !== name;
   state.tab = name;
-  $("view-search").hidden = name !== "search";
-  $("view-utilization").hidden = name !== "util";
+  for (const [t, id] of Object.entries(VIEW_IDS)) $(id).hidden = name !== t;
   if (switching) { // re-arm the reveal-on-scroll pass for the incoming view
-    const view = $(name === "search" ? "view-search" : "view-utilization");
+    const view = $(VIEW_IDS[name]);
     for (const el of view.querySelectorAll(".grid > .panel, .stats")) {
       el.classList.remove("vis");
       el.style.animationDelay = "";
@@ -3029,7 +3087,9 @@ async function setTab(name) {
   document.querySelectorAll("#tabs button, #side-nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   $("search-only").style.display = name === "search" ? "contents" : "none";
   $("util-slicers").style.display = name === "util" ? "contents" : "none";
-  $("app-title").textContent = name === "search" ? "Search performance" : "Performance Summary - MyRxCard";
+  $("app-title").textContent = name === "search" ? "Search performance"
+    : name === "util" ? "Performance Summary - MyRxCard" : "Document Studio - MyRxCard";
+  if (name === "docs") $("view-desc").textContent = "AI document editing · team only";
   if (name === "util") {
     if (!util.loaded) { stamp(true, "LOADING…"); await ensureUtilData(); }
     renderUtil();
@@ -3039,6 +3099,62 @@ async function setTab(name) {
     stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
   } else if (state.mode === "sample") {
     stamp(true, "STATIC SAMPLE");
+  }
+}
+
+/* ---------------- document studio ---------------- */
+// Backend: the myrxcard-docs Cloudflare Worker (holds the AI + team-password
+// secrets). Set after deploy; empty = feature shows a "not deployed" notice.
+const DOCS_API = "";
+let docs = { html: null, busy: false };
+const fileToB64 = (file) => new Promise((res, rej) => {
+  const r = new FileReader();
+  r.onload = () => res(String(r.result).split(",")[1]);
+  r.onerror = rej;
+  r.readAsDataURL(file);
+});
+
+async function runDocEdit() {
+  if (docs.busy) return;
+  const st = $("doc-status");
+  const req = $("doc-req").value.trim();
+  if (!DOCS_API) { st.textContent = "backend not deployed yet — ask Trevor"; return; }
+  if (!req) { st.textContent = "describe the change first"; return; }
+  const f = $("doc-file").files[0];
+  if (!docs.html && !f) { st.textContent = "choose a document first"; return; }
+  const pw = gatePw || sessionStorage.getItem("mrx-pw") || prompt("Team password");
+  if (!pw) return;
+  docs.busy = true;
+  $("doc-run").disabled = true;
+  st.textContent = "working… (30–90s; big documents take longer)";
+  try {
+    const body = { pw, instruction: req };
+    if (docs.html) body.html = docs.html;
+    else {
+      body.file = await fileToB64(f);
+      body.fileType = f.type || "application/pdf";
+      body.filename = f.name;
+    }
+    const lg = $("doc-logo").files[0];
+    if (lg) body.logo = { data: await fileToB64(lg), type: lg.type || "image/png" };
+    const resp = await fetch(DOCS_API + "/edit", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const out = await resp.json().catch(() => ({}));
+    if (!resp.ok || out.error) throw new Error(out.error || `HTTP ${resp.status}`);
+    docs.html = out.html;
+    $("doc-frame").srcdoc = out.html;
+    $("doc-result").hidden = false;
+    $("doc-result").classList.add("vis");
+    $("doc-req").value = "";
+    st.textContent = "done — describe another change to keep editing this version";
+  } catch (e) {
+    st.textContent = "failed: " + e.message;
+  } finally {
+    docs.busy = false;
+    $("doc-run").disabled = false;
   }
 }
 
@@ -3277,6 +3393,34 @@ async function boot() {
   });
   $("util-csv-btn").addEventListener("click", downloadUtilCsv);
   $("search-csv-btn").addEventListener("click", downloadSearchCsv);
+  // document studio
+  $("doc-file").addEventListener("change", () => {
+    $("doc-file-name").textContent = $("doc-file").files[0] ? $("doc-file").files[0].name : "no file selected";
+    docs.html = null; // a fresh source restarts the editing session
+    $("doc-result").hidden = true;
+  });
+  $("doc-logo").addEventListener("change", () => {
+    $("doc-logo-name").textContent = $("doc-logo").files[0] ? $("doc-logo").files[0].name : "none";
+  });
+  $("doc-run").addEventListener("click", runDocEdit);
+  $("doc-print").addEventListener("click", () => { const w = $("doc-frame").contentWindow; if (w) w.print(); });
+  $("doc-download").addEventListener("click", () => {
+    if (!docs.html) return;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([docs.html], { type: "text/html" }));
+    a.download = "myrxcard-document.html";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  $("doc-reset").addEventListener("click", () => {
+    docs.html = null;
+    $("doc-result").hidden = true;
+    $("doc-file").value = "";
+    $("doc-logo").value = "";
+    $("doc-file-name").textContent = "no file selected";
+    $("doc-logo-name").textContent = "none";
+    $("doc-status").textContent = "";
+  });
   // timeframe: granularity select resets the drill-down list; entries toggle
   // through the checkbox pop (handled with the other slicer changes below)
   $("util-gran").addEventListener("change", (e) => {
