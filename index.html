@@ -913,6 +913,11 @@
       <div class="spread" id="spread"></div>
     </div>
 
+    <div class="panel span12" id="xover-panel">
+      <div class="kicker">Search &#8594; claim crossover <span class="hint">· heuristic: a claim for the same drug + strength in the searched ZIP-3 region within 30 days of the search — no patient-level link</span></div>
+      <div id="xover"></div>
+    </div>
+
     <div class="panel span12">
       <div class="kicker">Latest searches</div>
       <div class="table-wrap" id="recent"></div>
@@ -970,10 +975,6 @@
         <div class="donut-legend trend-legend" id="util-trend-legend"></div>
       </div>
 
-      <div class="panel span12" id="xover-panel">
-        <div class="kicker">Search &#8594; claim crossover <span class="hint">· heuristic: a claim for the same drug + strength in the searched ZIP-3 region within 30 days of the search — no patient-level link</span></div>
-        <div id="xover"></div>
-      </div>
 
       <div class="panel span12" id="util-geo-panel">
         <div class="kicker">Pharmacy locations <span class="hint">· tap a pin or row to filter</span></div>
@@ -1733,6 +1734,8 @@ function renderAll() {
   renderBars($("top-drugs"), a.topDrugs, (k) => k, "drug");
   renderDevices(a);
   renderSpread(a);
+  ensureUtilData(); // claims load once in the background, then this re-renders
+  renderCrossover(util.merged, !!(util.merged && Array.isArray(util.merged.facts)), a.ev);
   renderRecent(a);
   // entrance choreography for the search tab
   for (const sel of ["#stats", "#top-drugs", "#drill", "#groups", "#recent tbody", "#trend svg"])
@@ -2830,10 +2833,19 @@ function primStrength(s) {
   return v;
 }
 
-function renderCrossover(p, hasCube) {
+// lazily pull the claims store (once) so the crossover can live on the search tab
+function ensureUtilData() {
+  if (!util.loadPromise) util.loadPromise = loadUtil().then(() => {
+    if (util.data && !util.merged) util.merged = mergedPeriod(util.data);
+    if (state.tab === "search") renderAll();
+  });
+  return util.loadPromise;
+}
+
+function renderCrossover(p, hasCube, evs) {
   const panel = $("xover-panel");
   const dom = hasCube ? utilDayDomain(p) : null;
-  const evs = state.events || [];
+  evs = evs || state.events || [];
   if (!dom || !evs.length) { panel.style.display = "none"; return; }
   panel.style.display = "";
   const base = (s) => String(s).split(" · ")[0].trim().toUpperCase();
@@ -2965,7 +2977,6 @@ function renderUtil() {
     ? pharmDrillHTML(p, util.drill)
     : pharmChartSVG(a.pharmacies, util.f ? util.f.pharmacies : null);
   renderUtilTrend(p, hasCube);
-  renderCrossover(p, hasCube);
   renderUtilGeo(p, a);
 
   // drug-level visuals (need the cube)
@@ -3004,7 +3015,7 @@ async function setTab(name) {
   $("util-slicers").style.display = name === "util" ? "contents" : "none";
   $("app-title").textContent = name === "search" ? "Search performance" : "Performance Summary - MyRxCard";
   if (name === "util") {
-    if (!util.loaded) { stamp(true, "LOADING…"); await loadUtil(); }
+    if (!util.loaded) { stamp(true, "LOADING…"); await ensureUtilData(); }
     renderUtil();
     const g = util.data && util.data.generatedAt;
     stamp(true, g ? "UTILIZATION · " + new Date(g).toLocaleDateString("en-US") : "UTILIZATION");
