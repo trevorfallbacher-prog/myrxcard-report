@@ -3105,7 +3105,7 @@ async function setTab(name) {
 /* ---------------- document studio ---------------- */
 // Backend: the myrxcard-docs Cloudflare Worker (holds the AI + team-password
 // secrets). Set after deploy; empty = feature shows a "not deployed" notice.
-const DOCS_API = "";
+const DOCS_API = "https://myrxcard-docs.trevorfallbacher.workers.dev";
 let docs = { html: null, busy: false };
 const fileToB64 = (file) => new Promise((res, rej) => {
   const r = new FileReader();
