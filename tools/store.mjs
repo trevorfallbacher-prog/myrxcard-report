@@ -33,12 +33,17 @@ export function loadStore() {
 }
 
 // Aggregate one .xlsx and merge it into the store as a period. Returns the period.
+// The key is span + source-file slug so different-scope files covering the same
+// months (e.g. Avalon vs non-Avalon pharmacies) coexist instead of colliding;
+// re-dropping the same filename still updates its own period in place.
 export function mergeFile(filePath, store = loadStore()) {
   const period = aggregateWorkbook(filePath);
-  const key = period.periodKey || period.sourceFile || `import-${Object.keys(store.periods).length + 1}`;
+  const slug = String(period.sourceFile || "src").toLowerCase()
+    .replace(/\.xlsx$/, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+  const key = `${period.periodKey || "import"}~${slug}`;
   period.periodKey = key;
+  period.processedAt = new Date().toISOString(); // de-dup priority: newest wins
   store.periods[key] = period;
-  // "latest" = newest period key (keys sort lexically: 2026-Q2 > 2026-Q1)
   store.latest = Object.keys(store.periods).sort().pop();
   store.generatedAt = new Date().toISOString();
   return { store, period, key };

@@ -2143,22 +2143,34 @@ function mergedPeriod(d) {
   if (usable.length === 1) return d.periods[usable[0]];
   const dims = { months: [], groups: [], states: [], pharmacies: [], brands: [], classes: [], drugs: [] };
   const idx = {}; for (const k in dims) idx[k] = new Map();
-  const pharmMeta = [], facts = [], labels = [];
+  const pharmMeta = [], facts = [];
   let rowCount = 0, client = "";
   const intern = (dim, label, key = label) => {
     let i = idx[dim].get(key);
     if (i === undefined) { i = dims[dim].length; dims[dim].push(label); idx[dim].set(key, i); }
     return i;
   };
-  // months claimed newest-period-first so an overlapping re-drop can't double count
-  const monthOwner = new Map();
-  for (const k of [...usable].reverse())
-    for (const m of d.periods[k].dims.months) if (!monthOwner.has(m)) monthOwner.set(m, k);
+  // de-dup at (month × client × pharmacy) granularity, claimed by the
+  // newest-processed file first: a re-dropped/corrected file replaces its own
+  // slice, while complementary scopes (Avalon vs non-Avalon pharmacies, or a
+  // client present only in an older file) all keep counting
+  const newestFirst = [...usable].sort((a, b) =>
+    String(d.periods[b].processedAt || b).localeCompare(String(d.periods[a].processedAt || a)));
+  const comboKey = (p, f) => {
+    const m = (p.pharmMeta || [])[f[3]] || {};
+    return p.dims.months[f[0]] + "|" + p.dims.groups[f[1]] + "|" + p.dims.pharmacies[f[3]] + "|" + (m.npi4 || "");
+  };
+  const comboOwner = new Map();
+  for (const k of newestFirst) {
+    const p = d.periods[k];
+    const combos = new Set();
+    for (const f of p.facts) combos.add(comboKey(p, f));
+    for (const c of combos) if (!comboOwner.has(c)) comboOwner.set(c, k);
+  }
   for (const k of usable) {
     const p = d.periods[k];
     rowCount += p.rowCount || 0;
     client = client || p.client;
-    labels.push(p.periodLabel || k);
     const pmap = p.dims.pharmacies.map((name, i) => {
       const m = (p.pharmMeta || [])[i] || {};
       const pi = intern("pharmacies", name, `${name}|${m.npi4 || i}|${m.st || ""}`);
@@ -2170,12 +2182,16 @@ function mergedPeriod(d) {
     for (const dim of ["months", "groups", "states", "brands", "classes", "drugs"])
       maps[dim] = p.dims[dim].map((v) => intern(dim, v));
     for (const f of p.facts) {
-      if (monthOwner.get(p.dims.months[f[0]]) !== k) continue;
+      if (comboOwner.get(comboKey(p, f)) !== k) continue;
       facts.push([maps.months[f[0]], maps.groups[f[1]], maps.states[f[2]], pmap[f[3]],
         maps.brands[f[4]], maps.classes[f[5]], maps.drugs[f[6]], f[7], f[8], f[9], f[10], f[11], f[12] || 0]);
     }
   }
-  return { periodKey: "all", periodLabel: labels.join(" · "), client, rowCount, dims, pharmMeta, facts };
+  const span = dims.months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
+  const periodLabel = span.length
+    ? `${monthLabel(span[0])} – ${monthLabel(span[span.length - 1])} · ${usable.length} files`
+    : `${usable.length} files`;
+  return { periodKey: "all", periodLabel, client, rowCount, dims, pharmMeta, facts };
 }
 
 /* --- timeframe drill-down: granularity select (Yearly…Daily) + a
