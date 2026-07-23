@@ -611,24 +611,37 @@
   #doc-source-intent { max-height: 72vh; }
   .docpage {
     width: 612pt; min-height: 792pt; margin: 0 auto; background: #fff; color: #000;
-    box-shadow: 0 4px 24px rgba(10, 30, 45, 0.18); padding: 72pt; box-sizing: border-box;
+    box-shadow: 0 4px 24px rgba(10, 30, 45, 0.18); padding: 26pt 36pt 60pt; box-sizing: border-box;
     font-family: "scandia-web", "Inter", sans-serif; position: relative;
   }
-  .docpage .dp-logo { width: 150pt; display: block; margin-bottom: 18pt; }
-  .dp-h1 { font-weight: 700; font-size: 16pt; line-height: 1.2; color: rgb(28,128,184); margin: 0 0 6pt; }
+  .docpage .dp-logo { width: 132pt; display: block; margin: 0 0 14pt auto; }
+  .docpage [contenteditable] { white-space: pre-wrap; }
+  .docpage [data-ph]:empty::before { content: attr(data-ph); color: #9aa4b2; }
+  .dp-h1 { font-weight: 700; font-size: 16pt; line-height: 1.2; color: rgb(48,82,128); margin: 0 0 6pt; }
   .dp-subheader { font-size: 9pt; letter-spacing: 0.2em; text-transform: uppercase; color: #000; margin: 10pt 0 4pt; }
-  .dp-subheader-callout { font-size: 9pt; letter-spacing: 0.2em; text-transform: uppercase; color: rgb(28,128,184); margin: 10pt 0 4pt; }
-  .dp-subheader-callout-2 { font-size: 9pt; font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase; color: #fff; margin: 0 0 3pt; }
+  .dp-subheader-callout { font-size: 9pt; letter-spacing: 0.2em; text-transform: uppercase; color: rgb(48,82,128); margin: 10pt 0 4pt; }
+  .dp-subheader-callout-2 { font-size: 9pt; font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase; color: #fff; margin: 0; }
   .dp-paragraph { font-size: 9pt; line-height: 1.35; color: #000; margin: 0 0 6pt; }
   .dp-callout-paragraph { font-size: 9pt; line-height: 1.35; color: #fff; margin: 0; }
   .dp-bullet { font-size: 9pt; line-height: 1.35; color: #000; margin: 0 0 3pt; padding-left: 12pt; position: relative; }
-  .dp-bullet::before { content: "\2022"; position: absolute; left: 2pt; color: rgb(28,128,184); }
-  .dp-table { width: 100%; border-collapse: collapse; margin: 6pt 0 12pt; }
-  .dp-table th { background: rgb(40,52,66); color: #fff; font-weight: 700; font-size: 8.5pt; letter-spacing: 0.03em; text-align: left; padding: 3.5pt 6pt; border: 0.5pt solid rgb(40,52,66); }
-  .dp-table td { font-size: 8.5pt; color: rgb(40,52,66); padding: 3.5pt 6pt; border: 0.5pt solid rgb(40,52,66); line-height: 11pt; }
-  .dp-callout { background: rgb(40,52,66); border-radius: 3pt; padding: 10pt 12pt; margin: 8pt 0 12pt; }
+  .dp-bullet::before { content: "\2022"; position: absolute; left: 2pt; color: rgb(48,82,128); }
+  .dp-table { width: 100%; border-collapse: collapse; margin: 6pt 0 12pt; table-layout: fixed; }
+  .dp-table th { background: rgb(48,82,128); color: #fff; font-weight: 700; font-size: 8.5pt; letter-spacing: 0.03em; text-align: left; padding: 4pt 6pt; border: 0.5pt solid rgb(48,82,128); }
+  .dp-table td { font-size: 8.5pt; color: rgb(40,52,66); padding: 4pt 6pt; border: 0.5pt solid #c4d0e2; line-height: 11pt; }
+  /* full-bleed gradient section banner — escapes the page padding */
+  .dp-callout { background: linear-gradient(90deg, rgb(43,148,237), rgb(44,49,174)); padding: 7pt 36pt; margin: 10pt -36pt 12pt; }
+  .dp-callout .dp-subheader-callout-2 { text-align: center; }
+  /* rounded light-blue callout box */
+  .dp-tintbox { background: rgb(217,232,255); border-radius: 8pt; padding: 10pt 14pt; margin: 8pt 0 12pt; }
+  .dp-tintbox .dp-subheader-callout { margin: 0 0 3pt; }
+  .dp-tintbox .dp-paragraph { margin: 0; }
   .dp-iconcols { display: flex; gap: 14pt; margin: 8pt 0 12pt; }
-  .dp-iconcols .dp-col { flex: 1; min-width: 0; }
+  .dp-iconcols .dp-col { flex: 1; min-width: 0; text-align: center; }
+  .dp-iconcols .dp-col .dp-subheader-callout { margin-top: 0; }
+  /* pinned footer: centered 7pt tracked caps + page number bottom-right */
+  .dp-footer { position: absolute; left: 40pt; right: 40pt; bottom: 18pt; }
+  .dp-footer .df-text { display: block; font-size: 7pt; letter-spacing: 0.2em; text-transform: uppercase; color: rgb(48,82,128); text-align: center; padding: 0 26pt; }
+  .dp-footer .df-page { position: absolute; right: 0; top: 0; font-size: 9pt; color: rgb(48,82,128); }
   /* editing chrome (lives outside the editable text) */
   .dp-block { position: relative; }
   .dp-block [contenteditable] { outline: none; }
@@ -1082,54 +1095,33 @@
  <div id="view-docs" hidden>
   <div class="grid">
     <div class="panel span12">
-      <div class="kicker">AI document editor <span class="hint">· upload a PDF (export decks to PDF first) or an image, describe the change, get a revised document back</span></div>
+      <div class="kicker">Document builder <span class="hint">· type straight into the page, insert brand objects, then build the real thing in InDesign</span></div>
       <div class="docs-form">
         <div class="docs-files" id="doc-templates-row">
-          <span class="kicker" style="align-self:center">Templates</span>
+          <span class="kicker" style="align-self:center">Start from</span>
           <select class="periodsel" id="doc-template" aria-label="Template">
-            <option value="">— pick a template —</option>
+            <option value="">— blank page, or pick a template —</option>
           </select>
-          <button class="iconbtn" id="doc-save-template" type="button" title="Save the chosen document file as a team template">SAVE UPLOAD AS TEMPLATE</button>
-          <button class="iconbtn" id="doc-del-template" type="button" hidden title="Delete the selected template">DELETE</button>
-        </div>
-        <div class="docs-files">
           <label class="docfile">
-            <input type="file" id="doc-file" accept="application/pdf,image/png,image/jpeg,.ai" hidden>
-            <span class="iconbtn">CHOOSE DOCUMENT</span>
-            <span class="docname" id="doc-file-name">no file selected</span>
+            <input type="file" id="doc-file" accept="application/pdf,image/png,image/jpeg" hidden>
+            <span class="iconbtn">REFERENCE DOC</span>
+            <span class="docname" id="doc-file-name">none</span>
           </label>
-          <label class="docfile">
-            <input type="file" id="doc-logo" accept="image/png,image/jpeg" hidden>
-            <span class="iconbtn">REPLACEMENT LOGO <span class="hint">(optional)</span></span>
-            <span class="docname" id="doc-logo-name">none</span>
-          </label>
+          <button class="iconbtn" id="draft-ai" type="button" title="AI drafts the page from the brief below and/or the reference document">ANALYZE &amp; DRAFT</button>
+          <button class="iconbtn" id="doc-del-template" type="button" hidden title="Delete the selected template">DELETE TEMPLATE</button>
         </div>
-        <div class="docs-files">
-          <div class="segbtns" id="doc-mode">
-            <button type="button" data-tval="surgical" class="on">PRESERVE ORIGINAL</button>
-            <button type="button" data-tval="illustrator">ILLUSTRATOR AGENT</button>
-            <button type="button" data-tval="generate">GENERATE (INDESIGN)</button>
-            <button type="button" data-tval="rebuild">REBUILD LAYOUT</button>
-          </div>
-          <span class="docstatus">preserve = targeted PDF changes · illustrator = real edits, true fonts (design PC) · generate = brand-new doc from the brand template (design PC) · rebuild = free restructuring</span>
-        </div>
-        <textarea id="doc-req" rows="3" placeholder="e.g. Swap the logo for the attached one, delete the second paragraph on page 1, and move the pricing table onto its own page."></textarea>
-        <div id="doc-draft" hidden>
-          <div class="docs-files" style="margin-bottom:10px">
-            <span class="kicker" style="align-self:center">Draft preview</span>
-            <button class="iconbtn" id="draft-ai" type="button" title="AI drafts the document from the brief above and the reference doc, if one is chosen">ANALYZE &amp; DRAFT</button>
-            <span class="docstatus">brand-true preview — click any text to edit it in place; hover a block for style &amp; order controls. Styling is exact; line &amp; page breaks are finalized by InDesign.</span>
-          </div>
-          <div class="docpage-wrap"><div class="docpage" id="docpage"></div></div>
-          <div class="dp-add">
-            <button class="iconbtn" data-dpadd="text" type="button">+ TEXT</button>
-            <button class="iconbtn" data-dpadd="table" type="button">+ TABLE</button>
-            <button class="iconbtn" data-dpadd="iconCols" type="button">+ ICON COLUMNS</button>
-            <button class="iconbtn" data-dpadd="callout" type="button">+ CALLOUT</button>
-          </div>
+        <textarea id="doc-req" rows="2" placeholder="Optional brief for ANALYZE &amp; DRAFT — e.g. one-page flyer introducing MyRxCard to independent pharmacies. Or skip it and just type into the page below."></textarea>
+        <div class="docpage-wrap"><div class="docpage" id="docpage"></div></div>
+        <div class="dp-add">
+          <button class="iconbtn" data-dpadd="text" type="button">+ TEXT</button>
+          <button class="iconbtn" data-dpadd="table" type="button">+ TABLE</button>
+          <button class="iconbtn" data-dpadd="iconCols" type="button">+ ICON COLUMNS</button>
+          <button class="iconbtn" data-dpadd="callout" type="button">+ SECTION BANNER</button>
+          <button class="iconbtn" data-dpadd="tintBox" type="button">+ CALLOUT BOX</button>
         </div>
         <div class="docs-actions">
-          <button class="iconbtn" id="doc-run" type="button">RUN EDIT</button>
+          <button class="iconbtn" id="doc-run" type="button">BUILD IN INDESIGN</button>
+          <button class="iconbtn" id="doc-save-template" type="button" title="Save this page as a team template">SAVE AS TEMPLATE</button>
           <span class="docstatus" id="doc-status"></span>
         </div>
       </div>
@@ -3190,7 +3182,10 @@ async function setTab(name) {
 // Backend: the myrxcard-docs Cloudflare Worker (holds the AI + team-password
 // secrets). Set after deploy; empty = feature shows a "not deployed" notice.
 const DOCS_API = "https://myrxcard-docs.trevorfallbacher.workers.dev";
-let docs = { html: null, pdf: null, mode: "surgical", busy: false, template: null, templatesLoaded: false, draft: [] };
+let docs = {
+  pdf: null, busy: false, template: null, templatesLoaded: false, draft: [],
+  footer: "FOR MORE INFORMATION, CONTACT INFO@AVALONSAVES.COM OR CALL (844)696-4566",
+};
 
 const docsPw = () => gatePw || sessionStorage.getItem("mrx-pw") || prompt("Team password");
 
@@ -3289,9 +3284,12 @@ function fitDocpage(page) { // shrink the 612pt page to the panel, never enlarge
   const z = Math.max(0.45, Math.min(1, (wrap.clientWidth - 46) / page.offsetWidth));
   page.style.zoom = z < 1 ? String(z) : "";
 }
+const seedDraft = () => [{ style: "H1", text: "" }, { style: "Paragraph", text: "" }];
 function renderDraft() {
+  if (!docs.draft.length) docs.draft = seedDraft(); // always an open, typeable page
   const page = $("docpage");
   page.innerHTML = `<img class="dp-logo" src="${AVALON_LOGO_SRC}" alt="Avalon Healthcare">`;
+  const PH = { "H1": "Document title…", "Paragraph": "Start typing…", "Subheader": "Section heading…", "Bullet": "Bullet point…" };
   docs.draft.forEach((b, i) => {
     const el = document.createElement("div");
     el.className = "dp-block";
@@ -3305,21 +3303,42 @@ function renderDraft() {
       extraCtl = `<button type="button" data-d="row" title="Add row">+row</button><button type="button" data-d="delrow" title="Remove last row">&#8722;row</button><button type="button" data-d="col" title="Add column">+col</button><button type="button" data-d="delcol" title="Remove last column">&#8722;col</button>`;
     } else if (b.iconCols) {
       inner = `<div class="dp-iconcols">${b.iconCols.map((c, ci) =>
-        `<div class="dp-col"><div class="dp-subheader-callout" ${CE} data-role="ict" data-c="${ci}">${esc(c.title)}</div><div class="dp-paragraph" ${CE} data-role="icx" data-c="${ci}">${esc(c.text)}</div></div>`).join("")}</div>`;
+        `<div class="dp-col"><div class="dp-subheader-callout" ${CE} data-role="ict" data-c="${ci}" data-ph="TITLE…">${esc(c.title)}</div><div class="dp-paragraph" ${CE} data-role="icx" data-c="${ci}" data-ph="Column text…">${esc(c.text)}</div></div>`).join("")}</div>`;
       extraCtl = `<button type="button" data-d="col" title="Add column (max 4)">+col</button><button type="button" data-d="delcol" title="Remove last column (min 2)">&#8722;col</button>`;
     } else if (b.callout) {
-      inner = `<div class="dp-callout"><div class="dp-callout-paragraph" ${CE} data-role="co">${esc(b.callout.text)}</div></div>`;
+      inner = `<div class="dp-callout"><div class="dp-subheader-callout-2" ${CE} data-role="co" data-ph="SECTION NAME…">${esc(b.callout.text)}</div></div>`;
+    } else if (b.tintBox) {
+      inner = `<div class="dp-tintbox"><div class="dp-subheader-callout" ${CE} data-role="tbt" data-ph="CALLOUT TITLE…">${esc(b.tintBox.title || "")}</div><div class="dp-paragraph" ${CE} data-role="tbx" data-ph="Callout text…">${esc(b.tintBox.text || "")}</div></div>`;
     } else {
       const cls = (DOC_STYLES[b.style] || DOC_STYLES.Paragraph).css;
-      inner = `<div class="${cls}" ${CE} data-role="text">${esc(b.text || "")}</div>`;
+      inner = `<div class="${cls}" ${CE} data-role="text" data-ph="${PH[b.style] || "Text…"}">${esc(b.text || "")}</div>`;
       extraCtl = `<select data-d="style" title="Brand style">${DRAFT_STYLES.map((s) => `<option${s === b.style ? " selected" : ""}>${s}</option>`).join("")}</select>`;
     }
     el.innerHTML = inner + `<div class="dp-chrome" contenteditable="false">${extraCtl}<button type="button" data-d="up" title="Move up">&#9650;</button><button type="button" data-d="down" title="Move down">&#9660;</button><button type="button" data-d="x" title="Remove block">&#215;</button></div>`;
     page.appendChild(el);
   });
-  if (!docs.draft.length) page.insertAdjacentHTML("beforeend",
-    `<div class="dp-paragraph" style="color:#9aa4b2">Empty draft — ANALYZE &amp; DRAFT fills this page from your brief and reference document, or add blocks with the buttons below. Left empty, AI structures the document from the brief alone.</div>`);
+  page.insertAdjacentHTML("beforeend",
+    `<div class="dp-footer"><span class="df-text" ${CE} data-role="footer">${esc(docs.footer)}</span><span class="df-page">1</span></div>`);
   fitDocpage(page);
+}
+// caret helpers for the type-like-a-doc flow
+function focusBlockText(i, atEnd) {
+  const el = $("docpage").querySelector(`.dp-block[data-i="${i}"] [data-role="text"]`);
+  if (!el) return;
+  el.focus();
+  const sel = getSelection(), r = document.createRange();
+  r.selectNodeContents(el);
+  r.collapse(!atEnd);
+  sel.removeAllRanges();
+  sel.addRange(r);
+}
+function caretOffsetIn(el) {
+  const sel = getSelection();
+  if (!sel.rangeCount) return el.textContent.length;
+  const r = sel.getRangeAt(0).cloneRange();
+  r.selectNodeContents(el);
+  r.setEnd(sel.getRangeAt(0).endContainer, sel.getRangeAt(0).endOffset);
+  return r.toString().length;
 }
 function draftToBlocks() { // serialize the model for /jobs/submit — skips empties
   const out = [];
@@ -3333,6 +3352,9 @@ function draftToBlocks() { // serialize the model for /jobs/submit — skips emp
       if (cols.length >= 2) out.push({ iconCols: cols });
     } else if (b.callout) {
       if (b.callout.text.trim()) out.push({ callout: { text: b.callout.text.trim() } });
+    } else if (b.tintBox) {
+      if ((b.tintBox.text || "").trim() || (b.tintBox.title || "").trim())
+        out.push({ tintBox: { title: (b.tintBox.title || "").trim(), text: (b.tintBox.text || "").trim() || (b.tintBox.title || "").trim() } });
     } else if ((b.text || "").trim()) {
       out.push({ style: DOC_STYLES[b.style] ? b.style : "Paragraph", text: b.text.trim() });
     }
@@ -3347,6 +3369,7 @@ function blocksToDraft(blocks) { // normalize incoming AI blocks into the model
     } };
     if (b && Array.isArray(b.iconCols)) return { iconCols: b.iconCols.slice(0, 4).map((c) => ({ title: String(c?.title || ""), text: String(c?.text || "") })) };
     if (b && b.callout) return { callout: { text: String(b.callout.text || "") } };
+    if (b && b.tintBox) return { tintBox: { title: String(b.tintBox.title || ""), text: String(b.tintBox.text || "") } };
     const raw = String(b?.text || "");
     const bulleted = /^[•\-–]\s+/.test(raw);
     return {
@@ -3377,102 +3400,47 @@ function showIntentPreview() {
   fitDocpage(clone);
 }
 
-async function runDocEdit() {
+async function runDocBuild() {
   if (docs.busy) return;
   const st = $("doc-status");
-  const req = $("doc-req").value.trim();
   if (!DOCS_API) { st.textContent = "backend not deployed yet — ask Trevor"; return; }
-  if (!req) { st.textContent = "describe the change first"; return; }
-  const f = $("doc-file").files[0];
-  const tpl = $("doc-template").value;
-  const iterating = docs.mode === "rebuild" ? !!docs.html : !!docs.pdf;
-  if (docs.mode !== "generate" && !iterating && !f && !tpl) { st.textContent = "choose a document or pick a template first"; return; }
+  const blocks = draftToBlocks();
+  const req = $("doc-req").value.trim();
+  if (!blocks.length && !req) { st.textContent = "type something into the page (or write a brief) first"; return; }
   docs.busy = true;
   $("doc-run").disabled = true;
-  st.textContent = "working… (30–90s; big documents take longer)";
   try {
-    const body = { instruction: req, mode: docs.mode };
-    if (docs.mode === "generate") {
-      const blocks = draftToBlocks();
-      if (blocks.length) body.blocks = blocks; // deterministic build from the draft
-      // source optional: an uploaded file or picked template acts as a
-      // layout/content reference for the new branded document
-      if (f) {
-        body.file = await fileToB64(f);
-        body.fileType = f.type || "application/pdf";
-        body.filename = f.name;
-      } else if (tpl) {
-        if (!docs.template || docs.template.slug !== tpl) {
-          st.textContent = "fetching reference…";
-          docs.template = { slug: tpl, ...(await docsApi("/templates/get", { slug: tpl })) };
-        }
-        body.file = docs.template.file;
-        body.fileType = docs.template.fileType;
-      }
-    } else if (docs.mode === "rebuild" && docs.html) {
-      body.html = docs.html; // iterate on the current working version
-    } else if (docs.mode !== "rebuild" && docs.pdf) {
-      body.file = docs.pdf; // iterate on the already-edited PDF
-      body.fileType = "application/pdf";
-    } else if (f) {
+    const body = { kind: "generate", mode: "generate", footer: docs.footer, instruction: req || "Build the document exactly from the draft blocks." };
+    if (blocks.length) body.blocks = blocks; // deterministic build from the page
+    const f = $("doc-file").files[0];
+    if (!blocks.length && f) { // brief-only build can still lean on a reference
       body.file = await fileToB64(f);
       body.fileType = f.type || "application/pdf";
       body.filename = f.name;
-    } else {
-      if (!docs.template || docs.template.slug !== tpl) {
-        st.textContent = "fetching template…";
-        docs.template = { slug: tpl, ...(await docsApi("/templates/get", { slug: tpl })) };
-      }
-      st.textContent = "working… (30–90s; big documents take longer)";
-      body.file = docs.template.file;
-      body.fileType = docs.template.fileType;
     }
-    if (docs.mode === "surgical" && body.fileType !== "application/pdf") {
-      st.textContent = "PRESERVE ORIGINAL works on PDFs — switch to REBUILD for images";
-      return;
+    st.textContent = "queued for the design agent…";
+    const sub = await docsApi("/jobs/submit", body);
+    const t0 = Date.now();
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 6000));
+      const s2 = await docsApi("/jobs/status", { id: sub.id });
+      if (s2.status === "done") break;
+      if (s2.status === "failed") throw new Error(s2.error || "the design agent hit an error");
+      const mins = (Date.now() - t0) / 60000;
+      st.textContent = s2.status === "processing"
+        ? "InDesign is building it…"
+        : "queued…" + (mins > 2 ? " (the design PC may be off — it runs when it's back)" : "");
+      if (mins > 15) throw new Error("timed out — the result will still appear here if you retry once the agent catches up");
     }
-    const lg = $("doc-logo").files[0];
-    if (lg) body.logo = { data: await fileToB64(lg), type: lg.type || "image/png" };
-    let out;
-    if (docs.mode === "illustrator" || docs.mode === "generate") {
-      // queue for the design agent, then poll until the design PC finishes
-      if (docs.mode === "generate") body.kind = "generate";
-      const sub = await docsApi("/jobs/submit", body);
-      const t0 = Date.now();
-      st.textContent = "queued for the design agent…";
-      for (;;) {
-        await new Promise((r) => setTimeout(r, 6000));
-        const s2 = await docsApi("/jobs/status", { id: sub.id });
-        if (s2.status === "done") break;
-        if (s2.status === "failed") throw new Error(s2.error || "the design agent hit an error");
-        const mins = (Date.now() - t0) / 60000;
-        st.textContent = s2.status === "processing"
-          ? "Illustrator is working on it…"
-          : "queued…" + (mins > 2 ? " (the design PC may be off — it runs when it's back)" : "");
-        if (mins > 15) throw new Error("timed out — the result will still appear here if you retry once the agent catches up");
-      }
-      const res2 = await docsApi("/jobs/result", { id: sub.id });
-      out = { pdf: res2.pdf, note: res2.note };
-    } else {
-      out = await docsApi("/edit", body);
-    }
-    if (out.pdf) { // surgical result: the same PDF with targeted changes
-      docs.pdf = out.pdf;
-      docs.html = null;
-      $("doc-frame").removeAttribute("srcdoc");
-      $("doc-frame").src = URL.createObjectURL(b64ToBlob(out.pdf, "application/pdf"));
-    } else {
-      docs.html = out.html;
-      docs.pdf = null;
-      $("doc-frame").removeAttribute("src");
-      $("doc-frame").srcdoc = out.html;
-    }
+    const res2 = await docsApi("/jobs/result", { id: sub.id });
+    docs.pdf = res2.pdf;
+    $("doc-frame").removeAttribute("srcdoc");
+    $("doc-frame").src = URL.createObjectURL(b64ToBlob(res2.pdf, "application/pdf"));
     $("doc-result").hidden = false;
     $("doc-result").classList.add("vis");
-    if (docs.mode === "generate" && docs.draft.length) showIntentPreview(); // intent vs actual
+    if (blocks.length) showIntentPreview(); // intent vs actual, side by side
     layoutDocPanels();
-    $("doc-req").value = "";
-    st.textContent = (out.note ? out.note + " · " : "") + "describe another change to keep editing this version";
+    st.textContent = (res2.note ? res2.note + " · " : "") + "tweak the page and build again, or save it as a template";
   } catch (e) {
     st.textContent = "failed: " + e.message;
   } finally {
@@ -3716,49 +3684,59 @@ async function boot() {
   });
   $("util-csv-btn").addEventListener("click", downloadUtilCsv);
   $("search-csv-btn").addEventListener("click", downloadSearchCsv);
-  // document studio
+  // document builder
   $("doc-file").addEventListener("change", () => {
     const f = $("doc-file").files[0];
-    $("doc-file-name").textContent = f ? f.name : "no file selected";
-    docs.html = null; // a fresh source restarts the editing session
-    $("doc-result").hidden = true;
+    $("doc-file-name").textContent = f ? f.name : "none";
     if (f) {
-      $("doc-template").value = ""; // uploaded file becomes the source
+      $("doc-template").value = ""; // uploaded reference replaces the template pick
       $("doc-del-template").hidden = true;
       showSourcePreview(f);
+      $("doc-status").textContent = "reference loaded — ANALYZE & DRAFT pulls it onto the page";
     } else hideSourcePreview();
   });
-  $("doc-logo").addEventListener("change", () => {
-    $("doc-logo-name").textContent = $("doc-logo").files[0] ? $("doc-logo").files[0].name : "none";
-  });
   $("doc-template").addEventListener("change", async () => {
-    docs.html = null;
     docs.template = null;
-    $("doc-result").hidden = true;
     const slug = $("doc-template").value;
     $("doc-del-template").hidden = !slug;
-    if (!slug) { hideSourcePreview(); return; }
-    $("doc-file").value = ""; // the template becomes the source
-    $("doc-file-name").textContent = "no file selected";
+    if (!slug) return;
+    $("doc-file").value = ""; // the template becomes the starting point
+    $("doc-file-name").textContent = "none";
     try {
-      $("doc-status").textContent = "loading template preview…";
+      $("doc-status").textContent = "loading template…";
       docs.template = { slug, ...(await docsApi("/templates/get", { slug })) };
-      showSourcePreview(b64ToBlob(docs.template.file, docs.template.fileType || "application/pdf"));
-      $("doc-status").textContent = "template loaded — describe the change and RUN EDIT";
+      if (Array.isArray(docs.template.blocks) && docs.template.blocks.length) {
+        // draft template: drops straight onto the page, no AI needed
+        if (docs.template.footer) docs.footer = docs.template.footer;
+        blocksToDraft(docs.template.blocks);
+        $("doc-status").textContent = "template loaded — edit the page, then BUILD IN INDESIGN";
+      } else if (docs.template.file) {
+        // file template: analyze it into an editable draft
+        showSourcePreview(b64ToBlob(docs.template.file, docs.template.fileType || "application/pdf"));
+        $("doc-status").textContent = "analyzing template into an editable draft…";
+        const out = await docsApi("/draft", {
+          instruction: "Recreate this document as our branded version — keep its content, use our styles and objects.",
+          file: docs.template.file, fileType: docs.template.fileType,
+        });
+        blocksToDraft(out.blocks);
+        $("doc-status").textContent = `drafted ${out.blocks.length} blocks from the template — edit the page, then BUILD IN INDESIGN`;
+      }
     } catch (e) { $("doc-status").textContent = "couldn't load template: " + e.message; }
   });
   $("doc-save-template").addEventListener("click", async () => {
-    const f = $("doc-file").files[0];
-    if (!f) { $("doc-status").textContent = "choose a document file first, then save it as a template"; return; }
-    const name = prompt("Template name for the team:", f.name.replace(/\.[^.]+$/, ""));
+    const blocks = draftToBlocks();
+    if (!blocks.length) { $("doc-status").textContent = "the page is empty — nothing to save yet"; return; }
+    const name = prompt("Template name for the team:", "");
     if (!name) return;
     try {
       $("doc-status").textContent = "saving template…";
-      const out = await docsApi("/templates/save", { name, file: await fileToB64(f), fileType: f.type || "application/pdf" });
+      const body = { name, blocks, footer: docs.footer };
+      if (docs.pdf) { body.file = docs.pdf; body.fileType = "application/pdf"; }
+      const out = await docsApi("/templates/save", body);
       await loadTemplates();
       $("doc-template").value = out.slug;
       $("doc-del-template").hidden = false;
-      $("doc-status").textContent = `saved "${name}" — it's now selectable for everyone`;
+      $("doc-status").textContent = `saved "${name}" — the team can now start from it`;
     } catch (e) { $("doc-status").textContent = "save failed: " + e.message; }
   });
   $("doc-del-template").addEventListener("click", async () => {
@@ -3772,32 +3750,68 @@ async function boot() {
       $("doc-status").textContent = "template deleted";
     } catch (e) { $("doc-status").textContent = "delete failed: " + e.message; }
   });
-  $("doc-run").addEventListener("click", runDocEdit);
-  $("doc-mode").addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-tval]");
-    if (!b) return;
-    docs.mode = b.dataset.tval;
-    for (const x of $("doc-mode").querySelectorAll("button")) x.classList.toggle("on", x === b);
-    docs.html = null; docs.pdf = null; // switching modes restarts the session
-    $("doc-result").hidden = true;
-    $("doc-draft").hidden = docs.mode !== "generate";
-    if (docs.mode === "generate") fitDocpage($("docpage")); // first fit happens hidden
-    layoutDocPanels();
-  });
-  // draft preview editor wiring — text edits sync per keystroke, structural
-  // changes mutate docs.draft and re-render
+  $("doc-run").addEventListener("click", runDocBuild);
+  // page editor wiring — text edits sync per keystroke, structural changes
+  // mutate docs.draft and re-render
   $("docpage").addEventListener("input", (e) => {
     const t = e.target.closest("[data-role]");
     if (!t) return;
-    const b = docs.draft[+t.closest(".dp-block").dataset.i];
-    if (!b) return;
     const txt = t.textContent, role = t.dataset.role;
+    if (role === "footer") { docs.footer = txt; return; }
+    const b = docs.draft[+t.closest(".dp-block")?.dataset.i];
+    if (!b) return;
     if (role === "text") b.text = txt;
     else if (role === "th") b.table.headers[+t.dataset.c] = txt;
     else if (role === "td") b.table.rows[+t.dataset.r][+t.dataset.c] = txt;
     else if (role === "ict") b.iconCols[+t.dataset.c].title = txt;
     else if (role === "icx") b.iconCols[+t.dataset.c].text = txt;
     else if (role === "co") b.callout.text = txt;
+    else if (role === "tbt") b.tintBox.title = txt;
+    else if (role === "tbx") b.tintBox.text = txt;
+  });
+  // type like a document: Enter splits into a new block (Bullets continue as
+  // bullets, headings hand off to Paragraph), Backspace at the start merges up
+  $("docpage").addEventListener("keydown", (e) => {
+    const t = e.target.closest('[data-role="text"]');
+    if (!t) {
+      // single-line regions: Enter just ends the edit
+      if (e.key === "Enter" && !e.shiftKey && e.target.closest('[data-role="ict"],[data-role="co"],[data-role="tbt"],[data-role="footer"]')) {
+        e.preventDefault();
+        e.target.blur();
+      }
+      return;
+    }
+    const i = +t.closest(".dp-block").dataset.i;
+    const b = docs.draft[i];
+    if (!b) return;
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const off = caretOffsetIn(t);
+      const full = t.textContent;
+      b.text = full.slice(0, off);
+      const nextStyle = b.style === "Bullet" ? "Bullet" : "Paragraph";
+      docs.draft.splice(i + 1, 0, { style: nextStyle, text: full.slice(off) });
+      renderDraft();
+      focusBlockText(i + 1, false);
+    } else if (e.key === "Backspace" && caretOffsetIn(t) === 0 && getSelection().isCollapsed) {
+      const prev = docs.draft[i - 1];
+      if (!prev || prev.table || prev.iconCols || prev.callout || prev.tintBox) return; // only merge into plain text
+      e.preventDefault();
+      const keepLen = (prev.text || "").length;
+      prev.text = (prev.text || "") + t.textContent;
+      docs.draft.splice(i, 1);
+      renderDraft();
+      focusBlockText(i - 1, true);
+      // put the caret at the join, not the end
+      const el = $("docpage").querySelector(`.dp-block[data-i="${i - 1}"] [data-role="text"]`);
+      if (el && el.firstChild) {
+        const sel = getSelection(), r = document.createRange();
+        r.setStart(el.firstChild, Math.min(keepLen, el.firstChild.length));
+        r.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(r);
+      }
+    }
   });
   $("docpage").addEventListener("change", (e) => {
     const sel = e.target.closest('select[data-d="style"]');
@@ -3826,25 +3840,27 @@ async function boot() {
     } else return;
     renderDraft();
   });
-  document.querySelector("#doc-draft .dp-add").addEventListener("click", (e) => {
+  document.querySelector(".dp-add").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-dpadd]");
     if (!btn) return;
     const k = btn.dataset.dpadd;
     docs.draft.push(
       k === "table" ? { table: { headers: ["Column A", "Column B"], rows: [["", ""]] } }
-      : k === "iconCols" ? { iconCols: [{ title: "TITLE ONE", text: "Text" }, { title: "TITLE TWO", text: "Text" }, { title: "TITLE THREE", text: "Text" }] }
-      : k === "callout" ? { callout: { text: "Callout text" } }
+      : k === "iconCols" ? { iconCols: [{ title: "", text: "" }, { title: "", text: "" }, { title: "", text: "" }] }
+      : k === "callout" ? { callout: { text: "" } }
+      : k === "tintBox" ? { tintBox: { title: "", text: "" } }
       : { style: "Paragraph", text: "" });
     renderDraft();
+    const added = $("docpage").querySelector(`.dp-block[data-i="${docs.draft.length - 1}"] [contenteditable]`);
+    if (added) added.focus();
   });
   renderDraft();
-  addEventListener("resize", () => { if (!$("doc-draft").hidden) fitDocpage($("docpage")); });
+  addEventListener("resize", () => fitDocpage($("docpage")));
   // honest fonts: flag the preview if the kit didn't deliver Scandia
   if (document.fonts?.ready) document.fonts.ready.then(() => {
     try {
       if (!document.fonts.check('9pt "scandia-web"')) {
-        const st = document.querySelector("#doc-draft .docstatus");
-        if (st) st.textContent += " · Scandia didn't load here — preview fonts are approximate; the InDesign build still uses the real thing.";
+        $("doc-status").textContent = "Scandia didn't load here — preview fonts are approximate; the InDesign build still uses the real thing.";
       }
     } catch {}
   });
@@ -3865,46 +3881,33 @@ async function boot() {
       }
       const out = await docsApi("/draft", payload);
       blocksToDraft(out.blocks);
-      st.textContent = `drafted ${out.blocks.length} blocks — click any text to edit, then RUN EDIT builds it in InDesign`;
+      st.textContent = `drafted ${out.blocks.length} blocks — click any text to edit, then BUILD IN INDESIGN`;
     } catch (e2) { st.textContent = "draft failed: " + e2.message; }
   });
-  $("doc-print").addEventListener("click", () => {
-    if (docs.pdf) { // surgical result IS a PDF — download it directly
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(b64ToBlob(docs.pdf, "application/pdf"));
-      a.download = "myrxcard-document.pdf";
-      a.click();
-      URL.revokeObjectURL(a.href);
-      return;
-    }
-    const w = $("doc-frame").contentWindow;
-    if (w) w.print();
-  });
-  $("doc-download").addEventListener("click", () => {
+  const downloadResultPdf = () => {
+    if (!docs.pdf) return;
     const a = document.createElement("a");
-    if (docs.pdf) {
-      a.href = URL.createObjectURL(b64ToBlob(docs.pdf, "application/pdf"));
-      a.download = "myrxcard-document.pdf";
-    } else if (docs.html) {
-      a.href = URL.createObjectURL(new Blob([docs.html], { type: "text/html" }));
-      a.download = "myrxcard-document.html";
-    } else return;
+    a.href = URL.createObjectURL(b64ToBlob(docs.pdf, "application/pdf"));
+    a.download = "myrxcard-document.pdf";
     a.click();
     URL.revokeObjectURL(a.href);
-  });
+  };
+  $("doc-print").addEventListener("click", downloadResultPdf);
+  $("doc-download").addEventListener("click", downloadResultPdf);
   $("doc-reset").addEventListener("click", () => {
-    docs.html = null;
     docs.pdf = null;
     docs.template = null;
+    docs.draft = [];
+    docs.footer = "FOR MORE INFORMATION, CONTACT INFO@AVALONSAVES.COM OR CALL (844)696-4566";
     $("doc-result").hidden = true;
     $("doc-file").value = "";
-    $("doc-logo").value = "";
-    $("doc-file-name").textContent = "no file selected";
-    $("doc-logo-name").textContent = "none";
+    $("doc-file-name").textContent = "none";
     $("doc-template").value = "";
     $("doc-del-template").hidden = true;
+    $("doc-req").value = "";
     $("doc-status").textContent = "";
     hideSourcePreview();
+    renderDraft();
   });
   // timeframe: granularity select resets the drill-down list; entries toggle
   // through the checkbox pop (handled with the other slicer changes below)
