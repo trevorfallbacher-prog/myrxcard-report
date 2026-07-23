@@ -604,22 +604,47 @@
   #view-docs .half { grid-column: span 6; }
   @media (max-width: 980px) { #view-docs .half { grid-column: span 12; } }
 
-  /* draft editor (GENERATE mode) */
-  #draft-blocks { display: flex; flex-direction: column; gap: 8px; }
-  .dblock { display: flex; gap: 10px; align-items: flex-start; }
-  .dblock select { flex: 0 0 170px; }
-  .dblock textarea {
-    flex: 1; resize: vertical; min-height: 34px; background: var(--card); color: var(--ink);
-    border: 1px solid var(--hair); border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13px; outline: none;
+  /* ---------- brand document preview (GENERATE): CSS twin of the InDesign
+       styles, values extracted from style outline.indd — content + styling
+       proof; exact line/page breaks come from InDesign ---------- */
+  .docpage-wrap { background: var(--card-solid); border: 1px solid var(--hair); border-radius: 12px; padding: 22px; overflow: auto; }
+  #doc-source-intent { max-height: 72vh; }
+  .docpage {
+    width: 612pt; min-height: 792pt; margin: 0 auto; background: #fff; color: #000;
+    box-shadow: 0 4px 24px rgba(10, 30, 45, 0.18); padding: 72pt; box-sizing: border-box;
+    font-family: "scandia-web", "Inter", sans-serif; position: relative;
   }
-  .dblock textarea:focus { border-color: var(--secondary); }
-  .dblock.tbl textarea { font-family: var(--mono); min-height: 64px; }
-  .dblock .dctl { display: flex; flex-direction: column; gap: 2px; }
-  .dblock .dctl button {
-    background: transparent; border: 1px solid var(--hair); border-radius: 6px; color: var(--ink-mute);
-    width: 24px; height: 22px; cursor: pointer; font-size: 11px; line-height: 1; padding: 0;
+  .docpage .dp-logo { width: 150pt; display: block; margin-bottom: 18pt; }
+  .dp-h1 { font-weight: 700; font-size: 16pt; line-height: 1.2; color: rgb(28,128,184); margin: 0 0 6pt; }
+  .dp-subheader { font-size: 9pt; letter-spacing: 0.2em; text-transform: uppercase; color: #000; margin: 10pt 0 4pt; }
+  .dp-subheader-callout { font-size: 9pt; letter-spacing: 0.2em; text-transform: uppercase; color: rgb(28,128,184); margin: 10pt 0 4pt; }
+  .dp-subheader-callout-2 { font-size: 9pt; font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase; color: #fff; margin: 0 0 3pt; }
+  .dp-paragraph { font-size: 9pt; line-height: 1.35; color: #000; margin: 0 0 6pt; }
+  .dp-callout-paragraph { font-size: 9pt; line-height: 1.35; color: #fff; margin: 0; }
+  .dp-bullet { font-size: 9pt; line-height: 1.35; color: #000; margin: 0 0 3pt; padding-left: 12pt; position: relative; }
+  .dp-bullet::before { content: "\2022"; position: absolute; left: 2pt; color: rgb(28,128,184); }
+  .dp-table { width: 100%; border-collapse: collapse; margin: 6pt 0 12pt; }
+  .dp-table th { background: rgb(40,52,66); color: #fff; font-weight: 700; font-size: 8.5pt; letter-spacing: 0.03em; text-align: left; padding: 3.5pt 6pt; border: 0.5pt solid rgb(40,52,66); }
+  .dp-table td { font-size: 8.5pt; color: rgb(40,52,66); padding: 3.5pt 6pt; border: 0.5pt solid rgb(40,52,66); line-height: 11pt; }
+  .dp-callout { background: rgb(40,52,66); border-radius: 3pt; padding: 10pt 12pt; margin: 8pt 0 12pt; }
+  .dp-iconcols { display: flex; gap: 14pt; margin: 8pt 0 12pt; }
+  .dp-iconcols .dp-col { flex: 1; min-width: 0; }
+  /* editing chrome (lives outside the editable text) */
+  .dp-block { position: relative; }
+  .dp-block [contenteditable] { outline: none; }
+  .dp-block [contenteditable]:focus { box-shadow: 0 0 0 1.5px var(--secondary); border-radius: 2px; }
+  .dp-chrome {
+    position: absolute; top: -12px; right: 0; z-index: 6; display: none; gap: 4px; align-items: center;
+    background: var(--card); border: 1px solid var(--hair); border-radius: 8px; padding: 3px 6px; box-shadow: var(--shadow);
   }
-  .dblock .dctl button:hover { color: var(--ink); border-color: var(--hair-bright); }
+  .dp-block:hover > .dp-chrome, .dp-block:focus-within > .dp-chrome { display: flex; }
+  .dp-chrome select { font: inherit; font-size: 11px; background: var(--card); color: var(--ink); border: 1px solid var(--hair); border-radius: 5px; }
+  .dp-chrome button {
+    background: transparent; border: 1px solid var(--hair); border-radius: 5px; color: var(--ink-mute);
+    min-width: 20px; height: 20px; font-size: 10px; cursor: pointer; padding: 0 4px; line-height: 1;
+  }
+  .dp-chrome button:hover { color: var(--ink); border-color: var(--hair-bright); }
+  .dp-add { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
 
   /* floating hover tooltip (replaces the browser's delayed native title tips) */
   #tip {
@@ -1091,13 +1116,17 @@
         <textarea id="doc-req" rows="3" placeholder="e.g. Swap the logo for the attached one, delete the second paragraph on page 1, and move the pricing table onto its own page."></textarea>
         <div id="doc-draft" hidden>
           <div class="docs-files" style="margin-bottom:10px">
-            <span class="kicker" style="align-self:center">Draft</span>
-            <button class="iconbtn" id="draft-ai" type="button" title="Have AI fill the draft from the brief above (and reference, if chosen)">AI DRAFT FROM BRIEF</button>
-            <button class="iconbtn" id="draft-add-text" type="button">+ TEXT</button>
-            <button class="iconbtn" id="draft-add-table" type="button">+ TABLE</button>
-            <span class="docstatus">tag each block with a brand style — the document is built exactly from this draft; leave empty to let AI structure it from the brief alone</span>
+            <span class="kicker" style="align-self:center">Draft preview</span>
+            <button class="iconbtn" id="draft-ai" type="button" title="AI drafts the document from the brief above and the reference doc, if one is chosen">ANALYZE &amp; DRAFT</button>
+            <span class="docstatus">brand-true preview — click any text to edit it in place; hover a block for style &amp; order controls. Styling is exact; line &amp; page breaks are finalized by InDesign.</span>
           </div>
-          <div id="draft-blocks"></div>
+          <div class="docpage-wrap"><div class="docpage" id="docpage"></div></div>
+          <div class="dp-add">
+            <button class="iconbtn" data-dpadd="text" type="button">+ TEXT</button>
+            <button class="iconbtn" data-dpadd="table" type="button">+ TABLE</button>
+            <button class="iconbtn" data-dpadd="iconCols" type="button">+ ICON COLUMNS</button>
+            <button class="iconbtn" data-dpadd="callout" type="button">+ CALLOUT</button>
+          </div>
         </div>
         <div class="docs-actions">
           <button class="iconbtn" id="doc-run" type="button">RUN EDIT</button>
@@ -1106,8 +1135,9 @@
       </div>
     </div>
     <div class="panel span12" id="doc-source" hidden>
-      <div class="kicker">Source preview <span class="hint">· this is what your edit request applies to</span></div>
+      <div class="kicker" id="doc-source-kicker">Source preview <span class="hint">· this is what your edit request applies to</span></div>
       <iframe id="doc-source-frame" title="Source document"></iframe>
+      <div id="doc-source-intent" class="docpage-wrap" hidden></div>
     </div>
     <div class="panel span12" id="doc-result" hidden>
       <div class="kicker">Result <span class="hint">· follow-up requests keep editing this version</span></div>
@@ -3160,7 +3190,7 @@ async function setTab(name) {
 // Backend: the myrxcard-docs Cloudflare Worker (holds the AI + team-password
 // secrets). Set after deploy; empty = feature shows a "not deployed" notice.
 const DOCS_API = "https://myrxcard-docs.trevorfallbacher.workers.dev";
-let docs = { html: null, pdf: null, mode: "surgical", busy: false, template: null, templatesLoaded: false };
+let docs = { html: null, pdf: null, mode: "surgical", busy: false, template: null, templatesLoaded: false, draft: [] };
 
 const docsPw = () => gatePw || sessionStorage.getItem("mrx-pw") || prompt("Team password");
 
@@ -3181,6 +3211,9 @@ let srcUrl = null; // active blob URL for the source preview
 function showSourcePreview(blob) {
   if (srcUrl) URL.revokeObjectURL(srcUrl);
   srcUrl = URL.createObjectURL(blob);
+  $("doc-source-intent").hidden = true;
+  $("doc-source-frame").hidden = false;
+  $("doc-source-kicker").innerHTML = `Source preview <span class="hint">· this is what your edit request applies to</span>`;
   $("doc-source-frame").src = srcUrl;
   $("doc-source").hidden = false;
   $("doc-source").classList.add("vis");
@@ -3227,45 +3260,121 @@ const fileToB64 = (file) => new Promise((res, rej) => {
   r.readAsDataURL(file);
 });
 
-/* --- draft editor (GENERATE mode): tagged blocks build deterministically --- */
-const DRAFT_STYLES = ["H1", "Subheader", "Subheader Callout", "Subheader Callout 2", "Paragraph", "Callout Paragraph", "Bullet"];
-function addDraftBlock(style, text, isTable) {
-  const row = document.createElement("div");
-  row.className = "dblock" + (isTable ? " tbl" : "");
-  row.innerHTML = (isTable
-    ? `<select class="periodsel" disabled><option>Table</option></select>
-       <textarea placeholder="Column A | Column B&#10;row 1a | row 1b&#10;row 2a | row 2b" spellcheck="false"></textarea>`
-    : `<select class="periodsel">${DRAFT_STYLES.map((s) => `<option${s === style ? " selected" : ""}>${s}</option>`).join("")}</select>
-       <textarea placeholder="text…"></textarea>`) +
-    `<div class="dctl"><button type="button" data-d="up" title="Move up">&#9650;</button><button type="button" data-d="down" title="Move down">&#9660;</button><button type="button" data-d="x" title="Remove">&#215;</button></div>`;
-  if (text) row.querySelector("textarea").value = text;
-  row.dataset.table = isTable ? "1" : "";
-  $("draft-blocks").appendChild(row);
-  return row;
+/* --- brand draft editor (GENERATE mode) ------------------------------------
+   docs.draft (blocks array) is the single source of truth. The page preview
+   renders from it; each text region is its own contenteditable that writes
+   textContent straight back to its block on input (innerHTML is never
+   parsed); structural changes (retag, reorder, add/remove, rows/cols)
+   mutate the model and re-render. The CSS classes are a twin of the
+   InDesign styles in style outline.indd — values extracted from the
+   template itself, so a style change there means updating DOC_STYLES +
+   the dp-* CSS together. */
+const DOC_STYLES = { // manifest: tag → preview class (InDesign style of the same name)
+  "H1": { css: "dp-h1" },
+  "Subheader": { css: "dp-subheader" },
+  "Subheader Callout": { css: "dp-subheader-callout" },
+  "Subheader Callout 2": { css: "dp-subheader-callout-2" },
+  "Paragraph": { css: "dp-paragraph" },
+  "Callout Paragraph": { css: "dp-callout-paragraph" },
+  "Bullet": { css: "dp-bullet" },
+};
+const DRAFT_STYLES = Object.keys(DOC_STYLES);
+const AVALON_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 182.2"><defs><style>.st0{fill:#abb9d4}.st1{fill:#315280}.st2{fill:#1c80b8}.st3{fill:#aac268}</style></defs><g><path class="st1" d="M292.9,127.8h-19.4l-6.5-17h-45.1l-6.6,17h-19.4l41.7-97.5h13.7l41.7,97.5ZM244.5,51.6l-17,44.3h34l-17-44.3Z"/><path class="st1" d="M274.3,58.3h18l18.7,49.5,18.7-49.5h18l-28.8,69.5h-15.6l-28.8-69.5Z"/><path class="st1" d="M420.2,58.3v69.5h-16.9v-12c-4,7.1-13.2,13.7-25.4,13.7-20.6,0-35.1-16.4-35.1-36.4s14.5-36.5,35.1-36.5,21.6,6.3,25.1,13.7v-12h17.1ZM381.4,115c11.6,0,21.3-8.5,21.3-21.9s-9.8-22-21.3-22-20.9,9.9-20.9,22,8.4,21.9,20.9,21.9Z"/><path class="st1" d="M428.9,127.8V26.1h17.6v101.7h-17.6Z"/><path class="st1" d="M452.2,93.2c0-19,14.2-36.5,38.2-36.5s38.2,17.6,38.2,36.5-14.2,36.4-38.2,36.4-38.2-17.6-38.2-36.4ZM469.4,93.2c0,11.3,7.5,21.7,21,21.7s21-10.4,21-21.7-7.5-21.9-21-21.9-21,10.6-21,21.9Z"/><path class="st1" d="M551.4,127.8h-17.6V58.3h17v11.8c3.2-8.1,12.3-13.5,23.1-13.5,16.7,0,26.1,12.3,26.1,29.5v41.7h-17.6v-38.7c0-9.9-4.5-17.1-14.9-17.1s-16.2,7-16.2,17v38.9Z"/></g><g><path class="st1" d="M321.2,145.2h4.9v10.9h13.1v-10.9h4.9v26.6h-4.9v-11.1h-13.1v11.1h-4.9v-26.6Z"/><path class="st1" d="M353,145.2h17.8v4.3h-12.8v6.6h12.5v4.3h-12.5v7h13v4.3h-17.9v-26.6Z"/><path class="st1" d="M402.9,171.8h-5.3l-1.8-4.6h-12.3l-1.8,4.6h-5.3l11.4-26.6h3.7l11.4,26.6ZM389.7,151l-4.6,12.1h9.3l-4.6-12.1Z"/><path class="st1" d="M409.7,145.2h4.9v22.3h12.1v4.3h-17.1v-26.6Z"/><path class="st1" d="M450.3,149.5h-8v22.3h-4.9v-22.3h-8v-4.3h21v4.3Z"/><path class="st1" d="M457.3,145.2h4.9v10.9h13.1v-10.9h4.9v26.6h-4.9v-11.1h-13.1v11.1h-4.9v-26.6Z"/><path class="st1" d="M515,153.9h-4.9c-1.4-2.9-4.1-4.9-8.2-4.9s-9.2,4.2-9.2,9.5,3.5,9.5,9.2,9.5,6.8-1.9,8.2-4.9h4.9c-1.6,5.1-6.4,9.2-13.1,9.2s-14.2-6.2-14.2-13.8,5.6-13.8,14.2-13.8,11.5,4.1,13.1,9.2Z"/><path class="st1" d="M545.8,171.8h-5.3l-1.8-4.6h-12.3l-1.8,4.6h-5.3l11.4-26.6h3.7l11.4,26.6ZM532.6,151l-4.6,12.1h9.3l-4.6-12.1Z"/><path class="st1" d="M561.6,164.1h-4.1v7.6h-4.9v-26.6h11.7c5.7,0,9.6,4.2,9.6,9.5s-2.5,7.7-6.4,9l7.6,8.1h-6.5l-7-7.6ZM563.7,159.9c3.3,0,5.4-2.3,5.4-5.2s-2.1-5.2-5.4-5.2h-6.1v10.4h6.1Z"/><path class="st1" d="M582.1,145.2h17.8v4.3h-12.8v6.6h12.5v4.3h-12.5v7h13v4.3h-17.9v-26.6Z"/></g><polygon class="st1" points="93.8 42.3 115.1 63.5 136.3 42.3 93.8 -.2 51.3 42.3 72.5 63.5 93.8 42.3"/><polygon class="st2" points="44.6 91.3 65.9 70 44.6 48.8 2.1 91.3 44.6 133.8 65.9 112.6 44.6 91.3"/><polygon class="st0" points="94.2 139.7 72.9 118.5 51.7 139.7 94.2 182.2 136.7 139.7 115.5 118.5 94.2 139.7"/><polygon class="st3" points="142.6 48.8 121.4 70 142.6 91.3 121.4 112.6 142.6 133.8 185.1 91.3 142.6 48.8"/></svg>`;
+const AVALON_LOGO_SRC = "data:image/svg+xml;utf8," + encodeURIComponent(AVALON_LOGO_SVG);
+const CE = 'contenteditable="plaintext-only"';
+
+function fitDocpage(page) { // shrink the 612pt page to the panel, never enlarge
+  const wrap = page.parentElement;
+  if (!wrap || !wrap.clientWidth) return;
+  const z = Math.max(0.45, Math.min(1, (wrap.clientWidth - 46) / page.offsetWidth));
+  page.style.zoom = z < 1 ? String(z) : "";
 }
-function draftToBlocks() {
-  const out = [];
-  for (const row of $("draft-blocks").children) {
-    const txt = row.querySelector("textarea").value.trim();
-    if (!txt) continue;
-    if (row.dataset.table) {
-      const lines = txt.split("\n").map((l) => l.split("|").map((c) => c.trim())).filter((l) => l.some(Boolean));
-      if (lines.length >= 2) out.push({ table: { headers: lines[0], rows: lines.slice(1) } });
-      else if (lines.length) out.push({ style: "Paragraph", text: lines[0].join(" — ") });
+function renderDraft() {
+  const page = $("docpage");
+  page.innerHTML = `<img class="dp-logo" src="${AVALON_LOGO_SRC}" alt="Avalon Healthcare">`;
+  docs.draft.forEach((b, i) => {
+    const el = document.createElement("div");
+    el.className = "dp-block";
+    el.dataset.i = i;
+    let inner = "", extraCtl = "";
+    if (b.table) {
+      inner = `<table class="dp-table"><thead><tr>${b.table.headers.map((h, c) =>
+        `<th ${CE} data-role="th" data-c="${c}">${esc(h)}</th>`).join("")}</tr></thead><tbody>${
+        b.table.rows.map((r, ri) => `<tr>${r.map((cell, c) =>
+          `<td ${CE} data-role="td" data-r="${ri}" data-c="${c}">${esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+      extraCtl = `<button type="button" data-d="row" title="Add row">+row</button><button type="button" data-d="delrow" title="Remove last row">&#8722;row</button><button type="button" data-d="col" title="Add column">+col</button><button type="button" data-d="delcol" title="Remove last column">&#8722;col</button>`;
+    } else if (b.iconCols) {
+      inner = `<div class="dp-iconcols">${b.iconCols.map((c, ci) =>
+        `<div class="dp-col"><div class="dp-subheader-callout" ${CE} data-role="ict" data-c="${ci}">${esc(c.title)}</div><div class="dp-paragraph" ${CE} data-role="icx" data-c="${ci}">${esc(c.text)}</div></div>`).join("")}</div>`;
+      extraCtl = `<button type="button" data-d="col" title="Add column (max 4)">+col</button><button type="button" data-d="delcol" title="Remove last column (min 2)">&#8722;col</button>`;
+    } else if (b.callout) {
+      inner = `<div class="dp-callout"><div class="dp-callout-paragraph" ${CE} data-role="co">${esc(b.callout.text)}</div></div>`;
     } else {
-      const style = row.querySelector("select").value;
-      if (style === "Bullet") out.push({ style: "Paragraph", text: "•  " + txt });
-      else out.push({ style, text: txt });
+      const cls = (DOC_STYLES[b.style] || DOC_STYLES.Paragraph).css;
+      inner = `<div class="${cls}" ${CE} data-role="text">${esc(b.text || "")}</div>`;
+      extraCtl = `<select data-d="style" title="Brand style">${DRAFT_STYLES.map((s) => `<option${s === b.style ? " selected" : ""}>${s}</option>`).join("")}</select>`;
+    }
+    el.innerHTML = inner + `<div class="dp-chrome" contenteditable="false">${extraCtl}<button type="button" data-d="up" title="Move up">&#9650;</button><button type="button" data-d="down" title="Move down">&#9660;</button><button type="button" data-d="x" title="Remove block">&#215;</button></div>`;
+    page.appendChild(el);
+  });
+  if (!docs.draft.length) page.insertAdjacentHTML("beforeend",
+    `<div class="dp-paragraph" style="color:#9aa4b2">Empty draft — ANALYZE &amp; DRAFT fills this page from your brief and reference document, or add blocks with the buttons below. Left empty, AI structures the document from the brief alone.</div>`);
+  fitDocpage(page);
+}
+function draftToBlocks() { // serialize the model for /jobs/submit — skips empties
+  const out = [];
+  for (const b of docs.draft) {
+    if (b.table) {
+      const headers = b.table.headers.map((h) => h.trim());
+      const rows = b.table.rows.map((r) => r.map((c) => c.trim())).filter((r) => r.some(Boolean));
+      if (headers.some(Boolean)) out.push({ table: { headers, rows } });
+    } else if (b.iconCols) {
+      const cols = b.iconCols.map((c) => ({ title: c.title.trim(), text: c.text.trim() })).filter((c) => c.title || c.text);
+      if (cols.length >= 2) out.push({ iconCols: cols });
+    } else if (b.callout) {
+      if (b.callout.text.trim()) out.push({ callout: { text: b.callout.text.trim() } });
+    } else if ((b.text || "").trim()) {
+      out.push({ style: DOC_STYLES[b.style] ? b.style : "Paragraph", text: b.text.trim() });
     }
   }
   return out;
 }
-function blocksToDraft(blocks) {
-  $("draft-blocks").innerHTML = "";
-  for (const b of blocks || []) {
-    if (b.table) addDraftBlock(null, [b.table.headers.join(" | ")].concat((b.table.rows || []).map((r) => r.join(" | "))).join("\n"), true);
-    else addDraftBlock(DRAFT_STYLES.includes(b.style) ? b.style : "Paragraph", String(b.text || "").replace(/^•\s*/, ""), false);
-  }
+function blocksToDraft(blocks) { // normalize incoming AI blocks into the model
+  docs.draft = (blocks || []).map((b) => {
+    if (b && b.table) return { table: {
+      headers: (b.table.headers || []).map((h) => String(h ?? "")),
+      rows: (b.table.rows || []).map((r) => (r || []).map((c) => String(c ?? ""))),
+    } };
+    if (b && Array.isArray(b.iconCols)) return { iconCols: b.iconCols.slice(0, 4).map((c) => ({ title: String(c?.title || ""), text: String(c?.text || "") })) };
+    if (b && b.callout) return { callout: { text: String(b.callout.text || "") } };
+    const raw = String(b?.text || "");
+    const bulleted = /^[•\-–]\s+/.test(raw);
+    return {
+      style: bulleted ? "Bullet" : (DOC_STYLES[b?.style] ? b.style : "Paragraph"),
+      text: raw.replace(/^[•\-–]\s+/, ""),
+    };
+  }).filter((b) => b.table ? b.table.headers.length : b.iconCols ? b.iconCols.length >= 2 : true);
+  renderDraft();
+}
+// "intent vs actual": after a generate build, the source panel shows a frozen
+// copy of the draft preview beside the InDesign result
+function showIntentPreview() {
+  const clone = $("docpage").cloneNode(true);
+  clone.removeAttribute("id");
+  clone.style.zoom = "";
+  for (const c of clone.querySelectorAll(".dp-chrome")) c.remove();
+  for (const c of clone.querySelectorAll("[contenteditable]")) c.removeAttribute("contenteditable");
+  if (srcUrl) { URL.revokeObjectURL(srcUrl); srcUrl = null; }
+  $("doc-source-frame").hidden = true;
+  const host = $("doc-source-intent");
+  host.innerHTML = "";
+  host.appendChild(clone);
+  host.hidden = false;
+  $("doc-source-kicker").innerHTML = `Draft intent <span class="hint">· what you approved — compare against the InDesign build</span>`;
+  $("doc-source").hidden = false;
+  $("doc-source").classList.add("vis");
+  layoutDocPanels();
+  fitDocpage(clone);
 }
 
 async function runDocEdit() {
@@ -3360,6 +3469,7 @@ async function runDocEdit() {
     }
     $("doc-result").hidden = false;
     $("doc-result").classList.add("vis");
+    if (docs.mode === "generate" && docs.draft.length) showIntentPreview(); // intent vs actual
     layoutDocPanels();
     $("doc-req").value = "";
     st.textContent = (out.note ? out.note + " · " : "") + "describe another change to keep editing this version";
@@ -3671,32 +3781,91 @@ async function boot() {
     docs.html = null; docs.pdf = null; // switching modes restarts the session
     $("doc-result").hidden = true;
     $("doc-draft").hidden = docs.mode !== "generate";
+    if (docs.mode === "generate") fitDocpage($("docpage")); // first fit happens hidden
     layoutDocPanels();
   });
-  // draft editor wiring
-  $("draft-add-text").addEventListener("click", () => addDraftBlock("Paragraph", "", false));
-  $("draft-add-table").addEventListener("click", () => addDraftBlock(null, "", true));
-  $("draft-blocks").addEventListener("click", (e) => {
+  // draft preview editor wiring — text edits sync per keystroke, structural
+  // changes mutate docs.draft and re-render
+  $("docpage").addEventListener("input", (e) => {
+    const t = e.target.closest("[data-role]");
+    if (!t) return;
+    const b = docs.draft[+t.closest(".dp-block").dataset.i];
+    if (!b) return;
+    const txt = t.textContent, role = t.dataset.role;
+    if (role === "text") b.text = txt;
+    else if (role === "th") b.table.headers[+t.dataset.c] = txt;
+    else if (role === "td") b.table.rows[+t.dataset.r][+t.dataset.c] = txt;
+    else if (role === "ict") b.iconCols[+t.dataset.c].title = txt;
+    else if (role === "icx") b.iconCols[+t.dataset.c].text = txt;
+    else if (role === "co") b.callout.text = txt;
+  });
+  $("docpage").addEventListener("change", (e) => {
+    const sel = e.target.closest('select[data-d="style"]');
+    if (!sel) return;
+    const b = docs.draft[+sel.closest(".dp-block").dataset.i];
+    if (b) { b.style = sel.value; renderDraft(); }
+  });
+  $("docpage").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-d]");
     if (!btn) return;
-    const row = btn.closest(".dblock");
-    if (btn.dataset.d === "x") row.remove();
-    else if (btn.dataset.d === "up" && row.previousElementSibling) row.parentElement.insertBefore(row, row.previousElementSibling);
-    else if (btn.dataset.d === "down" && row.nextElementSibling) row.parentElement.insertBefore(row.nextElementSibling, row);
+    const i = +btn.closest(".dp-block").dataset.i;
+    const b = docs.draft[i], d = btn.dataset.d;
+    if (d === "x") docs.draft.splice(i, 1);
+    else if (d === "up" && i > 0) docs.draft.splice(i - 1, 0, docs.draft.splice(i, 1)[0]);
+    else if (d === "down" && i < docs.draft.length - 1) docs.draft.splice(i + 1, 0, docs.draft.splice(i, 1)[0]);
+    else if (d === "row" && b.table) b.table.rows.push(b.table.headers.map(() => ""));
+    else if (d === "delrow" && b.table && b.table.rows.length > 1) b.table.rows.pop();
+    else if (d === "col") {
+      if (b.table) { b.table.headers.push(""); b.table.rows.forEach((r) => r.push("")); }
+      else if (b.iconCols && b.iconCols.length < 4) b.iconCols.push({ title: "TITLE", text: "Text" });
+      else return;
+    } else if (d === "delcol") {
+      if (b.table && b.table.headers.length > 1) { b.table.headers.pop(); b.table.rows.forEach((r) => r.pop()); }
+      else if (b.iconCols && b.iconCols.length > 2) b.iconCols.pop();
+      else return;
+    } else return;
+    renderDraft();
+  });
+  document.querySelector("#doc-draft .dp-add").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-dpadd]");
+    if (!btn) return;
+    const k = btn.dataset.dpadd;
+    docs.draft.push(
+      k === "table" ? { table: { headers: ["Column A", "Column B"], rows: [["", ""]] } }
+      : k === "iconCols" ? { iconCols: [{ title: "TITLE ONE", text: "Text" }, { title: "TITLE TWO", text: "Text" }, { title: "TITLE THREE", text: "Text" }] }
+      : k === "callout" ? { callout: { text: "Callout text" } }
+      : { style: "Paragraph", text: "" });
+    renderDraft();
+  });
+  renderDraft();
+  addEventListener("resize", () => { if (!$("doc-draft").hidden) fitDocpage($("docpage")); });
+  // honest fonts: flag the preview if the kit didn't deliver Scandia
+  if (document.fonts?.ready) document.fonts.ready.then(() => {
+    try {
+      if (!document.fonts.check('9pt "scandia-web"')) {
+        const st = document.querySelector("#doc-draft .docstatus");
+        if (st) st.textContent += " · Scandia didn't load here — preview fonts are approximate; the InDesign build still uses the real thing.";
+      }
+    } catch {}
   });
   $("draft-ai").addEventListener("click", async () => {
     const st = $("doc-status");
     const brief = $("doc-req").value.trim();
-    if (!brief) { st.textContent = "write the brief above first, then AI DRAFT fills the blocks"; return; }
+    const f = $("doc-file").files[0];
+    const tplSlug = $("doc-template").value;
+    if (!brief && !f && !tplSlug) { st.textContent = "write a brief above or choose a reference document first"; return; }
     try {
-      st.textContent = "drafting…";
-      const payload = { instruction: brief };
-      const f = $("doc-file").files[0];
+      st.textContent = "analyzing & drafting…";
+      const payload = { instruction: brief || "Recreate this reference document as our branded version — keep its content, use our styles and objects." };
       if (f) { payload.file = await fileToB64(f); payload.fileType = f.type || "application/pdf"; }
-      else if ($("doc-template").value && docs.template) { payload.file = docs.template.file; payload.fileType = docs.template.fileType; }
+      else if (tplSlug) {
+        if (!docs.template || docs.template.slug !== tplSlug) docs.template = { slug: tplSlug, ...(await docsApi("/templates/get", { slug: tplSlug })) };
+        payload.file = docs.template.file;
+        payload.fileType = docs.template.fileType;
+      }
       const out = await docsApi("/draft", payload);
       blocksToDraft(out.blocks);
-      st.textContent = `drafted ${out.blocks.length} blocks — review the tags, then RUN EDIT to build`;
+      st.textContent = `drafted ${out.blocks.length} blocks — click any text to edit, then RUN EDIT builds it in InDesign`;
     } catch (e2) { st.textContent = "draft failed: " + e2.message; }
   });
   $("doc-print").addEventListener("click", () => {
