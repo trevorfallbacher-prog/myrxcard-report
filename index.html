@@ -3320,11 +3320,12 @@ function fitDocpage(page) { // shrink the 612pt page to the panel, never enlarge
   page.style.zoom = z < 1 ? String(z) : "";
 }
 const seedDraft = () => [{ style: "H1", text: "" }, { style: "Paragraph", text: "" }];
-const ARROW_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><defs><linearGradient id="avag" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1c80b8"/><stop offset="0.71" stop-color="#315280"/></linearGradient></defs><polygon fill="url(#avag)" points="6,0 16,10 6,20 2,20 9,10 2,0"/><polygon fill="url(#avag)" points="0,6 4,10 0,14"/></svg>`;
+const ARROW_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 63.7 85"><defs><linearGradient id="avag" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1c80b8"/><stop offset="0.71" stop-color="#315280"/></linearGradient></defs><polygon fill="url(#avag)" points="21.2,0 0,21.2 21.2,42.5 0,63.8 21.2,85 63.7,42.5"/></svg>`;
+const badgeValSize = (v) => Math.min(22, Math.max(11, Math.round(96 / ((String(v || "").length || 1) * 0.75)))); // mirrors the InDesign auto-fit
 const badgeHtml = (spec) =>
   `<div class="dp-badge"><span class="bq tl"></span><span class="bq tr"></span><span class="bq bl"></span><span class="bq br"></span>` +
   `<div class="b-pre" ${CE} data-role="bp" data-ph="PREFIX…">${esc(spec.prefix || "")}</div>` +
-  `<div class="b-val" ${CE} data-role="bv" data-ph="75%">${esc(spec.value || "")}</div>` +
+  `<div class="b-val" ${CE} data-role="bv" data-ph="75%" style="font-size:${badgeValSize(spec.value)}pt">${esc(spec.value || "")}</div>` +
   `<div class="b-cap" ${CE} data-role="bc" data-ph="CAPTION…">${esc(spec.caption || "")}</div></div>`;
 const arrowsHtml = (items) =>
   `<div class="dp-arrows">${items.map((a, ai) =>
@@ -3854,6 +3855,7 @@ async function boot() {
     else if (role === "bp" || role === "bv" || role === "bc") {
       const spec = b.statBadge || b.badge;
       if (spec) spec[role === "bp" ? "prefix" : role === "bv" ? "value" : "caption"] = txt;
+      if (role === "bv") t.style.fontSize = badgeValSize(txt) + "pt"; // live auto-fit
     }
   });
   // type like a document: Enter splits into a new block (Bullets continue as
@@ -3966,10 +3968,14 @@ async function boot() {
     if (!Array.isArray(p?.facts) || !p.dims) return null;
     return { p, a: utilAgg(p) };
   }
+  // belt and braces: drive display directly too, so stale cached CSS can
+  // never leave the pop stranded over the buttons
+  const setPop = (show) => { const p = $("docdata-pop"); p.hidden = !show; p.style.display = show ? "flex" : "none"; };
+  setPop(false);
   $("dp-data-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     const pop = $("docdata-pop");
-    if (!pop.hidden) { pop.hidden = true; return; }
+    if (!pop.hidden) { setPop(false); return; }
     const s = docDataStats();
     if (!s) { $("doc-status").textContent = "utilization data isn't loaded yet — visit the Performance Summary tab once, then try again"; return; }
     const { p, a } = s;
@@ -3980,7 +3986,7 @@ async function boot() {
       `<button type="button" data-ins="revb">Reversed % → stat badge (${pctInt(a.money.reversedPct)})</button>` +
       `<button type="button" data-ins="kpit">KPI summary → table</button>` +
       `<button type="button" data-ins="pharmt">Top 10 pharmacies → table</button>`;
-    pop.hidden = false;
+    setPop(true);
   });
   $("docdata-pop").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-ins]");
@@ -4002,11 +4008,11 @@ async function boot() {
     ] } });
     else if (k === "pharmt") docs.draft.push({ table: { headers: ["Pharmacy", "Collected $", "Reversed $"], rows:
       a.pharmacies.slice(0, 10).map((x) => [x.name, money0(Math.max(x.collected, 0)), money0(x.reversed)]) } });
-    $("docdata-pop").hidden = true;
+    setPop(false);
     renderDraft();
   });
   document.addEventListener("click", (e) => {
-    if (!e.target.closest("#docdata-pop,#dp-data-btn")) $("docdata-pop").hidden = true;
+    if (!e.target.closest("#docdata-pop,#dp-data-btn")) setPop(false);
   });
   renderDraft();
   addEventListener("resize", () => fitDocpage($("docpage")));
