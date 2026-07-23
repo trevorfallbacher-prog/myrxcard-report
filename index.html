@@ -604,6 +604,23 @@
   #view-docs .half { grid-column: span 6; }
   @media (max-width: 980px) { #view-docs .half { grid-column: span 12; } }
 
+  /* draft editor (GENERATE mode) */
+  #draft-blocks { display: flex; flex-direction: column; gap: 8px; }
+  .dblock { display: flex; gap: 10px; align-items: flex-start; }
+  .dblock select { flex: 0 0 170px; }
+  .dblock textarea {
+    flex: 1; resize: vertical; min-height: 34px; background: var(--card); color: var(--ink);
+    border: 1px solid var(--hair); border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13px; outline: none;
+  }
+  .dblock textarea:focus { border-color: var(--secondary); }
+  .dblock.tbl textarea { font-family: var(--mono); min-height: 64px; }
+  .dblock .dctl { display: flex; flex-direction: column; gap: 2px; }
+  .dblock .dctl button {
+    background: transparent; border: 1px solid var(--hair); border-radius: 6px; color: var(--ink-mute);
+    width: 24px; height: 22px; cursor: pointer; font-size: 11px; line-height: 1; padding: 0;
+  }
+  .dblock .dctl button:hover { color: var(--ink); border-color: var(--hair-bright); }
+
   /* floating hover tooltip (replaces the browser's delayed native title tips) */
   #tip {
     position: fixed; z-index: 90; display: none; pointer-events: none;
@@ -1072,6 +1089,16 @@
           <span class="docstatus">preserve = targeted PDF changes · illustrator = real edits, true fonts (design PC) · generate = brand-new doc from the brand template (design PC) · rebuild = free restructuring</span>
         </div>
         <textarea id="doc-req" rows="3" placeholder="e.g. Swap the logo for the attached one, delete the second paragraph on page 1, and move the pricing table onto its own page."></textarea>
+        <div id="doc-draft" hidden>
+          <div class="docs-files" style="margin-bottom:10px">
+            <span class="kicker" style="align-self:center">Draft</span>
+            <button class="iconbtn" id="draft-ai" type="button" title="Have AI fill the draft from the brief above (and reference, if chosen)">AI DRAFT FROM BRIEF</button>
+            <button class="iconbtn" id="draft-add-text" type="button">+ TEXT</button>
+            <button class="iconbtn" id="draft-add-table" type="button">+ TABLE</button>
+            <span class="docstatus">tag each block with a brand style — the document is built exactly from this draft; leave empty to let AI structure it from the brief alone</span>
+          </div>
+          <div id="draft-blocks"></div>
+        </div>
         <div class="docs-actions">
           <button class="iconbtn" id="doc-run" type="button">RUN EDIT</button>
           <span class="docstatus" id="doc-status"></span>
@@ -3200,6 +3227,47 @@ const fileToB64 = (file) => new Promise((res, rej) => {
   r.readAsDataURL(file);
 });
 
+/* --- draft editor (GENERATE mode): tagged blocks build deterministically --- */
+const DRAFT_STYLES = ["H1", "Subheader", "Subheader Callout", "Subheader Callout 2", "Paragraph", "Callout Paragraph", "Bullet"];
+function addDraftBlock(style, text, isTable) {
+  const row = document.createElement("div");
+  row.className = "dblock" + (isTable ? " tbl" : "");
+  row.innerHTML = (isTable
+    ? `<select class="periodsel" disabled><option>Table</option></select>
+       <textarea placeholder="Column A | Column B&#10;row 1a | row 1b&#10;row 2a | row 2b" spellcheck="false"></textarea>`
+    : `<select class="periodsel">${DRAFT_STYLES.map((s) => `<option${s === style ? " selected" : ""}>${s}</option>`).join("")}</select>
+       <textarea placeholder="text…"></textarea>`) +
+    `<div class="dctl"><button type="button" data-d="up" title="Move up">&#9650;</button><button type="button" data-d="down" title="Move down">&#9660;</button><button type="button" data-d="x" title="Remove">&#215;</button></div>`;
+  if (text) row.querySelector("textarea").value = text;
+  row.dataset.table = isTable ? "1" : "";
+  $("draft-blocks").appendChild(row);
+  return row;
+}
+function draftToBlocks() {
+  const out = [];
+  for (const row of $("draft-blocks").children) {
+    const txt = row.querySelector("textarea").value.trim();
+    if (!txt) continue;
+    if (row.dataset.table) {
+      const lines = txt.split("\n").map((l) => l.split("|").map((c) => c.trim())).filter((l) => l.some(Boolean));
+      if (lines.length >= 2) out.push({ table: { headers: lines[0], rows: lines.slice(1) } });
+      else if (lines.length) out.push({ style: "Paragraph", text: lines[0].join(" — ") });
+    } else {
+      const style = row.querySelector("select").value;
+      if (style === "Bullet") out.push({ style: "Paragraph", text: "•  " + txt });
+      else out.push({ style, text: txt });
+    }
+  }
+  return out;
+}
+function blocksToDraft(blocks) {
+  $("draft-blocks").innerHTML = "";
+  for (const b of blocks || []) {
+    if (b.table) addDraftBlock(null, [b.table.headers.join(" | ")].concat((b.table.rows || []).map((r) => r.join(" | "))).join("\n"), true);
+    else addDraftBlock(DRAFT_STYLES.includes(b.style) ? b.style : "Paragraph", String(b.text || "").replace(/^•\s*/, ""), false);
+  }
+}
+
 async function runDocEdit() {
   if (docs.busy) return;
   const st = $("doc-status");
@@ -3216,6 +3284,8 @@ async function runDocEdit() {
   try {
     const body = { instruction: req, mode: docs.mode };
     if (docs.mode === "generate") {
+      const blocks = draftToBlocks();
+      if (blocks.length) body.blocks = blocks; // deterministic build from the draft
       // source optional: an uploaded file or picked template acts as a
       // layout/content reference for the new branded document
       if (f) {
@@ -3600,7 +3670,34 @@ async function boot() {
     for (const x of $("doc-mode").querySelectorAll("button")) x.classList.toggle("on", x === b);
     docs.html = null; docs.pdf = null; // switching modes restarts the session
     $("doc-result").hidden = true;
+    $("doc-draft").hidden = docs.mode !== "generate";
     layoutDocPanels();
+  });
+  // draft editor wiring
+  $("draft-add-text").addEventListener("click", () => addDraftBlock("Paragraph", "", false));
+  $("draft-add-table").addEventListener("click", () => addDraftBlock(null, "", true));
+  $("draft-blocks").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-d]");
+    if (!btn) return;
+    const row = btn.closest(".dblock");
+    if (btn.dataset.d === "x") row.remove();
+    else if (btn.dataset.d === "up" && row.previousElementSibling) row.parentElement.insertBefore(row, row.previousElementSibling);
+    else if (btn.dataset.d === "down" && row.nextElementSibling) row.parentElement.insertBefore(row.nextElementSibling, row);
+  });
+  $("draft-ai").addEventListener("click", async () => {
+    const st = $("doc-status");
+    const brief = $("doc-req").value.trim();
+    if (!brief) { st.textContent = "write the brief above first, then AI DRAFT fills the blocks"; return; }
+    try {
+      st.textContent = "drafting…";
+      const payload = { instruction: brief };
+      const f = $("doc-file").files[0];
+      if (f) { payload.file = await fileToB64(f); payload.fileType = f.type || "application/pdf"; }
+      else if ($("doc-template").value && docs.template) { payload.file = docs.template.file; payload.fileType = docs.template.fileType; }
+      const out = await docsApi("/draft", payload);
+      blocksToDraft(out.blocks);
+      st.textContent = `drafted ${out.blocks.length} blocks — review the tags, then RUN EDIT to build`;
+    } catch (e2) { st.textContent = "draft failed: " + e2.message; }
   });
   $("doc-print").addEventListener("click", () => {
     if (docs.pdf) { // surgical result IS a PDF — download it directly
