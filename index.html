@@ -628,9 +628,38 @@
   .dp-table { width: 100%; border-collapse: collapse; margin: 6pt 0 12pt; table-layout: fixed; }
   .dp-table th { background: rgb(48,82,128); color: #fff; font-weight: 700; font-size: 8.5pt; letter-spacing: 0.03em; text-align: left; padding: 4pt 6pt; border: 0.5pt solid rgb(48,82,128); }
   .dp-table td { font-size: 8.5pt; color: rgb(40,52,66); padding: 4pt 6pt; border: 0.5pt solid #c4d0e2; line-height: 11pt; }
-  /* full-bleed gradient section banner — escapes the page padding */
-  .dp-callout { background: linear-gradient(90deg, rgb(43,148,237), rgb(44,49,174)); padding: 7pt 36pt; margin: 10pt -36pt 12pt; }
+  /* full-bleed gradient section banner — the true brand ramp, sampled from
+     the Avalon collateral vectors: teal 0% -> navy 71% */
+  .dp-callout { background: linear-gradient(90deg, rgb(28,128,184) 0%, rgb(49,82,128) 71%); padding: 7pt 36pt; margin: 10pt -36pt 12pt; }
   .dp-callout .dp-subheader-callout-2 { text-align: center; }
+  /* arrow bullet list: gradient chevron + bold teal lead-in */
+  .dp-arrows { margin: 6pt 0 10pt; }
+  .dp-arrow { display: flex; gap: 7pt; margin: 0 0 8pt; }
+  .dp-arrow .ar-ico { flex: 0 0 11pt; width: 11pt; height: 11pt; margin-top: 1pt; }
+  .dp-arrow .ar-ico svg { width: 100%; height: 100%; display: block; }
+  .dp-arrow .ar-body { flex: 1; min-width: 0; font-size: 9pt; line-height: 1.35; }
+  .dp-arrow .ar-lead, .dp-arrow .ar-sep { font-weight: 700; color: rgb(28,128,184); }
+  .dp-arrow .ar-lead:empty + .ar-sep { display: none; }
+  .dp-arrows-row { display: flex; gap: 18pt; align-items: center; margin: 6pt 0 10pt; }
+  .dp-arrows-row .dp-arrows { flex: 1; margin: 0; }
+  /* framed stat badge with brand corner accents */
+  .dp-badge { width: 112pt; min-height: 112pt; margin: 12pt auto; position: relative; z-index: 0; border: 1pt solid rgb(49,82,128); background: #fff; display: flex; flex-direction: column; justify-content: center; text-align: center; padding: 8pt; box-sizing: border-box; }
+  .dp-badge .bq { position: absolute; width: 14pt; height: 14pt; z-index: -1; }
+  .dp-badge .bq.tl { top: -5pt; left: -5pt; background: rgb(49,82,128); }
+  .dp-badge .bq.tr { top: -5pt; right: -5pt; background: rgb(171,194,105); }
+  .dp-badge .bq.bl { bottom: -5pt; left: -5pt; background: rgb(28,128,184); }
+  .dp-badge .bq.br { bottom: -5pt; right: -5pt; background: rgb(171,186,212); }
+  .dp-badge .b-pre, .dp-badge .b-cap { font-size: 7.5pt; letter-spacing: 0.15em; text-transform: uppercase; color: rgb(49,82,128); }
+  .dp-badge .b-val { font-size: 22pt; font-weight: 700; color: rgb(49,82,128); line-height: 1.15; word-break: keep-all; }
+  .dp-arrows-row .dp-badge { flex: 0 0 112pt; margin: 4pt 0; }
+  /* uploaded image / icon */
+  .dp-image { text-align: center; margin: 8pt 0 12pt; }
+  .dp-image img { max-width: 100%; }
+  /* report-data pop */
+  #docdata-pop { position: absolute; z-index: 30; background: var(--card); border: 1px solid var(--hair); border-radius: 10px; box-shadow: var(--shadow); padding: 8px; display: flex; flex-direction: column; gap: 4px; min-width: 240px; }
+  #docdata-pop button { background: transparent; border: 0; color: var(--ink); text-align: left; padding: 6px 8px; border-radius: 6px; cursor: pointer; font: inherit; font-size: 13px; }
+  #docdata-pop button:hover { background: var(--hair); }
+  #docdata-pop .hint2 { color: var(--ink-mute); font-size: 11.5px; padding: 2px 8px; }
   /* rounded light-blue callout box */
   .dp-tintbox { background: rgb(217,232,255); border-radius: 8pt; padding: 10pt 14pt; margin: 8pt 0 12pt; }
   .dp-tintbox .dp-subheader-callout { margin: 0 0 3pt; }
@@ -1112,12 +1141,17 @@
         </div>
         <textarea id="doc-req" rows="2" placeholder="Optional brief for ANALYZE &amp; DRAFT — e.g. one-page flyer introducing MyRxCard to independent pharmacies. Or skip it and just type into the page below."></textarea>
         <div class="docpage-wrap"><div class="docpage" id="docpage"></div></div>
-        <div class="dp-add">
+        <div class="dp-add" style="position:relative">
           <button class="iconbtn" data-dpadd="text" type="button">+ TEXT</button>
           <button class="iconbtn" data-dpadd="table" type="button">+ TABLE</button>
-          <button class="iconbtn" data-dpadd="iconCols" type="button">+ ICON COLUMNS</button>
+          <button class="iconbtn" data-dpadd="iconCols" type="button">+ COLUMNS</button>
           <button class="iconbtn" data-dpadd="callout" type="button">+ SECTION BANNER</button>
           <button class="iconbtn" data-dpadd="tintBox" type="button">+ CALLOUT BOX</button>
+          <button class="iconbtn" data-dpadd="arrows" type="button">+ ARROW LIST</button>
+          <button class="iconbtn" data-dpadd="statBadge" type="button">+ STAT BADGE</button>
+          <label class="docfile"><input type="file" id="dp-image-file" accept="image/png,image/jpeg,image/svg+xml" hidden><span class="iconbtn">+ IMAGE</span></label>
+          <button class="iconbtn" id="dp-data-btn" type="button" title="Insert live numbers from the Utilization tab, using its current filters">+ REPORT DATA</button>
+          <div id="docdata-pop" hidden></div>
         </div>
         <div class="docs-actions">
           <button class="iconbtn" id="doc-run" type="button">BUILD IN INDESIGN</button>
@@ -3285,6 +3319,17 @@ function fitDocpage(page) { // shrink the 612pt page to the panel, never enlarge
   page.style.zoom = z < 1 ? String(z) : "";
 }
 const seedDraft = () => [{ style: "H1", text: "" }, { style: "Paragraph", text: "" }];
+const ARROW_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><defs><linearGradient id="avag" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#1c80b8"/><stop offset="0.71" stop-color="#315280"/></linearGradient></defs><polygon fill="url(#avag)" points="6,0 16,10 6,20 2,20 9,10 2,0"/><polygon fill="url(#avag)" points="0,6 4,10 0,14"/></svg>`;
+const badgeHtml = (spec) =>
+  `<div class="dp-badge"><span class="bq tl"></span><span class="bq tr"></span><span class="bq bl"></span><span class="bq br"></span>` +
+  `<div class="b-pre" ${CE} data-role="bp" data-ph="PREFIX…">${esc(spec.prefix || "")}</div>` +
+  `<div class="b-val" ${CE} data-role="bv" data-ph="75%">${esc(spec.value || "")}</div>` +
+  `<div class="b-cap" ${CE} data-role="bc" data-ph="CAPTION…">${esc(spec.caption || "")}</div></div>`;
+const arrowsHtml = (items) =>
+  `<div class="dp-arrows">${items.map((a, ai) =>
+    `<div class="dp-arrow"><span class="ar-ico">${ARROW_SVG}</span><div class="ar-body">` +
+    `<span class="ar-lead" ${CE} data-role="arl" data-c="${ai}" data-ph="Lead phrase">${esc(a.lead || "")}</span><span class="ar-sep">: </span>` +
+    `<span class="ar-text" ${CE} data-role="art" data-c="${ai}" data-ph="Benefit text…">${esc(a.text || "")}</span></div></div>`).join("")}</div>`;
 function renderDraft() {
   if (!docs.draft.length) docs.draft = seedDraft(); // always an open, typeable page
   const page = $("docpage");
@@ -3308,7 +3353,19 @@ function renderDraft() {
     } else if (b.callout) {
       inner = `<div class="dp-callout"><div class="dp-subheader-callout-2" ${CE} data-role="co" data-ph="SECTION NAME…">${esc(b.callout.text)}</div></div>`;
     } else if (b.tintBox) {
-      inner = `<div class="dp-tintbox"><div class="dp-subheader-callout" ${CE} data-role="tbt" data-ph="CALLOUT TITLE…">${esc(b.tintBox.title || "")}</div><div class="dp-paragraph" ${CE} data-role="tbx" data-ph="Callout text…">${esc(b.tintBox.text || "")}</div></div>`;
+      inner = `<div class="dp-tintbox">${b.tintBox.title === null ? "" :
+        `<div class="dp-subheader-callout" ${CE} data-role="tbt" data-ph="CALLOUT TITLE…">${esc(b.tintBox.title || "")}</div>`}<div class="dp-paragraph" ${CE} data-role="tbx" data-ph="Callout text…">${esc(b.tintBox.text || "")}</div></div>`;
+      extraCtl = `<button type="button" data-d="tbtitle" title="Show/hide the title line">&#177;title</button>`;
+    } else if (b.arrows) {
+      inner = b.badge
+        ? `<div class="dp-arrows-row">${arrowsHtml(b.arrows)}${badgeHtml(b.badge)}</div>`
+        : arrowsHtml(b.arrows);
+      extraCtl = `<button type="button" data-d="aritem" title="Add arrow">+item</button><button type="button" data-d="delaritem" title="Remove last arrow">&#8722;item</button><button type="button" data-d="arbadge" title="Toggle the framed stat on the right">&#177;stat</button>`;
+    } else if (b.statBadge) {
+      inner = badgeHtml(b.statBadge);
+    } else if (b.image) {
+      inner = `<div class="dp-image"><img src="data:${esc(b.image.type || "image/png")};base64,${b.image.data}" style="width:${+b.image.w || 240}pt" alt=""></div>`;
+      extraCtl = `<button type="button" data-d="imgbig" title="Wider">+w</button><button type="button" data-d="imgsmall" title="Narrower">&#8722;w</button>`;
     } else {
       const cls = (DOC_STYLES[b.style] || DOC_STYLES.Paragraph).css;
       inner = `<div class="${cls}" ${CE} data-role="text" data-ph="${PH[b.style] || "Text…"}">${esc(b.text || "")}</div>`;
@@ -3355,12 +3412,28 @@ function draftToBlocks() { // serialize the model for /jobs/submit — skips emp
     } else if (b.tintBox) {
       if ((b.tintBox.text || "").trim() || (b.tintBox.title || "").trim())
         out.push({ tintBox: { title: (b.tintBox.title || "").trim(), text: (b.tintBox.text || "").trim() || (b.tintBox.title || "").trim() } });
+    } else if (b.arrows) {
+      const items = b.arrows.map((a) => ({ lead: (a.lead || "").trim(), text: (a.text || "").trim() })).filter((a) => a.lead || a.text);
+      if (items.length) {
+        const blk = { arrows: items.map((a) => a.lead ? a : { text: a.text }) };
+        const bd = badgeOut(b.badge);
+        if (bd) blk.badge = bd;
+        out.push(blk);
+      }
+    } else if (b.statBadge) {
+      const bd = badgeOut(b.statBadge);
+      if (bd) out.push({ statBadge: bd });
+    } else if (b.image) {
+      if (b.image.data) out.push({ image: { data: b.image.data, type: b.image.type || "image/png", w: +b.image.w || 240 } });
     } else if ((b.text || "").trim()) {
       out.push({ style: DOC_STYLES[b.style] ? b.style : "Paragraph", text: b.text.trim() });
     }
   }
   return out;
 }
+const badgeOut = (s) => s && (s.value || "").trim()
+  ? { ...( (s.prefix || "").trim() ? { prefix: s.prefix.trim() } : {}), value: s.value.trim(), ...((s.caption || "").trim() ? { caption: s.caption.trim() } : {}) }
+  : null;
 function blocksToDraft(blocks) { // normalize incoming AI blocks into the model
   docs.draft = (blocks || []).map((b) => {
     if (b && b.table) return { table: {
@@ -3370,6 +3443,13 @@ function blocksToDraft(blocks) { // normalize incoming AI blocks into the model
     if (b && Array.isArray(b.iconCols)) return { iconCols: b.iconCols.slice(0, 4).map((c) => ({ title: String(c?.title || ""), text: String(c?.text || "") })) };
     if (b && b.callout) return { callout: { text: String(b.callout.text || "") } };
     if (b && b.tintBox) return { tintBox: { title: String(b.tintBox.title || ""), text: String(b.tintBox.text || "") } };
+    if (b && Array.isArray(b.arrows)) {
+      const d = { arrows: b.arrows.slice(0, 10).map((a) => ({ lead: String(a?.lead || ""), text: String(a?.text || "") })) };
+      if (b.badge?.value) d.badge = { prefix: String(b.badge.prefix || ""), value: String(b.badge.value || ""), caption: String(b.badge.caption || "") };
+      return d;
+    }
+    if (b && b.statBadge) return { statBadge: { prefix: String(b.statBadge.prefix || ""), value: String(b.statBadge.value || ""), caption: String(b.statBadge.caption || "") } };
+    if (b && b.image?.data) return { image: { data: String(b.image.data), type: String(b.image.type || "image/png"), w: +b.image.w || 240 } };
     const raw = String(b?.text || "");
     const bulleted = /^[•\-–]\s+/.test(raw);
     return {
@@ -3768,6 +3848,12 @@ async function boot() {
     else if (role === "co") b.callout.text = txt;
     else if (role === "tbt") b.tintBox.title = txt;
     else if (role === "tbx") b.tintBox.text = txt;
+    else if (role === "arl") b.arrows[+t.dataset.c].lead = txt;
+    else if (role === "art") b.arrows[+t.dataset.c].text = txt;
+    else if (role === "bp" || role === "bv" || role === "bc") {
+      const spec = b.statBadge || b.badge;
+      if (spec) spec[role === "bp" ? "prefix" : role === "bv" ? "value" : "caption"] = txt;
+    }
   });
   // type like a document: Enter splits into a new block (Bullets continue as
   // bullets, headings hand off to Paragraph), Backspace at the start merges up
@@ -3775,7 +3861,7 @@ async function boot() {
     const t = e.target.closest('[data-role="text"]');
     if (!t) {
       // single-line regions: Enter just ends the edit
-      if (e.key === "Enter" && !e.shiftKey && e.target.closest('[data-role="ict"],[data-role="co"],[data-role="tbt"],[data-role="footer"]')) {
+      if (e.key === "Enter" && !e.shiftKey && e.target.closest('[data-role="ict"],[data-role="co"],[data-role="tbt"],[data-role="footer"],[data-role="arl"],[data-role="art"],[data-role="bp"],[data-role="bv"],[data-role="bc"]')) {
         e.preventDefault();
         e.target.blur();
       }
@@ -3837,7 +3923,13 @@ async function boot() {
       if (b.table && b.table.headers.length > 1) { b.table.headers.pop(); b.table.rows.forEach((r) => r.pop()); }
       else if (b.iconCols && b.iconCols.length > 2) b.iconCols.pop();
       else return;
-    } else return;
+    } else if (d === "tbtitle" && b.tintBox) b.tintBox.title = b.tintBox.title === null ? "" : null;
+    else if (d === "aritem" && b.arrows && b.arrows.length < 10) b.arrows.push({ lead: "", text: "" });
+    else if (d === "delaritem" && b.arrows && b.arrows.length > 1) b.arrows.pop();
+    else if (d === "arbadge" && b.arrows) { if (b.badge) delete b.badge; else b.badge = { prefix: "Savings up to", value: "75%", caption: "" }; }
+    else if (d === "imgbig" && b.image) b.image.w = Math.min((+b.image.w || 240) + 40, 540);
+    else if (d === "imgsmall" && b.image) b.image.w = Math.max((+b.image.w || 240) - 40, 60);
+    else return;
     renderDraft();
   });
   document.querySelector(".dp-add").addEventListener("click", (e) => {
@@ -3849,10 +3941,71 @@ async function boot() {
       : k === "iconCols" ? { iconCols: [{ title: "", text: "" }, { title: "", text: "" }, { title: "", text: "" }] }
       : k === "callout" ? { callout: { text: "" } }
       : k === "tintBox" ? { tintBox: { title: "", text: "" } }
+      : k === "arrows" ? { arrows: [{ lead: "", text: "" }, { lead: "", text: "" }, { lead: "", text: "" }] }
+      : k === "statBadge" ? { statBadge: { prefix: "", value: "", caption: "" } }
       : { style: "Paragraph", text: "" });
     renderDraft();
     const added = $("docpage").querySelector(`.dp-block[data-i="${docs.draft.length - 1}"] [contenteditable]`);
     if (added) added.focus();
+  });
+  $("dp-image-file").addEventListener("change", async () => {
+    const f = $("dp-image-file").files[0];
+    if (!f) return;
+    if (f.size > 2500000) { $("doc-status").textContent = "image too large — keep it under ~2.5MB"; $("dp-image-file").value = ""; return; }
+    docs.draft.push({ image: { data: await fileToB64(f), type: f.type || "image/png", w: 240 } });
+    $("dp-image-file").value = "";
+    renderDraft();
+  });
+  // live report data: numbers from the Utilization tab, current slicers applied
+  function docDataStats() {
+    const d = util?.data;
+    if (!d || !d.periods || !Object.keys(d.periods).length) return null;
+    if (!util.merged) { util.merged = mergedPeriod(d); utilFilterReset(); }
+    const p = util.merged;
+    if (!Array.isArray(p?.facts) || !p.dims) return null;
+    return { p, a: utilAgg(p) };
+  }
+  $("dp-data-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const pop = $("docdata-pop");
+    if (!pop.hidden) { pop.hidden = true; return; }
+    const s = docDataStats();
+    if (!s) { $("doc-status").textContent = "utilization data isn't loaded yet — visit the Performance Summary tab once, then try again"; return; }
+    const { p, a } = s;
+    pop.innerHTML = `<span class="hint2">Live from Performance Summary — its current filters apply</span>` +
+      `<button type="button" data-ins="colb">Collected $ → stat badge (${shortMoney(a.money.collected)})</button>` +
+      `<button type="button" data-ins="paidb">Paid $ → stat badge (${shortMoney(a.money.paid)})</button>` +
+      `<button type="button" data-ins="clmb">Collected claims → stat badge (${int0(a.claims.collected)})</button>` +
+      `<button type="button" data-ins="revb">Reversed % → stat badge (${pctInt(a.money.reversedPct)})</button>` +
+      `<button type="button" data-ins="kpit">KPI summary → table</button>` +
+      `<button type="button" data-ins="pharmt">Top 10 pharmacies → table</button>`;
+    pop.hidden = false;
+  });
+  $("docdata-pop").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-ins]");
+    if (!btn) return;
+    const s = docDataStats();
+    if (!s) return;
+    const { p, a } = s;
+    const cap = (p.periodLabel || "").toUpperCase();
+    const k = btn.dataset.ins;
+    if (k === "colb") docs.draft.push({ statBadge: { prefix: "Collected", value: shortMoney(a.money.collected), caption: cap } });
+    else if (k === "paidb") docs.draft.push({ statBadge: { prefix: "Paid", value: shortMoney(a.money.paid), caption: cap } });
+    else if (k === "clmb") docs.draft.push({ statBadge: { prefix: "Collected claims", value: int0(a.claims.collected), caption: cap } });
+    else if (k === "revb") docs.draft.push({ statBadge: { prefix: "Reversed", value: pctInt(a.money.reversedPct), caption: "of paid dollars" } });
+    else if (k === "kpit") docs.draft.push({ table: { headers: ["Metric", "Dollars", "Claims"], rows: [
+      ["Paid", money0(a.money.paid), int0(a.claims.paid)],
+      ["Reversed", money0(a.money.reversed), int0(a.claims.reversed)],
+      ["Collected", money0(a.money.collected), int0(a.claims.collected)],
+      ["Reversed %", pctInt(a.money.reversedPct), pctInt(a.claims.reversedPct)],
+    ] } });
+    else if (k === "pharmt") docs.draft.push({ table: { headers: ["Pharmacy", "Collected $", "Reversed $"], rows:
+      a.pharmacies.slice(0, 10).map((x) => [x.name, money0(Math.max(x.collected, 0)), money0(x.reversed)]) } });
+    $("docdata-pop").hidden = true;
+    renderDraft();
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest("#docdata-pop,#dp-data-btn")) $("docdata-pop").hidden = true;
   });
   renderDraft();
   addEventListener("resize", () => fitDocpage($("docpage")));
