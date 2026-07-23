@@ -3216,7 +3216,20 @@ async function runDocEdit() {
   try {
     const body = { instruction: req, mode: docs.mode };
     if (docs.mode === "generate") {
-      // no source needed — the brand template lives on the design PC
+      // source optional: an uploaded file or picked template acts as a
+      // layout/content reference for the new branded document
+      if (f) {
+        body.file = await fileToB64(f);
+        body.fileType = f.type || "application/pdf";
+        body.filename = f.name;
+      } else if (tpl) {
+        if (!docs.template || docs.template.slug !== tpl) {
+          st.textContent = "fetching reference…";
+          docs.template = { slug: tpl, ...(await docsApi("/templates/get", { slug: tpl })) };
+        }
+        body.file = docs.template.file;
+        body.fileType = docs.template.fileType;
+      }
     } else if (docs.mode === "rebuild" && docs.html) {
       body.html = docs.html; // iterate on the current working version
     } else if (docs.mode !== "rebuild" && docs.pdf) {
