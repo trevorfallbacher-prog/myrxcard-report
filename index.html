@@ -801,6 +801,8 @@
   @media print {
     .tabs { display: none !important; }
     #view-utilization .grid { display: block; }
+    /* on screen .uc-table is a 340px scroll box; in print show all 20 rows */
+    .uc-table { max-height: none; overflow: visible; }
   }
 </style>
 </head>
