@@ -483,8 +483,8 @@
   #util-csv-btn, #search-csv-btn { background: var(--primary); border-color: var(--primary); color: #F2F8FF; }
   #util-csv-btn:hover, #search-csv-btn:hover { background: var(--secondary); border-color: var(--secondary); color: #FFFFFF; }
   /* active-filter chips live on their own row under the slicer buttons */
-  #util-chips, #filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 18px; }
-  #util-chips:empty, #filter-chips:empty { display: none; }
+  #util-chips, #fees-chips, #filter-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -6px 0 18px; }
+  #util-chips:empty, #fees-chips:empty, #filter-chips:empty { display: none; }
   #filter-chips { margin: 0 0 18px; }
   #util-slicers .slicer button.on { border-width: 2px; font-weight: 700; }
   #pharm-chart .bar { cursor: pointer; }
@@ -1146,6 +1146,7 @@
         <div class="sub" id="fees-window"></div>
       </div>
     </div>
+    <div id="fees-chips"></div>
 
     <div id="fees-empty" class="panel" hidden></div>
 
@@ -1171,6 +1172,23 @@
       <div class="panel span6">
         <div class="kicker">Net admin fees by month</div>
         <div class="bars bars-wide" id="fees-months"></div>
+      </div>
+
+      <div class="panel span12">
+        <div class="kicker">Collected vs U&amp;C by month <span class="hint">· gold cap = paid at U&amp;C, no fee revenue</span></div>
+        <div class="stack-controls">
+          <div class="segbtns" data-fset="measure">
+            <button type="button" data-fval="money">DOLLARS</button>
+            <button type="button" data-fval="claims">CLAIMS</button>
+          </div>
+        </div>
+        <div id="fees-stack"></div>
+        <div class="donut-legend trend-legend" id="fees-stack-legend"></div>
+      </div>
+
+      <div class="panel span12">
+        <div class="kicker">Net admin fees by pharmacy group <span class="hint">· who produces the fee revenue</span></div>
+        <div class="bars bars-wide" id="fees-groupbars"></div>
       </div>
 
       <div class="panel span12">
@@ -2578,9 +2596,14 @@ function togglePharm(pi) {
 function utilAgg(p) {
   let paid = 0, rev = 0, pn = 0, rn = 0, ucN = 0, feeP = 0, feeR = 0, ucColl = 0;
   const byPharm = new Map(), byPharmRev = new Map(), byClass = new Map(), byDrugRev = new Map(), byDrugUC = new Map(), byMonthFee = new Map();
+  const byMonth = new Map(); // mi -> [collected$, ucCollected$, netClaims, ucNetClaims]
   for (const f of p.facts) {
     if (!factPass(f)) continue;
     paid += f[8]; rev += f[9]; pn += f[10]; rn += f[11];
+    let bm = byMonth.get(f[0]);
+    if (!bm) { bm = [0, 0, 0, 0]; byMonth.set(f[0], bm); }
+    bm[0] += f[8] + f[9]; bm[2] += f[10] - f[11];
+    if (f[7]) { bm[1] += f[8] + f[9]; bm[3] += f[10] - f[11]; }
     byPharm.set(f[3], (byPharm.get(f[3]) || 0) + f[8] + f[9]);
     if (f[9]) byPharmRev.set(f[3], (byPharmRev.get(f[3]) || 0) - f[9]);
     byClass.set(f[5], (byClass.get(f[5]) || 0) + f[8] + f[9]);
@@ -2608,6 +2631,7 @@ function utilAgg(p) {
     fees: { paid: feeP, reversed: Math.abs(feeR), net: feeP + feeR },
     ucCollected: ucColl,
     byMonthFee,
+    byMonth,
   };
 }
 
@@ -2724,6 +2748,9 @@ function renderUtilSlicers(p) {
   }
   $("util-chips").innerHTML = chips.join("") +
     (any ? `<button class="badge-filter reset" type="button" data-uchip="__reset">RESET</button>` : "");
+  // the fees view shares these filters — mirror the chips so an active
+  // selection is visible (and clearable) there too
+  $("fees-chips").innerHTML = $("util-chips").innerHTML;
 }
 
 /* --- pharmacy locations: bar list + map pins --- */
@@ -3257,6 +3284,29 @@ function renderUtil() {
    and timeframe with the Utilization tab, but lives in its own view so it is
    never part of a printed client report. */
 const periodHasFees = (p) => Array.isArray(p.facts) && p.facts.length > 0 && p.facts.every((f) => f.length >= 15);
+
+// stacked monthly columns: fee-eligible base (teal) + U&C cap (gold)
+function feesStackSVG(rows, fmtV) {
+  if (!rows.length) return `<div style="color:var(--ink-mute)">Nothing under the current filters.</div>`;
+  const H = 250, padB = 28, padT = 22, bw = 36, gap = 24, padL = 10;
+  const W = padL * 2 + rows.length * (bw + gap) - gap;
+  const max = Math.max(...rows.map((r) => r.total), 1);
+  let s = "";
+  rows.forEach((r, i) => {
+    const x = padL + i * (bw + gap);
+    const hTot = (H - padB - padT) * (Math.max(r.total, 0) / max);
+    const hUC = hTot * (r.total > 0 ? Math.max(r.uc, 0) / r.total : 0);
+    const yTop = H - padB - hTot;
+    const ucPct = r.total > 0 ? (100 * r.uc / r.total).toFixed(1) : "0.0";
+    s += `<g><path d="${colPath(x, yTop, bw, hTot, 5)}" fill="${COL_COLLECTED}"/>` +
+      (hUC > 0.5 ? `<path d="${colPath(x, yTop, bw, hUC, 5)}" fill="${COL_REVERSED}"/>` : "") +
+      `<title>${esc(r.name)} · total ${fmtV(r.total)} · U&C ${fmtV(r.uc)} (${ucPct}%)</title></g>`;
+    s += `<text x="${x + bw / 2}" y="${H - padB + 17}" text-anchor="middle" font-size="9.5" style="font-family:var(--mono)" fill="var(--ink-mute)">${esc(r.name)}</text>`;
+    s += `<text x="${x + bw / 2}" y="${yTop - 7}" text-anchor="middle" font-size="9.5" style="font-family:var(--mono)" fill="var(--ink-soft)">${fmtV(r.total)}</text>`;
+  });
+  s += `<line x1="0" y1="${H - padB}" x2="${W}" y2="${H - padB}" stroke="var(--hair)" stroke-width="1"/>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${Math.round(W * 1.35)}px;display:block;margin:0 auto" preserveAspectRatio="xMidYMid meet">${s}</svg>`;
+}
 function renderFees() {
   const d = util.data;
   const has = d && d.periods && Object.keys(d.periods).length;
@@ -3324,6 +3374,22 @@ function renderFees() {
     .sort((x, y) => String(x.key).localeCompare(String(y.key)));
   hbars($("fees-months"), months, shortMoney, false);
 
+  // stacked monthly columns: collected split into fee-eligible vs U&C
+  const measure = util.feesMeasure || "money";
+  const fmtV = measure === "money" ? shortMoney : fmt;
+  const mrows = [...a.byMonth.entries()]
+    .map(([mi, b]) => ({ key: p.dims.months[mi], name: monthLabel(p.dims.months[mi]),
+      total: measure === "money" ? b[0] : b[2], uc: measure === "money" ? b[1] : b[3] }))
+    .sort((x, y) => String(x.key).localeCompare(String(y.key)));
+  $("fees-stack").innerHTML = feesStackSVG(mrows, fmtV);
+  const sumT = mrows.reduce((s, r) => s + r.total, 0), sumU = mrows.reduce((s, r) => s + r.uc, 0);
+  $("fees-stack-legend").innerHTML = legendHTML([
+    { label: measure === "money" ? "Fee-eligible collected $" : "Fee-eligible claims", val: fmtV(sumT - sumU), pct: pct2(sumT ? (sumT - sumU) / sumT : 0), color: COL_COLLECTED },
+    { label: measure === "money" ? "U&C collected $ (no fee)" : "U&C claims (no fee)", val: fmtV(sumU), pct: pct2(sumT ? sumU / sumT : 0), color: COL_REVERSED },
+  ]);
+  for (const b of document.querySelectorAll('[data-fset="measure"] button'))
+    b.classList.toggle("on", b.dataset.fval === measure);
+
   // by pharmacy group: chains roll up under the same rules as the PHARMACIES slicer
   const groups = new Map();
   for (const f of p.facts) {
@@ -3352,8 +3418,9 @@ function renderFees() {
         `<td class="r num">${int0(g.net)}</td><td class="r num">${int0(g.uc)}</td>` +
         `<td class="r num">${g.net ? (100 * g.uc / g.net).toFixed(1) : "0.0"}%</td></tr>`).join("")
     : `<tr><td colspan="7" style="color:var(--ink-mute)">Nothing under the current filters.</td></tr>`;
+  hbars($("fees-groupbars"), rows.map(([name, g]) => ({ name, v: Math.max(g.fee, 0) })), shortMoney, false);
 
-  for (const sel of ["#kpi-fees", "#kpi-feeuc", "#legend-fees", "#fees-months", "#fees-groups"]) setStagger(sel);
+  for (const sel of ["#kpi-fees", "#kpi-feeuc", "#legend-fees", "#fees-months", "#fees-stack svg", "#fees-stack-legend", "#fees-groupbars", "#fees-groups"]) setStagger(sel);
   for (const el of document.querySelectorAll("#kpi-fees .v, #kpi-feeuc .v"))
     if (el.closest(".vis")) countUp(el);
   $("view-desc").textContent = "Internal revenue view · admin fees vs U&C — not for client distribution";
@@ -4284,6 +4351,30 @@ async function boot() {
     for (const other of document.querySelectorAll("#util-slicers .pop")) if (other !== pop) other.hidden = true;
     pop.hidden = !pop.hidden;
     clampPop(pop);
+  });
+  // chip clicks on the fees view (same shared filters; renderUtil routes back
+  // to renderFees while that tab is active)
+  $("view-fees").addEventListener("click", (e) => {
+    const tb = e.target.closest(".segbtns button");
+    if (tb && tb.dataset.fval) { util.feesMeasure = tb.dataset.fval; renderUtil(); return; }
+    const xClear = e.target.closest("[data-uchipclear]");
+    if (xClear) { util.f[xClear.dataset.uchipclear] = null; renderUtil(); return; }
+    if (e.target.closest("[data-urangeclear]")) { util.range = null; renderUtil(); return; }
+    if (e.target.closest("[data-utfclear]")) { util.tf.sel = null; applyTimeframe(); renderUtil(); return; }
+    const ex = e.target.closest("[data-uexpand]");
+    if (ex) { util.chipsOpen.add(ex.dataset.uexpand); renderUtil(); return; }
+    const col = e.target.closest("[data-ucollapse]");
+    if (col) { util.chipsOpen.delete(col.dataset.ucollapse); renderUtil(); return; }
+    const chip = e.target.closest("[data-uchip]");
+    if (chip) {
+      const dim = chip.dataset.uchip;
+      if (dim === "__reset") utilFilterReset();
+      else {
+        util.f[dim].delete(Number(chip.dataset.idx));
+        if (!util.f[dim].size) util.f[dim] = null;
+      }
+      renderUtil();
+    }
   });
   $("view-utilization").addEventListener("click", (e) => {
     if (e.target.closest("a")) return; // maps links open in a new tab, don't also filter
