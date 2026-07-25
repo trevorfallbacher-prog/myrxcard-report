@@ -78,6 +78,10 @@ export function aggregateRows(rows, sourceLabel = "") {
 
   let paidMoney = 0, reversedMoney = 0;
   let paidClaims = 0, reversedClaims = 0;
+  // Admin fee = the BillDispFee column (per-claim transaction fee Avalon
+  // bills; $0 on U&C claims, negative on reversals). Matches invoice #1287:
+  // Brookshire week of 1/27/25 = 666 billable transactions × $0.50.
+  let feePaid = 0, feeReversed = 0;
   const byPharm = new Map();          // name -> net PlanGrossAmount
   let minKey = null, maxKey = null;   // process-date span (yyyymm)
   let group = "", carrier = "";
@@ -113,8 +117,9 @@ export function aggregateRows(rows, sourceLabel = "") {
 
     if (type !== "P" && type !== "R") continue; // skip blanks / unknown types
 
-    if (type === "P") { paidMoney += gross; paidClaims += 1; }
-    else { reversedMoney += gross; reversedClaims += 1; }
+    const fee = num(r.BillDispFee);
+    if (type === "P") { paidMoney += gross; paidClaims += 1; feePaid += fee; }
+    else { reversedMoney += gross; reversedClaims += 1; feeReversed += fee; }
 
     const pharm = norm(r.PharmacyName) || "—";
     const pharmKey = `${pharm}|${norm(r.NPI)}`;
@@ -146,9 +151,9 @@ export function aggregateRows(rows, sourceLabel = "") {
     const day = pd ? pd.y * 10000 + pd.m * 100 + pd.d : 0; // yyyymmdd, 0 = unknown
     const fk = `${mi}|${gi}|${si}|${pi}|${bi}|${ci}|${di}|${uc}|${day}`;
     let f = factMap.get(fk);
-    if (!f) { f = [mi, gi, si, pi, bi, ci, di, uc, 0, 0, 0, 0, day]; factMap.set(fk, f); }
-    if (type === "P") { f[8] += gross; f[10] += 1; }
-    else { f[9] += gross; f[11] += 1; } // reversal gross is negative; keep sign
+    if (!f) { f = [mi, gi, si, pi, bi, ci, di, uc, 0, 0, 0, 0, day, 0, 0]; factMap.set(fk, f); }
+    if (type === "P") { f[8] += gross; f[10] += 1; f[13] += fee; }
+    else { f[9] += gross; f[11] += 1; f[14] += fee; } // reversal gross/fee are negative; keep sign
   }
 
   const reversedMoneyAbs = Math.abs(reversedMoney);
@@ -190,6 +195,7 @@ export function aggregateRows(rows, sourceLabel = "") {
       reversed: r2(reversedMoneyAbs),
       collected: r2(collectedMoney),
       reversedPct: paidMoney ? r4(reversedMoneyAbs / paidMoney) : 0,
+      adminFees: { paid: r2(feePaid), reversed: r2(Math.abs(feeReversed)), net: r2(feePaid + feeReversed) },
     },
     claims: {
       paid: paidClaims,
@@ -202,7 +208,8 @@ export function aggregateRows(rows, sourceLabel = "") {
     pharmMeta,
     // [monthIdx, groupIdx, stateIdx, pharmacyIdx, brandIdx, classIdx, drugIdx,
     //  paidAtUC flag, paid$, reversed$ (negative), paidClaims, reversedClaims,
-    //  processDate yyyymmdd (0 when the row had no parseable date)]
-    facts: [...factMap.values()].map((f) => [f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], r2(f[8]), r2(f[9]), f[10], f[11], f[12]]),
+    //  processDate yyyymmdd (0 when the row had no parseable date),
+    //  adminFee$ paid, adminFee$ reversed (negative)]
+    facts: [...factMap.values()].map((f) => [f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], r2(f[8]), r2(f[9]), f[10], f[11], f[12], r2(f[13]), r2(f[14])]),
   };
 }

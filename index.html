@@ -448,6 +448,15 @@
 
   /* ---------- Utilization tab ---------- */
   #view-utilization[hidden] { display: none; }
+  #view-fees[hidden] { display: none; }
+  .fees-flag {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: #8A6100; background: var(--success-tint, #FBF3DC); border: 1px solid #E9AE2E;
+    border-radius: 8px; padding: 6px 12px; margin-bottom: 14px;
+  }
+  .fees-table td, .fees-table th { white-space: nowrap; }
+  .fees-table .r { text-align: right; }
   .util-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 22px; }
   .util-head .t { font-size: 21px; font-weight: 700; letter-spacing: -0.015em; }
   .util-head .t em { color: var(--tertiary); font-style: italic; font-weight: 600; }
@@ -800,7 +809,7 @@
 
   @media print {
     .tabs { display: none !important; }
-    #view-utilization .grid { display: block; }
+    #view-utilization .grid, #view-fees .grid { display: block; }
     /* on screen .uc-table is a 340px scroll box; in print show all 20 rows */
     .uc-table { max-height: none; overflow: visible; }
   }
@@ -850,6 +859,10 @@
       <button type="button" data-tab="util">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
         Utilization
+      </button>
+      <button type="button" data-tab="fees">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v20"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Admin Fees
       </button>
       <button type="button" data-tab="docs">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>
@@ -963,6 +976,7 @@
   <nav class="tabs" id="tabs" hidden>
     <button type="button" data-tab="search" class="on">Website Search Records</button>
     <button type="button" data-tab="util">Utilization</button>
+    <button type="button" data-tab="fees">Admin Fees</button>
   </nav>
 
   <div class="print-meta" id="print-meta"></div>
@@ -1123,6 +1137,53 @@
       </div>
     </div>
  </div><!-- /view-utilization -->
+
+ <div id="view-fees" hidden>
+    <div class="fees-flag">Internal — Avalon revenue view · not part of client reports</div>
+    <div class="util-head">
+      <div>
+        <div class="t">Admin fees <span id="fees-client"></span></div>
+        <div class="sub" id="fees-window"></div>
+      </div>
+    </div>
+
+    <div id="fees-empty" class="panel" hidden></div>
+
+    <div id="fees-body" class="grid">
+      <div class="panel span6">
+        <div class="kicker">Admin fee revenue <span class="hint">· BillDispFee per claim, net of reversals</span></div>
+        <div class="kpi-row" id="kpi-fees"></div>
+      </div>
+
+      <div class="panel span6">
+        <div class="kicker">Claims paid at U&amp;C <span class="hint">· no admin fee revenue on these</span></div>
+        <div class="kpi-row" id="kpi-feeuc"></div>
+      </div>
+
+      <div class="panel span6">
+        <div class="kicker">Collected $ that earns Avalon a fee <span class="hint">· U&amp;C collected $ produces no admin fees</span></div>
+        <div class="donut-wrap">
+          <div id="donut-fees"></div>
+          <div class="donut-legend" id="legend-fees"></div>
+        </div>
+      </div>
+
+      <div class="panel span6">
+        <div class="kicker">Net admin fees by month</div>
+        <div class="bars bars-wide" id="fees-months"></div>
+      </div>
+
+      <div class="panel span12">
+        <div class="kicker">Admin fees by pharmacy group</div>
+        <div class="table-wrap">
+          <table class="fees-table">
+            <thead><tr><th>Group</th><th class="r">Net admin fees</th><th class="r">Fee $ billed</th><th class="r">Fee $ reversed</th><th class="r">Net claims</th><th class="r">U&amp;C claims</th><th class="r">U&amp;C %</th></tr></thead>
+            <tbody id="fees-groups"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+ </div><!-- /view-fees -->
 
  <div id="view-docs" hidden>
   <div class="grid">
@@ -2169,7 +2230,7 @@ const USLICER_LABELS = { groups: "Clients", pharmacies: "Pharmacies", months: "M
 const PHARM_GROUPS = [
   ["Brookshire Brothers", (n) => /^Brookshire Brothers/i.test(n)],
   ["Rochester Collective", (n, m) => m.city === "Rochester" && m.st === "NY"],
-  ["UW Health (UWHC)", (n) => /^UW Health/i.test(n)],
+  ["UW Health (UWHC)", (n) => /^UW Health|^Swedish American/i.test(n)], // Swedish American rolls up per the claim file's Pharmacy Group
   ["Marshfield Clinic", (n) => /^Marshfield/i.test(n)],
   ["Sun Life", (n) => /^Sun Life/i.test(n)],
 ];
@@ -2352,7 +2413,7 @@ function mergedPeriod(d) {
     for (const f of p.facts) {
       if (comboOwner.get(comboKey(p, f)) !== k) continue;
       facts.push([maps.months[f[0]], maps.groups[f[1]], maps.states[f[2]], pmap[f[3]],
-        maps.brands[f[4]], maps.classes[f[5]], maps.drugs[f[6]], f[7], f[8], f[9], f[10], f[11], f[12] || 0]);
+        maps.brands[f[4]], maps.classes[f[5]], maps.drugs[f[6]], f[7], f[8], f[9], f[10], f[11], f[12] || 0, f[13] || 0, f[14] || 0]);
     }
   }
   const span = dims.months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
@@ -2515,8 +2576,8 @@ function togglePharm(pi) {
 }
 
 function utilAgg(p) {
-  let paid = 0, rev = 0, pn = 0, rn = 0, ucN = 0;
-  const byPharm = new Map(), byPharmRev = new Map(), byClass = new Map(), byDrugRev = new Map(), byDrugUC = new Map();
+  let paid = 0, rev = 0, pn = 0, rn = 0, ucN = 0, feeP = 0, feeR = 0, ucColl = 0;
+  const byPharm = new Map(), byPharmRev = new Map(), byClass = new Map(), byDrugRev = new Map(), byDrugUC = new Map(), byMonthFee = new Map();
   for (const f of p.facts) {
     if (!factPass(f)) continue;
     paid += f[8]; rev += f[9]; pn += f[10]; rn += f[11];
@@ -2525,7 +2586,10 @@ function utilAgg(p) {
     byClass.set(f[5], (byClass.get(f[5]) || 0) + f[8] + f[9]);
     if (f[11]) byDrugRev.set(f[6], (byDrugRev.get(f[6]) || 0) + f[11]);
     // U&C = net claim count (paid − reversed), matching Power BI's Sum of ClaimCount
-    if (f[7]) { ucN += f[10] - f[11]; byDrugUC.set(f[6], (byDrugUC.get(f[6]) || 0) + f[10] - f[11]); }
+    if (f[7]) { ucN += f[10] - f[11]; ucColl += f[8] + f[9]; byDrugUC.set(f[6], (byDrugUC.get(f[6]) || 0) + f[10] - f[11]); }
+    // admin fees (facts 13/14; absent on stores built before fee support)
+    const fp = f[13] || 0, fr = f[14] || 0;
+    if (fp || fr) { feeP += fp; feeR += fr; byMonthFee.set(f[0], (byMonthFee.get(f[0]) || 0) + fp + fr); }
   }
   const revAbs = Math.abs(rev);
   const top = (map, names, n) => [...map.entries()]
@@ -2541,6 +2605,9 @@ function utilAgg(p) {
     revDrugs: top(byDrugRev, p.dims.drugs, 13),
     ucCount: ucN,
     ucDrugs: top(byDrugUC, p.dims.drugs, 20),
+    fees: { paid: feeP, reversed: Math.abs(feeR), net: feeP + feeR },
+    ucCollected: ucColl,
+    byMonthFee,
   };
 }
 
@@ -3096,6 +3163,9 @@ function renderCrossover(p, hasCube, evs) {
 }
 
 function renderUtil() {
+  // slicer/timeframe handlers all call renderUtil(); route to the fees view
+  // when it is the active tab so the shared filters re-render it too
+  if (state.tab === "fees") return renderFees();
   const d = util.data;
   const has = d && d.periods && Object.keys(d.periods).length;
   $("util-empty").hidden = !!has;
@@ -3181,7 +3251,115 @@ function renderUtil() {
   $("view-desc").textContent = utilViewDesc(p);
 }
 
-const VIEW_IDS = { search: "view-search", util: "view-utilization", docs: "view-docs" };
+/* ---------------- admin fees tab (internal) ----------------
+   Avalon's per-claim fee revenue (fact slots 13/14 = BillDispFee paid/reversed)
+   and the U&C slice that earns nothing. Shares the utilization store, slicers,
+   and timeframe with the Utilization tab, but lives in its own view so it is
+   never part of a printed client report. */
+const periodHasFees = (p) => Array.isArray(p.facts) && p.facts.length > 0 && p.facts.every((f) => f.length >= 15);
+function renderFees() {
+  const d = util.data;
+  const has = d && d.periods && Object.keys(d.periods).length;
+  $("fees-empty").hidden = !!has;
+  $("fees-body").style.display = has ? "" : "none";
+  if (!has) {
+    $("fees-empty").innerHTML = util.error ? esc(util.error)
+      : "No utilization data yet — the admin-fee view reads the same claims drops as the Utilization tab.";
+    $("fees-client").textContent = ""; $("fees-window").textContent = "";
+    return;
+  }
+  if (!util.merged) { util.merged = mergedPeriod(d); utilFilterReset(); }
+  const p = util.merged || d.periods[Object.keys(d.periods).sort().pop()];
+  if (!util.f) utilFilterReset();
+  const hasCube = Array.isArray(p.facts) && p.dims;
+  const hasFees = hasCube && Object.values(d.periods)
+    .filter((x) => x.dims && Array.isArray(x.facts)).every(periodHasFees);
+  for (const el of $("util-slicers").querySelectorAll("[data-uslicer]")) el.style.display = hasCube ? "" : "none";
+
+  $("fees-client").innerHTML = "— <em>" + esc(p.client || "") + "</em>";
+  const gen = d.generatedAt ? new Date(d.generatedAt) : null;
+  $("fees-window").textContent =
+    (p.periodLabel || "").toUpperCase() +
+    (gen ? ` · UPDATED ${gen.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }).toUpperCase()}` : "");
+
+  if (!hasFees) {
+    $("fees-empty").hidden = false;
+    $("fees-body").style.display = "none";
+    $("fees-empty").innerHTML = "The published data predates admin-fee support. " +
+      "Re-drop the claims workbooks into the <b>Avalon Reports</b> folder (or re-run " +
+      "<code>build-utilization.mjs</code>) and this tab will populate.";
+    return;
+  }
+
+  if (hasCube) renderUtilSlicers(p);
+  renderUtilTf();
+  renderUtilDates(p);
+
+  const a = utilAgg(p);
+  const eligible = a.claims.collected - (a.ucCount || 0); // net non-U&C (fee-eligible) claims
+  $("kpi-fees").innerHTML =
+    kpi("collected", money0(a.fees.net), "Net Admin Fees") +
+    kpi("paid", money0(a.fees.paid), "Fee $ Billed") +
+    kpi("reversed", money0(a.fees.reversed), "Fee $ Reversed") +
+    kpi("pct", eligible > 0 ? "$" + (a.fees.net / eligible).toFixed(2) : "—", "Avg Fee / Eligible Claim");
+  const ucPct = a.claims.collected ? (a.ucCount || 0) / a.claims.collected : 0;
+  const ucCollPct = a.money.collected ? a.ucCollected / a.money.collected : 0;
+  $("kpi-feeuc").innerHTML =
+    kpi("paid", int0(a.ucCount || 0), "U&C Claims (net)") +
+    kpi("pct", pct2(ucPct), "% of Claims at U&C") +
+    kpi("reversed", money0(a.ucCollected), "U&C Collected $") +
+    kpi("collected", pct2(ucCollPct), "% of Collected $ at U&C");
+  fitNums($("kpi-fees"));
+  fitNums($("kpi-feeuc"));
+
+  const feeColl = Math.max(a.money.collected - a.ucCollected, 0);
+  $("donut-fees").innerHTML = donutSVG([{ v: feeColl, color: COL_COLLECTED }, { v: Math.max(a.ucCollected, 0), color: COL_REVERSED }], 170);
+  $("legend-fees").innerHTML = legendHTML([
+    { label: "Fee-eligible collected $", val: money0(feeColl), pct: pct2(1 - ucCollPct), color: COL_COLLECTED },
+    { label: "U&C collected $ (no fee)", val: money0(a.ucCollected), pct: pct2(ucCollPct), color: COL_REVERSED },
+  ]);
+
+  const months = [...a.byMonthFee.entries()]
+    .map(([mi, v]) => ({ key: p.dims.months[mi], name: monthLabel(p.dims.months[mi]), v: Math.max(v, 0) }))
+    .sort((x, y) => String(x.key).localeCompare(String(y.key)));
+  hbars($("fees-months"), months, shortMoney, false);
+
+  // by pharmacy group: chains roll up under the same rules as the PHARMACIES slicer
+  const groups = new Map();
+  for (const f of p.facts) {
+    if (!factPass(f)) continue;
+    const key = pharmChain(p, f[3]) || p.dims.pharmacies[f[3]];
+    const g = groups.get(key) || { fee: 0, feeP: 0, feeR: 0, net: 0, uc: 0 };
+    g.fee += (f[13] || 0) + (f[14] || 0);
+    g.feeP += f[13] || 0; g.feeR += f[14] || 0;
+    g.net += f[10] - f[11];
+    if (f[7]) g.uc += f[10] - f[11];
+    groups.set(key, g);
+  }
+  // top groups individually; the long tail (hundreds of one-off non-Avalon
+  // pharmacies) rolls into a single "all other" row
+  let rows = [...groups.entries()].sort((x, y) => y[1].fee - x[1].fee);
+  if (rows.length > 16) {
+    const tail = rows.slice(15);
+    const o = { fee: 0, feeP: 0, feeR: 0, net: 0, uc: 0 };
+    for (const [, g] of tail) { o.fee += g.fee; o.feeP += g.feeP; o.feeR += g.feeR; o.net += g.net; o.uc += g.uc; }
+    rows = rows.slice(0, 15).concat([[`All other pharmacies (${int0(tail.length)})`, o]]);
+  }
+  $("fees-groups").innerHTML = rows.length
+    ? rows.map(([name, g]) =>
+        `<tr><td class="drug">${esc(name)}</td><td class="r num">${money0(g.fee)}</td>` +
+        `<td class="r num">${money0(g.feeP)}</td><td class="r num">${money0(Math.abs(g.feeR))}</td>` +
+        `<td class="r num">${int0(g.net)}</td><td class="r num">${int0(g.uc)}</td>` +
+        `<td class="r num">${g.net ? (100 * g.uc / g.net).toFixed(1) : "0.0"}%</td></tr>`).join("")
+    : `<tr><td colspan="7" style="color:var(--ink-mute)">Nothing under the current filters.</td></tr>`;
+
+  for (const sel of ["#kpi-fees", "#kpi-feeuc", "#legend-fees", "#fees-months", "#fees-groups"]) setStagger(sel);
+  for (const el of document.querySelectorAll("#kpi-fees .v, #kpi-feeuc .v"))
+    if (el.closest(".vis")) countUp(el);
+  $("view-desc").textContent = "Internal revenue view · admin fees vs U&C — not for client distribution";
+}
+
+const VIEW_IDS = { search: "view-search", util: "view-utilization", fees: "view-fees", docs: "view-docs" };
 async function setTab(name) {
   const switching = state.tab !== name;
   state.tab = name;
@@ -3196,18 +3374,19 @@ async function setTab(name) {
   }
   document.querySelectorAll("#tabs button, #side-nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   $("search-only").style.display = name === "search" ? "contents" : "none";
-  $("util-slicers").style.display = name === "util" ? "contents" : "none";
+  $("util-slicers").style.display = name === "util" || name === "fees" ? "contents" : "none";
   $("app-title").textContent = name === "search" ? "Search performance"
-    : name === "util" ? "Performance Summary - MyRxCard" : "Document Studio - MyRxCard";
+    : name === "util" ? "Performance Summary - MyRxCard"
+    : name === "fees" ? "Admin Fees - Internal" : "Document Studio - MyRxCard";
   if (name === "docs") {
     $("view-desc").textContent = "AI document editing · team only";
     if (!docs.templatesLoaded) loadTemplates();
   }
-  if (name === "util") {
+  if (name === "util" || name === "fees") {
     if (!util.loaded) { stamp(true, "LOADING…"); await ensureUtilData(); }
     renderUtil();
     const g = util.data && util.data.generatedAt;
-    stamp(true, g ? "UTILIZATION · " + new Date(g).toLocaleDateString("en-US") : "UTILIZATION");
+    stamp(true, (name === "fees" ? "ADMIN FEES" : "UTILIZATION") + (g ? " · " + new Date(g).toLocaleDateString("en-US") : ""));
   } else if (state.mode === "live" && state.lastSync) {
     stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
   } else if (state.mode === "sample") {
