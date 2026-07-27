@@ -1,16 +1,14 @@
-// push_avalon_aggregate — FINAL (field names confirmed 2026-07-27)
-// -----------------------------------------------------------------
+// push_avalon_case — FINAL v2, case-level rows (field names confirmed 2026-07-27)
+// -------------------------------------------------------------------------
 // Zoho CRM workflow function, module "Avalon Assist" (API name: Cases).
-// Rule: on Create or Edit → Function, one argument recordId mapped to #id.
-// Paste this whole file as the function body; set syncSecret below to the
-// same SYNC_SECRET bound to the myrxcard-sync worker.
+// Rule: on Create or Edit → Instant Action → this function, recordId → #id.
+// Category must be Automation. Set syncSecret to the worker's SYNC_SECRET.
 //
-// Recomputes the changed case's aggregate bucket (client × source ×
-// medication × month, month from Created_Time) and pushes ONLY the rollup.
-// Client_Name and TPA are lookups → their .name is used. PHI fields on the
-// record (Member, Member_DOB, Email, Phone, Government_ID, …) are never read.
+// Pushes ONE identifier-free row for the changed case; the worker upserts it
+// by case_key, so status changes overwrite the same row. Member fields
+// (name, DOB, email, phone, government ID, dose, comments) are never read.
 
-void automation.push_avalon_aggregate(int recordId)
+void automation.push_avalon_case(int recordId)
 {
 	syncUrl = "https://myrxcard-sync.trevorfallbacher.workers.dev";
 	syncSecret = "PASTE-YOUR-SYNC-SECRET-HERE";
@@ -19,20 +17,17 @@ void automation.push_avalon_aggregate(int recordId)
 
 	cl = rec.get("Client_Name");
 	clientName = "";
-	clientId = "";
 	if(cl != null)
 	{
 		clientName = ifnull(cl.get("name"),"").toString();
-		clientId = ifnull(cl.get("id"),"").toString();
 	}
 	medName = ifnull(rec.get("Medication_Name"),"").toString().trim();
-	month = ifnull(rec.get("Created_Time"),"").toString();
-	if(clientId == "" || medName == "" || month.length() < 7)
+	created = ifnull(rec.get("Created_Time"),"").toString();
+	if(clientName == "" || medName == "" || created.length() < 10)
 	{
 		info "skipped: record missing client, medication, or created time";
 		return;
 	}
-	month = month.subString(0,7);
 
 	// canonical channel names (Source is free text with many spellings)
 	normSource = Map();
@@ -47,137 +42,86 @@ void automation.push_avalon_aggregate(int recordId)
 	srcRaw = ifnull(rec.get("Source"),"").toString().trim();
 	source = ifnull(normSource.get(srcRaw.toLowerCase()), if(srcRaw == "","Direct",srcRaw));
 
-	// pull every case for this client (paged), then filter to this bucket
-	allRows = List();
-	for each pg in {1,2,3,4,5}
-	{
-		batch = zoho.crm.searchRecords("Cases","(Client_Name.id:equals:" + clientId + ")",pg,200);
-		allRows.addAll(batch);
-		if(batch.size() < 200)
-		{
-			break;
-		}
-	}
-
-	cases = 0;
-	openCases = 0;
-	completedCases = 0;
-	closedNoFill = 0;
-	awp = 0.0;
-	avalonFee = 0.0;
-	aaPrice = 0.0;
-	aaSavings = 0.0;
-	avalonSavings = 0.0;
-	myrx = 0.0;
-	medsd = 0.0;
-	rxfree = 0.0;
-	globalrx = 0.0;
-	canada = 0.0;
-	ndc = "";
-	medType = "";
 	tpa = "";
-	groupNumber = "";
-	for each r in allRows
+	tp = rec.get("TPA");
+	if(tp != null)
 	{
-		rMed = ifnull(r.get("Medication_Name"),"").toString().trim();
-		rMonth = ifnull(r.get("Created_Time"),"").toString();
-		if(rMonth.length() >= 7)
-		{
-			rMonth = rMonth.subString(0,7);
-		}
-		rSrcRaw = ifnull(r.get("Source"),"").toString().trim();
-		rSrc = ifnull(normSource.get(rSrcRaw.toLowerCase()), if(rSrcRaw == "","Direct",rSrcRaw));
-		if(rMed == medName && rMonth == month && rSrc == source)
-		{
-			cases = cases + 1;
-			status = ifnull(r.get("Status"),"").toString();
-			if(status.startsWith("Open") || status == "Targeted for Switch")
-			{
-				openCases = openCases + 1;
-			}
-			if(status == "Completed")
-			{
-				completedCases = completedCases + 1;
-			}
-			if(status.startsWith("Closed"))
-			{
-				closedNoFill = closedNoFill + 1;
-			}
-			if(r.get("AWP") != null)
-			{
-				awp = awp + r.get("AWP").toDecimal();
-			}
-			if(r.get("Avalon_Fee") != null)
-			{
-				avalonFee = avalonFee + r.get("Avalon_Fee").toDecimal();
-			}
-			if(r.get("AA_Price") != null)
-			{
-				aaPrice = aaPrice + r.get("AA_Price").toDecimal();
-			}
-			if(r.get("AA_Savings") != null)
-			{
-				aaSavings = aaSavings + r.get("AA_Savings").toDecimal();
-			}
-			if(r.get("Avalon_Savings") != null)
-			{
-				avalonSavings = avalonSavings + r.get("Avalon_Savings").toDecimal();
-			}
-			if(r.get("MyRXCard_Pricing") != null)
-			{
-				myrx = myrx + r.get("MyRXCard_Pricing").toDecimal();
-			}
-			if(r.get("MEDSDirect_Pricing") != null)
-			{
-				medsd = medsd + r.get("MEDSDirect_Pricing").toDecimal();
-			}
-			if(r.get("RxFree4me_Pricing") != null)
-			{
-				rxfree = rxfree + r.get("RxFree4me_Pricing").toDecimal();
-			}
-			if(r.get("GlobalRx_Pricing") != null)
-			{
-				globalrx = globalrx + r.get("GlobalRx_Pricing").toDecimal();
-			}
-			if(r.get("Canada_Pharmacy_Export_Pricing") != null)
-			{
-				canada = canada + r.get("Canada_Pharmacy_Export_Pricing").toDecimal();
-			}
-			ndc = ifnull(r.get("NDC"),"").toString().replaceAll("[^0-9]","");
-			medType = ifnull(r.get("Medication_Type"),"").toString();
-			tp = r.get("TPA");
-			if(tp != null)
-			{
-				tpa = ifnull(tp.get("name"),"").toString();
-			}
-			groupNumber = ifnull(r.get("Group_Number"),"").toString();
-		}
+		tpa = ifnull(tp.get("name"),"").toString();
+	}
+	closedDate = ifnull(rec.get("Closed_Date"),"").toString();
+	if(closedDate.length() >= 10)
+	{
+		closedDate = closedDate.subString(0,10);
 	}
 
 	row = Map();
-	row.put("bucket_key",clientName + "|" + source + "|" + medName + "|" + month);
+	row.put("case_key",recordId.toString());
+	row.put("assist_number",ifnull(rec.get("Case_Number"),"").toString());
 	row.put("client_name",clientName);
 	row.put("tpa",tpa);
-	row.put("group_number",groupNumber);
+	row.put("group_number",ifnull(rec.get("Group_Number"),"").toString());
 	row.put("source",source);
+	row.put("status",ifnull(rec.get("Status"),"").toString());
+	row.put("closed_reason",ifnull(rec.get("Closed_Reason"),"").toString());
 	row.put("medication_name",medName);
-	row.put("ndc",ndc);
-	row.put("medication_type",medType);
-	row.put("month",month);
-	row.put("cases",cases);
-	row.put("open_cases",openCases);
-	row.put("completed_cases",completedCases);
-	row.put("closed_no_fill_cases",closedNoFill);
-	row.put("awp_total",awp);
-	row.put("avalon_fee_total",avalonFee);
-	row.put("aa_price_total",aaPrice);
-	row.put("aa_savings_total",aaSavings);
-	row.put("avalon_savings_total",avalonSavings);
-	row.put("myrxcard_total",myrx);
-	row.put("medsdirect_total",medsd);
-	row.put("rxfree4me_total",rxfree);
-	row.put("globalrx_total",globalrx);
-	row.put("canada_total",canada);
+	row.put("ndc",ifnull(rec.get("NDC"),"").toString().replaceAll("[^0-9]",""));
+	row.put("medication_type",ifnull(rec.get("Medication_Type"),"").toString());
+	row.put("month",created.subString(0,7));
+	row.put("created_date",created.subString(0,10));
+	row.put("closed_date",closedDate);
+	if(rec.get("AWP") != null)
+	{
+		row.put("awp",rec.get("AWP").toDecimal());
+	}
+	if(rec.get("Avalon_Fee") != null)
+	{
+		row.put("avalon_fee",rec.get("Avalon_Fee").toDecimal());
+	}
+	if(rec.get("AA_Price") != null)
+	{
+		row.put("aa_price",rec.get("AA_Price").toDecimal());
+	}
+	if(rec.get("AA_Savings") != null)
+	{
+		row.put("aa_savings",rec.get("AA_Savings").toDecimal());
+	}
+	if(rec.get("Avalon_Savings") != null)
+	{
+		row.put("avalon_savings",rec.get("Avalon_Savings").toDecimal());
+	}
+	if(rec.get("MyRXCard_Pricing") != null)
+	{
+		row.put("myrxcard_pricing",rec.get("MyRXCard_Pricing").toDecimal());
+	}
+	if(rec.get("MEDSDirect_Pricing") != null)
+	{
+		row.put("medsdirect_pricing",rec.get("MEDSDirect_Pricing").toDecimal());
+	}
+	if(rec.get("RxFree4me_Pricing") != null)
+	{
+		row.put("rxfree4me_pricing",rec.get("RxFree4me_Pricing").toDecimal());
+	}
+	if(rec.get("GlobalRx_Pricing") != null)
+	{
+		row.put("globalrx_pricing",rec.get("GlobalRx_Pricing").toDecimal());
+	}
+	if(rec.get("Canada_Pharmacy_Export_Pricing") != null)
+	{
+		row.put("canada_pricing",rec.get("Canada_Pharmacy_Export_Pricing").toDecimal());
+	}
+	if(rec.get("Shipping_Fees") != null)
+	{
+		row.put("shipping_fees",rec.get("Shipping_Fees").toDecimal());
+	}
+	if(rec.get("Physician_Fees") != null)
+	{
+		row.put("physician_fees",rec.get("Physician_Fees").toDecimal());
+	}
+	if(rec.get("Other_Fees") != null)
+	{
+		row.put("other_fees",rec.get("Other_Fees").toDecimal());
+	}
+
 	payload = Map();
 	payload.put("secret",syncSecret);
 	payload.put("rows",{row});

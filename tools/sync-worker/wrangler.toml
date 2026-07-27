@@ -3,4 +3,4 @@ main = "worker.js"
 compatibility_date = "2026-07-01"
 
 [vars]
-XANO_CONTENT_URL = "https://xy2f-yrzu-6a37.n7d.xano.io/api:meta/workspace/1/table/11/content"
+XANO_CONTENT_URL = "https://xy2f-yrzu-6a37.n7d.xano.io/api:meta/workspace/1/table/12/content"

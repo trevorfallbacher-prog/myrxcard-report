@@ -20,38 +20,41 @@ const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json", ...CORS } });
 
-// the ONLY fields allowed out — mirrors the Avalon Assist report columns
-// (dims from the report's own vocabulary; per-case fields like dosage,
-// quantity, relationship-to-insured, and any dates stay in Zoho).
-// Bucket grain: client × source × medication × month. Status is a set of
-// counters inside the bucket, not part of the key — cases move between
-// statuses, and counters can't strand a stale row the way a keyed status can.
+// the ONLY fields allowed out — one row per Avalon Assist case, identifier-
+// free. Member fields (name, DOB, email, phone, government ID, relationship,
+// dose/quantity free text, survey comments) are not in this list and any
+// attempt to send them rejects the whole batch. Upsert key: case_key (the
+// Zoho record id — a surrogate, so status changes overwrite in place).
 const FIELDS = {
-  bucket_key: { t: "string", max: 160 },   // client|source|medication|month
+  case_key: { t: "string", max: 30, re: /^\d+$/ },      // Zoho record id
+  assist_number: { t: "string", max: 20 },              // Case_Number autonumber
   client_name: { t: "string", max: 80 },
   tpa: { t: "string", max: 60 },
   group_number: { t: "string", max: 40 },
-  source: { t: "string", max: 40 },        // Canada Outreach / MedsDirect / NASH / …
+  source: { t: "string", max: 40 },                     // canonical channel
+  status: { t: "string", max: 60 },
+  closed_reason: { t: "string", max: 80 },
   medication_name: { t: "string", max: 80 },
   ndc: { t: "string", max: 11, re: /^\d{0,11}$/ },
-  medication_type: { t: "string", max: 20 },  // Brand / Generic
-  month: { t: "string", max: 7, re: /^\d{4}-\d{2}$/ },
-  cases: { t: "number" },
-  open_cases: { t: "number" },              // "Open…" + "Targeted for Switch"
-  completed_cases: { t: "number" },         // "Completed"
-  closed_no_fill_cases: { t: "number" },    // "Closed, No Fill"
-  awp_total: { t: "number" },
-  avalon_fee_total: { t: "number" },
-  aa_price_total: { t: "number" },
-  aa_savings_total: { t: "number" },
-  avalon_savings_total: { t: "number" },
-  myrxcard_total: { t: "number" },
-  medsdirect_total: { t: "number" },
-  rxfree4me_total: { t: "number" },
-  globalrx_total: { t: "number" },
-  canada_total: { t: "number" },
+  medication_type: { t: "string", max: 20 },            // Brand / Generic
+  month: { t: "string", max: 7, re: /^\d{4}-\d{2}$/ },  // created month (bucketing)
+  created_date: { t: "string", max: 10, re: /^\d{4}-\d{2}-\d{2}$/ },
+  closed_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
+  awp: { t: "number" },
+  avalon_fee: { t: "number" },
+  aa_price: { t: "number" },
+  aa_savings: { t: "number" },
+  avalon_savings: { t: "number" },
+  myrxcard_pricing: { t: "number" },
+  medsdirect_pricing: { t: "number" },
+  rxfree4me_pricing: { t: "number" },
+  globalrx_pricing: { t: "number" },
+  canada_pricing: { t: "number" },
+  shipping_fees: { t: "number" },
+  physician_fees: { t: "number" },
+  other_fees: { t: "number" },
 };
-const REQUIRED = ["bucket_key", "client_name", "medication_name", "month"];
+const REQUIRED = ["case_key", "client_name", "medication_name", "month"];
 
 // PHI tripwires for string values that slipped into allowed fields
 const SUSPECT = [
@@ -96,12 +99,12 @@ export default {
       const err = validateRow(rows[i]);
       if (err) return json({ error: `row ${i}: ${err}` }, 422);
     }
-    // upsert each row by bucket_key via the Metadata API
+    // upsert each row by case_key via the Metadata API
     const H = { "content-type": "application/json", authorization: `Bearer ${env.XANO_META_TOKEN}` };
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const sr = await fetch(`${env.XANO_CONTENT_URL}/search`, { method: "POST", headers: H,
-        body: JSON.stringify({ page: 1, per_page: 1, search: [{ field: "bucket_key", operator: "=", value: row.bucket_key }] }) });
+        body: JSON.stringify({ page: 1, per_page: 1, search: [{ field: "case_key", operator: "=", value: row.case_key }] }) });
       const sout = await sr.json().catch(() => ({}));
       if (!sr.ok) return json({ error: `Xano search ${sr.status} on row ${i}: ${JSON.stringify(sout).slice(0, 200)}` }, 502);
       const existing = (sout.items || [])[0];
