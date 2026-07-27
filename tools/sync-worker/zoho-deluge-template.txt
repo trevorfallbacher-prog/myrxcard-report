@@ -1,64 +1,108 @@
-// Zoho CRM → myrxcard-sync : aggregate push (Deluge)
-// ---------------------------------------------------
-// Attach as a CRM Workflow rule → Function on Create/Edit of the Avalon
-// process module. When a record changes, this recomputes the aggregate
-// bucket that record belongs to (process × pharmacy × month) from CRM and
-// pushes ONLY the rollup. No record-level data ever leaves Zoho.
+// Zoho CRM → myrxcard-sync : Avalon Assist aggregate push (Deluge)
+// -----------------------------------------------------------------
+// Attach as a CRM Workflow rule → Function, on Create/Edit of the Avalon
+// Assist case module, with one argument: recordId mapped to the record ID.
 //
-// FILL IN the <ANGLE-BRACKET> placeholders — send Claude the module and
-// field API names and he'll finish this script for you.
+// When a case changes, this recomputes its aggregate bucket
+// (client × source × medication × month, keyed on Created Time's month)
+// from CRM and pushes ONLY the rollup. Status lives as counters inside the
+// bucket, so a case moving Open → Completed updates in place.
+//
+// Field API names below are BEST GUESSES from the report column labels.
+// CONFIRM each one in Setup → Developer Space → API Names before going live
+// (a wrong name here fails silently). Send Claude the confirmed list and
+// he'll return this file finished.
 
 // ---- config -------------------------------------------------------------
 syncUrl = "https://myrxcard-sync.trevorfallbacher.workers.dev";
-syncSecret = "<PASTE-THE-SYNC-SECRET>";           // same value as the worker's SYNC_SECRET
-moduleName = "<CRM-MODULE-API-NAME>";             // e.g. "Avalon_Processes"
+syncSecret = "<PASTE-THE-SYNC-SECRET>";
+moduleName = "<CONFIRM e.g. Avalon_Assist>";
 
-// ---- the record that changed (workflow passes its ID) --------------------
+// ---- the record that changed ---------------------------------------------
 rec = zoho.crm.getRecordById(moduleName, recordId);
-processName = rec.get("<PROCESS-FIELD>");          // e.g. "Process_Type"
-pharmacyNpi = rec.get("<PHARMACY-NPI-FIELD>");     // e.g. "Pharmacy_NPI"
-recDate = rec.get("<DATE-FIELD>").toDate();        // e.g. "Process_Date"
-month = recDate.toString("yyyy-MM");
+clientName = ifnull(rec.get("Client_Name"), "").toString();
+medName = ifnull(rec.get("Medication_Name"), "").toString();
+created = rec.get("Created_Time").toString().toDate();
+month = created.toString("yyyy-MM");
 
-// ---- recompute this bucket from CRM (aggregate IN Zoho) -------------------
-criteria = "(<PROCESS-FIELD>:equals:" + processName + ")and(<PHARMACY-NPI-FIELD>:equals:" + pharmacyNpi + ")";
-rows = zoho.crm.searchRecords(moduleName, criteria, 1, 200);
-recordCount = 0;
-completed = 0;
-amount = 0.0;
-pharmacyName = "";
-state = "";
-for each r in rows
+// normalize the messy Source spellings into canonical channels
+normSource = map();
+normSource.put("medsdirect", "MedsDirect");
+normSource.put("meds direct", "MedsDirect");
+normSource.put("canada outreach", "Canada Outreach");
+normSource.put("canada outreached", "Canada Outreach");
+normSource.put("nash", "NASH");
+normSource.put("rxfree4me", "RxFree4me");
+normSource.put("global rx", "GlobalRx");
+normSource.put("globalrx", "GlobalRx");
+srcRaw = ifnull(rec.get("Source"), "").toString().trim().toLowerCase();
+source = ifnull(normSource.get(srcRaw), if(srcRaw == "", "Direct", rec.get("Source").toString().trim()));
+
+// ---- recompute this bucket from CRM (aggregation happens IN Zoho) ----------
+criteria = "(Client_Name:equals:" + clientName + ")and(Medication_Name:equals:" + medName + ")";
+found = zoho.crm.searchRecords(moduleName, criteria, 1, 200);
+cases = 0;
+openCases = 0;
+completedCases = 0;
+closedNoFill = 0;
+awp = 0.0;  avalonFee = 0.0;  aaPrice = 0.0;  aaSavings = 0.0;  avalonSavings = 0.0;
+myrx = 0.0; medsd = 0.0; rxfree = 0.0; globalrx = 0.0; canada = 0.0;
+ndc = "";  medType = "";  tpa = "";  groupNumber = "";
+addNum = map(); // helper pattern: Deluge has no functions — inline null-guarded adds below
+for each r in found
 {
-    d = r.get("<DATE-FIELD>").toDate();
-    if(d.toString("yyyy-MM") == month)
+    rSrcRaw = ifnull(r.get("Source"), "").toString().trim().toLowerCase();
+    rSrc = ifnull(normSource.get(rSrcRaw), if(rSrcRaw == "", "Direct", r.get("Source").toString().trim()));
+    rMonth = r.get("Created_Time").toString().toDate().toString("yyyy-MM");
+    if(rMonth == month && rSrc == source)
     {
-        recordCount = recordCount + 1;
-        if(r.get("<STATUS-FIELD>") == "Completed")
-        {
-            completed = completed + 1;
-        }
-        amt = r.get("<AMOUNT-FIELD>");
-        if(amt != null)
-        {
-            amount = amount + amt.toDecimal();
-        }
-        pharmacyName = r.get("<PHARMACY-NAME-FIELD>");
-        state = r.get("<PHARMACY-STATE-FIELD>");
+        cases = cases + 1;
+        status = ifnull(r.get("Status"), "").toString();
+        if(status.startsWith("Open") || status == "Targeted for Switch") { openCases = openCases + 1; }
+        if(status == "Completed") { completedCases = completedCases + 1; }
+        if(status.startsWith("Closed")) { closedNoFill = closedNoFill + 1; }
+        if(r.get("AWP") != null) { awp = awp + r.get("AWP").toDecimal(); }
+        if(r.get("Avalon_Fee") != null) { avalonFee = avalonFee + r.get("Avalon_Fee").toDecimal(); }
+        if(r.get("AA_Price") != null) { aaPrice = aaPrice + r.get("AA_Price").toDecimal(); }
+        if(r.get("AA_Savings") != null) { aaSavings = aaSavings + r.get("AA_Savings").toDecimal(); }
+        if(r.get("Avalon_Savings") != null) { avalonSavings = avalonSavings + r.get("Avalon_Savings").toDecimal(); }
+        if(r.get("MyRXCard_Pricing") != null) { myrx = myrx + r.get("MyRXCard_Pricing").toDecimal(); }
+        if(r.get("MEDSDirect_Pricing") != null) { medsd = medsd + r.get("MEDSDirect_Pricing").toDecimal(); }
+        if(r.get("RxFree4me_Pricing") != null) { rxfree = rxfree + r.get("RxFree4me_Pricing").toDecimal(); }
+        if(r.get("GlobalRx_Pricing") != null) { globalrx = globalrx + r.get("GlobalRx_Pricing").toDecimal(); }
+        if(r.get("Canada_Pharmacy_Export_Pricing") != null) { canada = canada + r.get("Canada_Pharmacy_Export_Pricing").toDecimal(); }
+        ndc = ifnull(r.get("NDC"), "").toString().replaceAll("[^0-9]", "");
+        medType = ifnull(r.get("Medication_Type"), "").toString();
+        tpa = ifnull(r.get("TPA"), "").toString();
+        groupNumber = ifnull(r.get("Group_Number"), "").toString();
     }
 }
 
 // ---- push ONLY the aggregate ---------------------------------------------
 row = Map();
-row.put("bucket_key", processName + "|" + pharmacyNpi + "|" + month);
-row.put("process", processName);
-row.put("pharmacy_name", pharmacyName);
-row.put("pharmacy_npi", pharmacyNpi.toString());
-row.put("state", state);
+row.put("bucket_key", clientName + "|" + source + "|" + medName + "|" + month);
+row.put("client_name", clientName);
+row.put("tpa", tpa);
+row.put("group_number", groupNumber);
+row.put("source", source);
+row.put("medication_name", medName);
+row.put("ndc", ndc);
+row.put("medication_type", medType);
 row.put("month", month);
-row.put("record_count", recordCount);
-row.put("completed_count", completed);
-row.put("amount", amount);
+row.put("cases", cases);
+row.put("open_cases", openCases);
+row.put("completed_cases", completedCases);
+row.put("closed_no_fill_cases", closedNoFill);
+row.put("awp_total", awp);
+row.put("avalon_fee_total", avalonFee);
+row.put("aa_price_total", aaPrice);
+row.put("aa_savings_total", aaSavings);
+row.put("avalon_savings_total", avalonSavings);
+row.put("myrxcard_total", myrx);
+row.put("medsdirect_total", medsd);
+row.put("rxfree4me_total", rxfree);
+row.put("globalrx_total", globalrx);
+row.put("canada_total", canada);
 payload = Map();
 payload.put("secret", syncSecret);
 payload.put("rows", {row});

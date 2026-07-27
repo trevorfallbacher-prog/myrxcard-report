@@ -16,21 +16,38 @@ const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json", ...CORS } });
 
-// the ONLY fields allowed out: aggregate dimensions + numeric measures
+// the ONLY fields allowed out — mirrors the Avalon Assist report columns
+// (dims from the report's own vocabulary; per-case fields like dosage,
+// quantity, relationship-to-insured, and any dates stay in Zoho).
+// Bucket grain: client × source × medication × month. Status is a set of
+// counters inside the bucket, not part of the key — cases move between
+// statuses, and counters can't strand a stale row the way a keyed status can.
 const FIELDS = {
-  bucket_key: { t: "string", max: 120 },   // e.g. "assist|1689773905|2026-07"
-  process: { t: "string", max: 60 },       // Avalon process/program name
-  pharmacy_name: { t: "string", max: 80 },
-  pharmacy_npi: { t: "string", max: 10, re: /^\d{0,10}$/ },
-  state: { t: "string", max: 2, re: /^[A-Za-z]{0,2}$/ },
+  bucket_key: { t: "string", max: 160 },   // client|source|medication|month
+  client_name: { t: "string", max: 80 },
+  tpa: { t: "string", max: 60 },
+  group_number: { t: "string", max: 40 },
+  source: { t: "string", max: 40 },        // Canada Outreach / MedsDirect / NASH / …
+  medication_name: { t: "string", max: 80 },
+  ndc: { t: "string", max: 11, re: /^\d{0,11}$/ },
+  medication_type: { t: "string", max: 20 },  // Brand / Generic
   month: { t: "string", max: 7, re: /^\d{4}-\d{2}$/ },
-  record_count: { t: "number" },
-  open_count: { t: "number" },
-  completed_count: { t: "number" },
-  amount: { t: "number" },
-  amount_secondary: { t: "number" },
+  cases: { t: "number" },
+  open_cases: { t: "number" },              // "Open…" + "Targeted for Switch"
+  completed_cases: { t: "number" },         // "Completed"
+  closed_no_fill_cases: { t: "number" },    // "Closed, No Fill"
+  awp_total: { t: "number" },
+  avalon_fee_total: { t: "number" },
+  aa_price_total: { t: "number" },
+  aa_savings_total: { t: "number" },
+  avalon_savings_total: { t: "number" },
+  myrxcard_total: { t: "number" },
+  medsdirect_total: { t: "number" },
+  rxfree4me_total: { t: "number" },
+  globalrx_total: { t: "number" },
+  canada_total: { t: "number" },
 };
-const REQUIRED = ["bucket_key", "process", "month"];
+const REQUIRED = ["bucket_key", "client_name", "medication_name", "month"];
 
 // PHI tripwires for string values that slipped into allowed fields
 const SUSPECT = [
