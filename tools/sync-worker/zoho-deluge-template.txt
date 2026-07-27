@@ -1,0 +1,72 @@
+// Zoho CRM → myrxcard-sync : aggregate push (Deluge)
+// ---------------------------------------------------
+// Attach as a CRM Workflow rule → Function on Create/Edit of the Avalon
+// process module. When a record changes, this recomputes the aggregate
+// bucket that record belongs to (process × pharmacy × month) from CRM and
+// pushes ONLY the rollup. No record-level data ever leaves Zoho.
+//
+// FILL IN the <ANGLE-BRACKET> placeholders — send Claude the module and
+// field API names and he'll finish this script for you.
+
+// ---- config -------------------------------------------------------------
+syncUrl = "https://myrxcard-sync.trevorfallbacher.workers.dev";
+syncSecret = "<PASTE-THE-SYNC-SECRET>";           // same value as the worker's SYNC_SECRET
+moduleName = "<CRM-MODULE-API-NAME>";             // e.g. "Avalon_Processes"
+
+// ---- the record that changed (workflow passes its ID) --------------------
+rec = zoho.crm.getRecordById(moduleName, recordId);
+processName = rec.get("<PROCESS-FIELD>");          // e.g. "Process_Type"
+pharmacyNpi = rec.get("<PHARMACY-NPI-FIELD>");     // e.g. "Pharmacy_NPI"
+recDate = rec.get("<DATE-FIELD>").toDate();        // e.g. "Process_Date"
+month = recDate.toString("yyyy-MM");
+
+// ---- recompute this bucket from CRM (aggregate IN Zoho) -------------------
+criteria = "(<PROCESS-FIELD>:equals:" + processName + ")and(<PHARMACY-NPI-FIELD>:equals:" + pharmacyNpi + ")";
+rows = zoho.crm.searchRecords(moduleName, criteria, 1, 200);
+recordCount = 0;
+completed = 0;
+amount = 0.0;
+pharmacyName = "";
+state = "";
+for each r in rows
+{
+    d = r.get("<DATE-FIELD>").toDate();
+    if(d.toString("yyyy-MM") == month)
+    {
+        recordCount = recordCount + 1;
+        if(r.get("<STATUS-FIELD>") == "Completed")
+        {
+            completed = completed + 1;
+        }
+        amt = r.get("<AMOUNT-FIELD>");
+        if(amt != null)
+        {
+            amount = amount + amt.toDecimal();
+        }
+        pharmacyName = r.get("<PHARMACY-NAME-FIELD>");
+        state = r.get("<PHARMACY-STATE-FIELD>");
+    }
+}
+
+// ---- push ONLY the aggregate ---------------------------------------------
+row = Map();
+row.put("bucket_key", processName + "|" + pharmacyNpi + "|" + month);
+row.put("process", processName);
+row.put("pharmacy_name", pharmacyName);
+row.put("pharmacy_npi", pharmacyNpi.toString());
+row.put("state", state);
+row.put("month", month);
+row.put("record_count", recordCount);
+row.put("completed_count", completed);
+row.put("amount", amount);
+payload = Map();
+payload.put("secret", syncSecret);
+payload.put("rows", {row});
+resp = invokeurl
+[
+    url: syncUrl
+    type: POST
+    parameters: payload.toString()
+    headers: {"content-type":"application/json"}
+];
+info resp;
