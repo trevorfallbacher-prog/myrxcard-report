@@ -46,56 +46,72 @@ function cleanSvg(text) {
   return svg;
 }
 
+// premium backends are best-effort: any failure (bad key, unverified org,
+// rate limit, outage) falls through to the built-in Workers AI models so the
+// feature never goes fully dark
 async function makeIcon(env, prompt) {
+  let premiumErr = null;
   if (env.ANTHROPIC_API_KEY) {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 2500, system: ICON_SYS,
-        messages: [{ role: "user", content: `Icon: ${prompt}` }] }),
-    });
-    const out = await r.json();
-    if (!r.ok) throw new Error(out.error?.message || `Anthropic ${r.status}`);
-    return { svg: cleanSvg(out.content?.[0]?.text), via: "claude-sonnet-5" };
+    try {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 2500, system: ICON_SYS,
+          messages: [{ role: "user", content: `Icon: ${prompt}` }] }),
+      });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error?.message || `Anthropic ${r.status}`);
+      const svg = cleanSvg(out.content?.[0]?.text);
+      if (svg) return { svg, via: "claude-sonnet-5" };
+      throw new Error("no svg in reply");
+    } catch (e) { premiumErr = `anthropic: ${e.message}`; }
   }
   if (env.OPENAI_API_KEY) {
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${env.OPENAI_API_KEY}` },
-      body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: 2500,
-        messages: [{ role: "system", content: ICON_SYS }, { role: "user", content: `Icon: ${prompt}` }] }),
-    });
-    const out = await r.json();
-    if (!r.ok) throw new Error(out.error?.message || `OpenAI ${r.status}`);
-    return { svg: cleanSvg(out.choices?.[0]?.message?.content), via: "gpt-4o-mini" };
+    try {
+      const r = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${env.OPENAI_API_KEY}` },
+        body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: 2500,
+          messages: [{ role: "system", content: ICON_SYS }, { role: "user", content: `Icon: ${prompt}` }] }),
+      });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error?.message || `OpenAI ${r.status}`);
+      const svg = cleanSvg(out.choices?.[0]?.message?.content);
+      if (svg) return { svg, via: "gpt-4o-mini" };
+      throw new Error("no svg in reply");
+    } catch (e) { premiumErr = `openai: ${e.message}`; }
   }
   if (env.AI) {
     const res = await env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast", {
       messages: [{ role: "system", content: ICON_SYS }, { role: "user", content: `Icon: ${prompt}` }],
       max_tokens: 2500,
     });
-    return { svg: cleanSvg(res.response), via: "llama-3.3" };
+    const svg = cleanSvg(res.response);
+    if (svg) return { svg, via: "llama-3.3", note: premiumErr ? `fell back (${premiumErr})` : undefined };
   }
-  throw new Error("icon generation needs ANTHROPIC_API_KEY or OPENAI_API_KEY");
+  throw new Error(premiumErr || "icon generation needs ANTHROPIC_API_KEY or OPENAI_API_KEY");
 }
 
 async function makeImage(env, prompt, size) {
   const full = prompt + BRAND_SUFFIX;
+  let premiumErr = null;
   if (env.OPENAI_API_KEY) {
-    const r = await fetch("https://api.openai.com/v1/images/generations", {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${env.OPENAI_API_KEY}` },
-      body: JSON.stringify({ model: "gpt-image-1", prompt: full, size, quality: "medium", n: 1, background: "opaque" }),
-    });
-    const out = await r.json();
-    if (!r.ok) throw new Error(out.error?.message || `OpenAI ${r.status}`);
-    return { image: out.data[0].b64_json, type: "image/png", via: "gpt-image-1" };
+    try {
+      const r = await fetch("https://api.openai.com/v1/images/generations", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${env.OPENAI_API_KEY}` },
+        body: JSON.stringify({ model: "gpt-image-1", prompt: full, size, quality: "medium", n: 1, background: "opaque" }),
+      });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error?.message || `OpenAI ${r.status}`);
+      return { image: out.data[0].b64_json, type: "image/png", via: "gpt-image-1" };
+    } catch (e) { premiumErr = `openai: ${e.message}`; }
   }
   if (env.AI) {
     const res = await env.AI.run("@cf/black-forest-labs/flux-1-schnell", { prompt: full, steps: 8 });
-    return { image: res.image, type: "image/jpeg", via: "flux-1-schnell" };
+    return { image: res.image, type: "image/jpeg", via: "flux-1-schnell", note: premiumErr ? `fell back (${premiumErr})` : undefined };
   }
-  throw new Error("no image backend — set OPENAI_API_KEY or enable Workers AI");
+  throw new Error(premiumErr || "no image backend — set OPENAI_API_KEY or enable Workers AI");
 }
 
 export default {
