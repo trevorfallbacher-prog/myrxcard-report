@@ -670,6 +670,12 @@
   .dp-badge .b-pre, .dp-badge .b-cap { font-size: 7.5pt; letter-spacing: 0.15em; text-transform: uppercase; color: rgb(49,82,128); }
   .dp-badge .b-val { font-size: 22pt; font-weight: 700; color: rgb(49,82,128); line-height: 1.15; word-break: keep-all; }
   .dp-arrows-row .dp-badge { flex: 0 0 112pt; margin: 4pt 0; }
+  /* hover-to-insert line between blocks (zero net height so the page measures true) */
+  .dp-insert { display: flex; align-items: center; gap: 6pt; height: 14px; margin: -7px 0; position: relative; z-index: 4; opacity: 0; cursor: pointer; transition: opacity 0.12s; }
+  .dp-insert:hover { opacity: 1; }
+  .dp-insert i { flex: 1; height: 0; border-top: 1.5px dashed rgb(28,128,184); }
+  .dp-insert span { font: 700 11px/1 var(--mono); color: #fff; background: rgb(28,128,184); border-radius: 50%; width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; }
+  .dp-chrome .fsize { font-size: 10px; color: var(--ink-mute); align-self: center; padding: 0 2px; }
   /* join pick-mode: source outlined solid, click targets outline on hover */
   .dp-block.join-src { outline: 2px solid rgb(28,128,184); outline-offset: 4px; border-radius: 4px; }
   .dp-block.join-target { cursor: copy; }
@@ -2400,7 +2406,7 @@ function factPass(f, skipDim) {
   if (util.tfMonths && !util.tfMonths.has(f[0])) return false;
   if (util.tfRanges && !(f[12] && util.tfRanges.some(([a, b]) => f[12] >= a && f[12] <= b))) return false;
   if (util.tfDays && !(f[12] && util.tfDays.has(f[12]))) return false;
-  const F = util.f;
+  const F = util.f || {}; // slicers may not be initialized yet (crossover loads lazily)
   for (const dim in USLICER_DIMS) {
     if (dim === skipDim) continue;
     if (F[dim] && !F[dim].has(f[USLICER_DIMS[dim]])) return false;
@@ -3158,6 +3164,7 @@ function primStrength(s) {
 function ensureUtilData() {
   if (!util.loadPromise) util.loadPromise = loadUtil().then(() => {
     if (util.data && !util.merged) util.merged = mergedPeriod(util.data);
+    if (!util.f) utilFilterReset(); // crossover filters facts before any tab initialized the slicers
     if (state.tab === "search") renderAll();
   });
   return util.loadPromise;
@@ -3624,6 +3631,7 @@ const DOC_STYLES = { // manifest: tag → preview class (InDesign style of the s
   "Bullet": { css: "dp-bullet" },
 };
 const DRAFT_STYLES = Object.keys(DOC_STYLES);
+const DOC_SIZE = { "H1": 16, "Subheader": 9, "Subheader Callout": 9, "Subheader Callout 2": 9, "Paragraph": 9, "Callout Paragraph": 9, "Bullet": 9 }; // default pt per style
 const AVALON_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 182.2"><defs><style>.st0{fill:#abb9d4}.st1{fill:#315280}.st2{fill:#1c80b8}.st3{fill:#aac268}</style></defs><g><path class="st1" d="M292.9,127.8h-19.4l-6.5-17h-45.1l-6.6,17h-19.4l41.7-97.5h13.7l41.7,97.5ZM244.5,51.6l-17,44.3h34l-17-44.3Z"/><path class="st1" d="M274.3,58.3h18l18.7,49.5,18.7-49.5h18l-28.8,69.5h-15.6l-28.8-69.5Z"/><path class="st1" d="M420.2,58.3v69.5h-16.9v-12c-4,7.1-13.2,13.7-25.4,13.7-20.6,0-35.1-16.4-35.1-36.4s14.5-36.5,35.1-36.5,21.6,6.3,25.1,13.7v-12h17.1ZM381.4,115c11.6,0,21.3-8.5,21.3-21.9s-9.8-22-21.3-22-20.9,9.9-20.9,22,8.4,21.9,20.9,21.9Z"/><path class="st1" d="M428.9,127.8V26.1h17.6v101.7h-17.6Z"/><path class="st1" d="M452.2,93.2c0-19,14.2-36.5,38.2-36.5s38.2,17.6,38.2,36.5-14.2,36.4-38.2,36.4-38.2-17.6-38.2-36.4ZM469.4,93.2c0,11.3,7.5,21.7,21,21.7s21-10.4,21-21.7-7.5-21.9-21-21.9-21,10.6-21,21.9Z"/><path class="st1" d="M551.4,127.8h-17.6V58.3h17v11.8c3.2-8.1,12.3-13.5,23.1-13.5,16.7,0,26.1,12.3,26.1,29.5v41.7h-17.6v-38.7c0-9.9-4.5-17.1-14.9-17.1s-16.2,7-16.2,17v38.9Z"/></g><g><path class="st1" d="M321.2,145.2h4.9v10.9h13.1v-10.9h4.9v26.6h-4.9v-11.1h-13.1v11.1h-4.9v-26.6Z"/><path class="st1" d="M353,145.2h17.8v4.3h-12.8v6.6h12.5v4.3h-12.5v7h13v4.3h-17.9v-26.6Z"/><path class="st1" d="M402.9,171.8h-5.3l-1.8-4.6h-12.3l-1.8,4.6h-5.3l11.4-26.6h3.7l11.4,26.6ZM389.7,151l-4.6,12.1h9.3l-4.6-12.1Z"/><path class="st1" d="M409.7,145.2h4.9v22.3h12.1v4.3h-17.1v-26.6Z"/><path class="st1" d="M450.3,149.5h-8v22.3h-4.9v-22.3h-8v-4.3h21v4.3Z"/><path class="st1" d="M457.3,145.2h4.9v10.9h13.1v-10.9h4.9v26.6h-4.9v-11.1h-13.1v11.1h-4.9v-26.6Z"/><path class="st1" d="M515,153.9h-4.9c-1.4-2.9-4.1-4.9-8.2-4.9s-9.2,4.2-9.2,9.5,3.5,9.5,9.2,9.5,6.8-1.9,8.2-4.9h4.9c-1.6,5.1-6.4,9.2-13.1,9.2s-14.2-6.2-14.2-13.8,5.6-13.8,14.2-13.8,11.5,4.1,13.1,9.2Z"/><path class="st1" d="M545.8,171.8h-5.3l-1.8-4.6h-12.3l-1.8,4.6h-5.3l11.4-26.6h3.7l11.4,26.6ZM532.6,151l-4.6,12.1h9.3l-4.6-12.1Z"/><path class="st1" d="M561.6,164.1h-4.1v7.6h-4.9v-26.6h11.7c5.7,0,9.6,4.2,9.6,9.5s-2.5,7.7-6.4,9l7.6,8.1h-6.5l-7-7.6ZM563.7,159.9c3.3,0,5.4-2.3,5.4-5.2s-2.1-5.2-5.4-5.2h-6.1v10.4h6.1Z"/><path class="st1" d="M582.1,145.2h17.8v4.3h-12.8v6.6h12.5v4.3h-12.5v7h13v4.3h-17.9v-26.6Z"/></g><polygon class="st1" points="93.8 42.3 115.1 63.5 136.3 42.3 93.8 -.2 51.3 42.3 72.5 63.5 93.8 42.3"/><polygon class="st2" points="44.6 91.3 65.9 70 44.6 48.8 2.1 91.3 44.6 133.8 65.9 112.6 44.6 91.3"/><polygon class="st0" points="94.2 139.7 72.9 118.5 51.7 139.7 94.2 182.2 136.7 139.7 115.5 118.5 94.2 139.7"/><polygon class="st3" points="142.6 48.8 121.4 70 142.6 91.3 121.4 112.6 142.6 133.8 185.1 91.3 142.6 48.8"/></svg>`;
 const AVALON_LOGO_SRC = "data:image/svg+xml;utf8," + encodeURIComponent(AVALON_LOGO_SVG);
 const CE = 'contenteditable="plaintext-only"';
@@ -3633,7 +3641,7 @@ const CE = 'contenteditable="plaintext-only"';
 // own 612×792pt geometry IS 8.5×11in)
 function draftExportHTML() {
   const page = $("docpage").cloneNode(true);
-  page.querySelectorAll(".dp-chrome, .join-banner").forEach((el) => el.remove());
+  page.querySelectorAll(".dp-chrome, .join-banner, .dp-insert").forEach((el) => el.remove());
   for (const el of page.querySelectorAll("[contenteditable]")) el.removeAttribute("contenteditable");
   page.classList.remove("join-src", "join-target");
   page.style.zoom = "";
@@ -3721,8 +3729,9 @@ function blockInner(b, PH) {
     extraCtl = `<button type="button" data-d="imgbig" title="Wider">+w</button><button type="button" data-d="imgsmall" title="Narrower">&#8722;w</button>`;
   } else {
     const cls = (DOC_STYLES[b.style] || DOC_STYLES.Paragraph).css;
-    inner = `<div class="${cls}" ${CE} data-role="text" data-ph="${PH[b.style] || "Text…"}">${esc(b.text || "")}</div>`;
-    extraCtl = `<select data-d="style" title="Brand style">${DRAFT_STYLES.map((s) => `<option${s === b.style ? " selected" : ""}>${s}</option>`).join("")}</select>`;
+    inner = `<div class="${cls}" ${CE} data-role="text" data-ph="${PH[b.style] || "Text…"}"${b.size ? ` style="font-size:${b.size}pt"` : ""}>${esc(b.text || "")}</div>`;
+    extraCtl = `<select data-d="style" title="Brand style">${DRAFT_STYLES.map((s) => `<option${s === b.style ? " selected" : ""}>${s}</option>`).join("")}</select>` +
+      `<button type="button" data-d="fminus" title="Smaller text">A&#8722;</button><span class="fsize num">${b.size || DOC_SIZE[b.style] || 9}pt</span><button type="button" data-d="fplus" title="Bigger text">A+</button>`;
   }
   return { inner, extraCtl };
 }
@@ -3731,7 +3740,11 @@ function renderDraft() {
   const page = $("docpage");
   page.innerHTML = `<img class="dp-logo" src="${AVALON_LOGO_SRC}" alt="Avalon Healthcare">`;
   const PH = { "H1": "Document title…", "Paragraph": "Start typing…", "Subheader": "Section heading…", "Bullet": "Bullet point…" };
+  // hover-to-insert zones between blocks (zero net height, stripped on export)
+  const insertZone = (at) =>
+    `<div class="dp-insert" data-insat="${at}" contenteditable="false" title="Insert a block here"><i></i><span>+</span><i></i></div>`;
   docs.draft.forEach((b, i) => {
+    page.insertAdjacentHTML("beforeend", insertZone(i));
     const el = document.createElement("div");
     el.className = "dp-block";
     el.dataset.i = i;
@@ -3758,6 +3771,7 @@ function renderDraft() {
     else if (docs.joining != null) el.classList.add("join-target");
     page.appendChild(el);
   });
+  page.insertAdjacentHTML("beforeend", insertZone(docs.draft.length));
   if (docs.joining != null)
     page.insertAdjacentHTML("beforeend",
       `<div class="join-banner" contenteditable="false">JOINING — click the blocks to add as columns (${(docs.draft[docs.joining].columns || [0]).length}/3) <button type="button" id="join-done">DONE</button></div>`);
@@ -3828,7 +3842,7 @@ function serializeInto(out, b) {
     } else if (b.image) {
       if (b.image.data) out.push({ image: { data: b.image.data, type: b.image.type || "image/png", w: +b.image.w || 240 } });
     } else if ((b.text || "").trim()) {
-      out.push({ style: DOC_STYLES[b.style] ? b.style : "Paragraph", text: b.text.trim() });
+      out.push({ style: DOC_STYLES[b.style] ? b.style : "Paragraph", text: b.text.trim(), ...(b.size ? { fontSize: b.size } : {}) });
     }
   }
   return out;
@@ -3862,6 +3876,7 @@ function blocksToDraft(blocks) { // normalize incoming AI blocks into the model
     return {
       style: bulleted ? "Bullet" : (DOC_STYLES[b?.style] ? b.style : "Paragraph"),
       text: raw.replace(/^[•\-–]\s+/, ""),
+      ...(+b?.fontSize ? { size: +b.fontSize } : {}),
     };
   };
   docs.draft = (blocks || []).map(normOne)
@@ -3903,6 +3918,8 @@ async function runDocBuild() {
     if (blocks.length) body.blocks = blocks; // deterministic build from the page
     if (blocks.some((b) => b.columns)) // teach the design agent the columns wrapper
       body.instruction += ' Any block shaped {"columns":[…]} lays its child blocks out side by side as equal-width columns on one row (left to right), not stacked.';
+    if (blocks.some((b) => b.fontSize || (b.columns || []).some((c) => c.fontSize)))
+      body.instruction += ' A "fontSize" number on a text block is a point-size override for that block.';
     const f = $("doc-file").files[0];
     if (!blocks.length && f) { // brief-only build can still lean on a reference
       body.file = await fileToB64(f);
@@ -4350,6 +4367,16 @@ async function boot() {
   }
   $("docpage").addEventListener("click", (e) => {
     if (e.target.closest("#join-done")) { docs.joining = null; renderDraft(); return; }
+    const insEl = e.target.closest(".dp-insert");
+    if (insEl) {
+      if (docs.joining != null) return; // finish joining first
+      snapDraft();
+      const at = +insEl.dataset.insat;
+      docs.draft.splice(at, 0, { style: "Paragraph", text: "" });
+      renderDraft();
+      focusBlockText(at, false);
+      return;
+    }
     const btn = e.target.closest("button[data-d]");
     if (!btn) {
       // in join mode a plain click on another block adds it as a column
@@ -4388,6 +4415,11 @@ async function boot() {
     else if (d === "arbadge" && b.arrows) { if (b.badge) delete b.badge; else b.badge = { prefix: "Savings up to", value: "75%", caption: "" }; }
     else if (d === "imgbig" && b.image) b.image.w = Math.min((+b.image.w || 240) + 40, 540);
     else if (d === "imgsmall" && b.image) b.image.w = Math.max((+b.image.w || 240) - 40, 60);
+    else if ((d === "fplus" || d === "fminus") && !b.columns && !b.table && !b.iconCols && !b.callout && !b.tintBox && !b.arrows && !b.statBadge && !b.image) {
+      const dflt = DOC_SIZE[b.style] || 9;
+      b.size = Math.max(6, Math.min(36, (b.size || dflt) + (d === "fplus" ? 1 : -1)));
+      if (b.size === dflt) delete b.size;
+    }
     else return;
     renderDraft();
   });
@@ -4490,17 +4522,23 @@ async function boot() {
   // honest fonts: flag the preview if the kit didn't deliver Scandia — but the
   // Adobe kit loads late, so re-check before and after warning to avoid a
   // false alarm (and clear it if the font shows up)
-  if (document.fonts?.ready) document.fonts.ready.then(() => setTimeout(() => {
+  if (document.fonts?.ready) document.fonts.ready.then(() => setTimeout(async () => {
     try {
       const msg = "Scandia didn't load here — preview fonts are approximate; the InDesign build still uses the real thing.";
+      // check() alone lies: the docs page starts hidden, so the browser never
+      // fetches Scandia until it is shown. Force the fetch, then judge.
+      await Promise.race([
+        document.fonts.load('9pt "scandia-web"').then(() => document.fonts.load('700 16pt "scandia-web"')),
+        new Promise((r) => setTimeout(r, 6000)),
+      ]);
       if (!document.fonts.check('9pt "scandia-web"')) {
         $("doc-status").textContent = msg;
-        setTimeout(() => {
-          if (document.fonts.check('9pt "scandia-web"') && $("doc-status").textContent === msg) $("doc-status").textContent = "";
-        }, 4000);
+        const clear = () => { if (document.fonts.check('9pt "scandia-web"') && $("doc-status").textContent === msg) $("doc-status").textContent = ""; };
+        document.fonts.addEventListener("loadingdone", clear);
+        setTimeout(clear, 5000);
       }
     } catch {}
-  }, 2500));
+  }, 1500));
   $("draft-ai").addEventListener("click", async () => {
     const st = $("doc-status");
     const brief = $("doc-req").value.trim();
