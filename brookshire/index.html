@@ -2202,8 +2202,17 @@ function pharmDrillHTML(p, pi) {
 
 function pharmChartSVG(data, selSet) {
   if (!data.length) return `<div style="color:var(--ink-mute);padding:16px 0">Nothing collected under the current filters.</div>`;
-  const bw = 24, gap = 9, padL = 46, padR = 12, padTop = 22, padBot = 122, h = 320;
+  let bw = 24, gap = 9;
+  const padL = 46, padR = 12, padTop = 22, padBot = 122, h = 320;
   const n = data.length;
+  // few bars in a wide panel: widen bars to fill the available width
+  // (capped, and never narrower than the dense-chart defaults)
+  const availW = ($("pharm-chart").clientWidth || 0) - 2;
+  if (availW > padL + padR + n * bw + (n - 1) * gap) {
+    const unit = Math.min(96, Math.floor((availW - padL - padR) / n));
+    gap = Math.max(9, Math.round(unit * 0.25));
+    bw = Math.max(24, unit - gap);
+  }
   const w = padL + padR + n * bw + (n - 1) * gap;
   const chartH = h - padTop - padBot;
   const max = Math.max(...data.map((p) => Math.max(p.collected, 0) + (p.reversed || 0)), 1);
