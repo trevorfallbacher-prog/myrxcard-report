@@ -10,180 +10,183 @@
 // Client_Name and TPA are lookups → their .name is used. PHI fields on the
 // record (Member, Member_DOB, Email, Phone, Government_ID, …) are never read.
 
-syncUrl = "https://myrxcard-sync.trevorfallbacher.workers.dev";
-syncSecret = "PASTE-YOUR-SYNC-SECRET-HERE";
-
-rec = zoho.crm.getRecordById("Cases", recordId);
-
-cl = rec.get("Client_Name");
-clientName = "";
-clientId = "";
-if(cl != null)
+void automation.push_avalon_aggregate(int recordId)
 {
-	clientName = ifnull(cl.get("name"),"").toString();
-	clientId = ifnull(cl.get("id"),"").toString();
-}
-medName = ifnull(rec.get("Medication_Name"),"").toString().trim();
-month = ifnull(rec.get("Created_Time"),"").toString();
-if(clientId == "" || medName == "" || month.length() < 7)
-{
-	info "skipped: record missing client, medication, or created time";
-	return;
-}
-month = month.subString(0,7);
+	syncUrl = "https://myrxcard-sync.trevorfallbacher.workers.dev";
+	syncSecret = "PASTE-YOUR-SYNC-SECRET-HERE";
 
-// canonical channel names (Source is free text with many spellings)
-normSource = Map();
-normSource.put("medsdirect","MedsDirect");
-normSource.put("meds direct","MedsDirect");
-normSource.put("canada outreach","Canada Outreach");
-normSource.put("canada outreached","Canada Outreach");
-normSource.put("nash","NASH");
-normSource.put("rxfree4me","RxFree4me");
-normSource.put("global rx","GlobalRx");
-normSource.put("globalrx","GlobalRx");
-srcRaw = ifnull(rec.get("Source"),"").toString().trim();
-source = ifnull(normSource.get(srcRaw.toLowerCase()), if(srcRaw == "","Direct",srcRaw));
+	rec = zoho.crm.getRecordById("Cases", recordId);
 
-// pull every case for this client (paged), then filter to this bucket
-allRows = List();
-for each pg in {1,2,3,4,5}
-{
-	batch = zoho.crm.searchRecords("Cases","(Client_Name.id:equals:" + clientId + ")",pg,200);
-	allRows.addAll(batch);
-	if(batch.size() < 200)
+	cl = rec.get("Client_Name");
+	clientName = "";
+	clientId = "";
+	if(cl != null)
 	{
-		break;
+		clientName = ifnull(cl.get("name"),"").toString();
+		clientId = ifnull(cl.get("id"),"").toString();
 	}
-}
-
-cases = 0;
-openCases = 0;
-completedCases = 0;
-closedNoFill = 0;
-awp = 0.0;
-avalonFee = 0.0;
-aaPrice = 0.0;
-aaSavings = 0.0;
-avalonSavings = 0.0;
-myrx = 0.0;
-medsd = 0.0;
-rxfree = 0.0;
-globalrx = 0.0;
-canada = 0.0;
-ndc = "";
-medType = "";
-tpa = "";
-groupNumber = "";
-for each r in allRows
-{
-	rMed = ifnull(r.get("Medication_Name"),"").toString().trim();
-	rMonth = ifnull(r.get("Created_Time"),"").toString();
-	if(rMonth.length() >= 7)
+	medName = ifnull(rec.get("Medication_Name"),"").toString().trim();
+	month = ifnull(rec.get("Created_Time"),"").toString();
+	if(clientId == "" || medName == "" || month.length() < 7)
 	{
-		rMonth = rMonth.subString(0,7);
+		info "skipped: record missing client, medication, or created time";
+		return;
 	}
-	rSrcRaw = ifnull(r.get("Source"),"").toString().trim();
-	rSrc = ifnull(normSource.get(rSrcRaw.toLowerCase()), if(rSrcRaw == "","Direct",rSrcRaw));
-	if(rMed == medName && rMonth == month && rSrc == source)
-	{
-		cases = cases + 1;
-		status = ifnull(r.get("Status"),"").toString();
-		if(status.startsWith("Open") || status == "Targeted for Switch")
-		{
-			openCases = openCases + 1;
-		}
-		if(status == "Completed")
-		{
-			completedCases = completedCases + 1;
-		}
-		if(status.startsWith("Closed"))
-		{
-			closedNoFill = closedNoFill + 1;
-		}
-		if(r.get("AWP") != null)
-		{
-			awp = awp + r.get("AWP").toDecimal();
-		}
-		if(r.get("Avalon_Fee") != null)
-		{
-			avalonFee = avalonFee + r.get("Avalon_Fee").toDecimal();
-		}
-		if(r.get("AA_Price") != null)
-		{
-			aaPrice = aaPrice + r.get("AA_Price").toDecimal();
-		}
-		if(r.get("AA_Savings") != null)
-		{
-			aaSavings = aaSavings + r.get("AA_Savings").toDecimal();
-		}
-		if(r.get("Avalon_Savings") != null)
-		{
-			avalonSavings = avalonSavings + r.get("Avalon_Savings").toDecimal();
-		}
-		if(r.get("MyRXCard_Pricing") != null)
-		{
-			myrx = myrx + r.get("MyRXCard_Pricing").toDecimal();
-		}
-		if(r.get("MEDSDirect_Pricing") != null)
-		{
-			medsd = medsd + r.get("MEDSDirect_Pricing").toDecimal();
-		}
-		if(r.get("RxFree4me_Pricing") != null)
-		{
-			rxfree = rxfree + r.get("RxFree4me_Pricing").toDecimal();
-		}
-		if(r.get("GlobalRx_Pricing") != null)
-		{
-			globalrx = globalrx + r.get("GlobalRx_Pricing").toDecimal();
-		}
-		if(r.get("Canada_Pharmacy_Export_Pricing") != null)
-		{
-			canada = canada + r.get("Canada_Pharmacy_Export_Pricing").toDecimal();
-		}
-		ndc = ifnull(r.get("NDC"),"").toString().replaceAll("[^0-9]","");
-		medType = ifnull(r.get("Medication_Type"),"").toString();
-		tp = r.get("TPA");
-		if(tp != null)
-		{
-			tpa = ifnull(tp.get("name"),"").toString();
-		}
-		groupNumber = ifnull(r.get("Group_Number"),"").toString();
-	}
-}
+	month = month.subString(0,7);
 
-row = Map();
-row.put("bucket_key",clientName + "|" + source + "|" + medName + "|" + month);
-row.put("client_name",clientName);
-row.put("tpa",tpa);
-row.put("group_number",groupNumber);
-row.put("source",source);
-row.put("medication_name",medName);
-row.put("ndc",ndc);
-row.put("medication_type",medType);
-row.put("month",month);
-row.put("cases",cases);
-row.put("open_cases",openCases);
-row.put("completed_cases",completedCases);
-row.put("closed_no_fill_cases",closedNoFill);
-row.put("awp_total",awp);
-row.put("avalon_fee_total",avalonFee);
-row.put("aa_price_total",aaPrice);
-row.put("aa_savings_total",aaSavings);
-row.put("avalon_savings_total",avalonSavings);
-row.put("myrxcard_total",myrx);
-row.put("medsdirect_total",medsd);
-row.put("rxfree4me_total",rxfree);
-row.put("globalrx_total",globalrx);
-row.put("canada_total",canada);
-payload = Map();
-payload.put("secret",syncSecret);
-payload.put("rows",{row});
-resp = invokeurl
-[
-	url :syncUrl
-	type :POST
-	parameters:payload.toString()
-	headers:{"content-type":"application/json"}
-];
-info resp;
+	// canonical channel names (Source is free text with many spellings)
+	normSource = Map();
+	normSource.put("medsdirect","MedsDirect");
+	normSource.put("meds direct","MedsDirect");
+	normSource.put("canada outreach","Canada Outreach");
+	normSource.put("canada outreached","Canada Outreach");
+	normSource.put("nash","NASH");
+	normSource.put("rxfree4me","RxFree4me");
+	normSource.put("global rx","GlobalRx");
+	normSource.put("globalrx","GlobalRx");
+	srcRaw = ifnull(rec.get("Source"),"").toString().trim();
+	source = ifnull(normSource.get(srcRaw.toLowerCase()), if(srcRaw == "","Direct",srcRaw));
+
+	// pull every case for this client (paged), then filter to this bucket
+	allRows = List();
+	for each pg in {1,2,3,4,5}
+	{
+		batch = zoho.crm.searchRecords("Cases","(Client_Name.id:equals:" + clientId + ")",pg,200);
+		allRows.addAll(batch);
+		if(batch.size() < 200)
+		{
+			break;
+		}
+	}
+
+	cases = 0;
+	openCases = 0;
+	completedCases = 0;
+	closedNoFill = 0;
+	awp = 0.0;
+	avalonFee = 0.0;
+	aaPrice = 0.0;
+	aaSavings = 0.0;
+	avalonSavings = 0.0;
+	myrx = 0.0;
+	medsd = 0.0;
+	rxfree = 0.0;
+	globalrx = 0.0;
+	canada = 0.0;
+	ndc = "";
+	medType = "";
+	tpa = "";
+	groupNumber = "";
+	for each r in allRows
+	{
+		rMed = ifnull(r.get("Medication_Name"),"").toString().trim();
+		rMonth = ifnull(r.get("Created_Time"),"").toString();
+		if(rMonth.length() >= 7)
+		{
+			rMonth = rMonth.subString(0,7);
+		}
+		rSrcRaw = ifnull(r.get("Source"),"").toString().trim();
+		rSrc = ifnull(normSource.get(rSrcRaw.toLowerCase()), if(rSrcRaw == "","Direct",rSrcRaw));
+		if(rMed == medName && rMonth == month && rSrc == source)
+		{
+			cases = cases + 1;
+			status = ifnull(r.get("Status"),"").toString();
+			if(status.startsWith("Open") || status == "Targeted for Switch")
+			{
+				openCases = openCases + 1;
+			}
+			if(status == "Completed")
+			{
+				completedCases = completedCases + 1;
+			}
+			if(status.startsWith("Closed"))
+			{
+				closedNoFill = closedNoFill + 1;
+			}
+			if(r.get("AWP") != null)
+			{
+				awp = awp + r.get("AWP").toDecimal();
+			}
+			if(r.get("Avalon_Fee") != null)
+			{
+				avalonFee = avalonFee + r.get("Avalon_Fee").toDecimal();
+			}
+			if(r.get("AA_Price") != null)
+			{
+				aaPrice = aaPrice + r.get("AA_Price").toDecimal();
+			}
+			if(r.get("AA_Savings") != null)
+			{
+				aaSavings = aaSavings + r.get("AA_Savings").toDecimal();
+			}
+			if(r.get("Avalon_Savings") != null)
+			{
+				avalonSavings = avalonSavings + r.get("Avalon_Savings").toDecimal();
+			}
+			if(r.get("MyRXCard_Pricing") != null)
+			{
+				myrx = myrx + r.get("MyRXCard_Pricing").toDecimal();
+			}
+			if(r.get("MEDSDirect_Pricing") != null)
+			{
+				medsd = medsd + r.get("MEDSDirect_Pricing").toDecimal();
+			}
+			if(r.get("RxFree4me_Pricing") != null)
+			{
+				rxfree = rxfree + r.get("RxFree4me_Pricing").toDecimal();
+			}
+			if(r.get("GlobalRx_Pricing") != null)
+			{
+				globalrx = globalrx + r.get("GlobalRx_Pricing").toDecimal();
+			}
+			if(r.get("Canada_Pharmacy_Export_Pricing") != null)
+			{
+				canada = canada + r.get("Canada_Pharmacy_Export_Pricing").toDecimal();
+			}
+			ndc = ifnull(r.get("NDC"),"").toString().replaceAll("[^0-9]","");
+			medType = ifnull(r.get("Medication_Type"),"").toString();
+			tp = r.get("TPA");
+			if(tp != null)
+			{
+				tpa = ifnull(tp.get("name"),"").toString();
+			}
+			groupNumber = ifnull(r.get("Group_Number"),"").toString();
+		}
+	}
+
+	row = Map();
+	row.put("bucket_key",clientName + "|" + source + "|" + medName + "|" + month);
+	row.put("client_name",clientName);
+	row.put("tpa",tpa);
+	row.put("group_number",groupNumber);
+	row.put("source",source);
+	row.put("medication_name",medName);
+	row.put("ndc",ndc);
+	row.put("medication_type",medType);
+	row.put("month",month);
+	row.put("cases",cases);
+	row.put("open_cases",openCases);
+	row.put("completed_cases",completedCases);
+	row.put("closed_no_fill_cases",closedNoFill);
+	row.put("awp_total",awp);
+	row.put("avalon_fee_total",avalonFee);
+	row.put("aa_price_total",aaPrice);
+	row.put("aa_savings_total",aaSavings);
+	row.put("avalon_savings_total",avalonSavings);
+	row.put("myrxcard_total",myrx);
+	row.put("medsdirect_total",medsd);
+	row.put("rxfree4me_total",rxfree);
+	row.put("globalrx_total",globalrx);
+	row.put("canada_total",canada);
+	payload = Map();
+	payload.put("secret",syncSecret);
+	payload.put("rows",{row});
+	resp = invokeurl
+	[
+		url :syncUrl
+		type :POST
+		parameters:payload.toString()
+		headers:{"content-type":"application/json"}
+	];
+	info resp;
+}
