@@ -715,6 +715,13 @@
   .dp-tintbox .dp-paragraph { margin: 0; }
   .dp-iconcols { display: flex; gap: 14pt; margin: 8pt 0 12pt; }
   .dp-iconcols .dp-col { flex: 1; min-width: 0; text-align: center; }
+  .dp-iconcols .ic-img { width: 42pt; height: 42pt; display: block; margin: 0 auto 5pt; cursor: pointer; }
+  .dp-iconcols .ic-slot {
+    width: 42pt; height: 42pt; display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 5pt; border: 1.5pt dashed rgb(28,128,184); border-radius: 50%;
+    color: rgb(28,128,184); font-size: 14pt; cursor: pointer; user-select: none;
+  }
+  .dp-iconcols .ic-slot.err { border-color: #C94F4E; color: #C94F4E; }
   .dp-iconcols .dp-col .dp-subheader-callout { margin-top: 0; }
   /* pinned footer: centered 7pt tracked caps + page number bottom-right */
   .dp-footer { position: absolute; left: 40pt; right: 40pt; bottom: 18pt; }
@@ -3570,7 +3577,11 @@ async function imageApi(kind, promptText) {
   if (!resp.ok || out.error) throw new Error(out.error || `HTTP ${resp.status}`);
   return out;
 }
-// resolve every pending {aiVisual} placeholder in the draft, one at a time
+// resolve every pending AI visual in the draft, one at a time: standalone
+// {aiVisual} blocks and iconCols columns carrying an iconPrompt
+const visualResult = (out) => out.svg
+  ? { data: btoa(unescape(encodeURIComponent(out.svg))), type: "image/svg+xml" }
+  : { data: out.image, type: out.type || "image/png" };
 let aiVisBusy = false;
 async function resolveAiVisuals() {
   if (aiVisBusy) return;
@@ -3578,27 +3589,36 @@ async function resolveAiVisuals() {
   const st = $("doc-status");
   try {
     for (;;) {
-      let holder = null, idx = -1;
+      let job = null;
       const scan = (arr) => {
         for (let i = 0; i < arr.length; i++) {
           const b = arr[i];
-          if (b.aiVisual && b.aiVisual.status !== "error") { holder = arr; idx = i; return true; }
+          if (b.aiVisual && b.aiVisual.status !== "error") {
+            const v = b.aiVisual;
+            job = { kind: v.kind, prompt: v.prompt,
+              apply: (out) => { arr[i] = { image: { ...visualResult(out), w: v.kind === "icon" ? (out.svg ? 90 : 120) : 300 } }; },
+              fail: (msg) => { v.status = "error"; v.error = msg; } };
+            return true;
+          }
+          if (b.iconCols) for (const c of b.iconCols) {
+            if (c.iconPrompt && !c.icon && c.iconStatus !== "error") {
+              job = { kind: "icon", prompt: c.iconPrompt,
+                apply: (out) => { c.icon = visualResult(out); },
+                fail: (msg) => { c.iconStatus = "error"; c.iconError = msg; } };
+              return true;
+            }
+          }
           if (b.columns && scan(b.columns)) return true;
         }
         return false;
       };
       if (!scan(docs.draft)) break;
-      const v = holder[idx].aiVisual;
-      st.textContent = `generating ${v.kind === "icon" ? "icon" : "image"}: ${v.prompt.slice(0, 60)}…`;
+      st.textContent = `generating ${job.kind === "icon" ? "icon" : "image"}: ${job.prompt.slice(0, 60)}…`;
       try {
-        const out = await imageApi(v.kind, v.prompt);
-        holder[idx] = out.svg
-          ? { image: { data: btoa(unescape(encodeURIComponent(out.svg))), type: "image/svg+xml", w: v.kind === "icon" ? 90 : 300 } }
-          : { image: { data: out.image, type: out.type || "image/png", w: v.kind === "icon" ? 120 : 300 } };
+        job.apply(await imageApi(job.kind, job.prompt));
         st.textContent = "";
       } catch (e) {
-        v.status = "error";
-        v.error = e.message;
+        job.fail(e.message);
         st.textContent = "visual failed: " + e.message;
       }
       renderDraft();
@@ -3768,9 +3788,14 @@ function blockInner(b, PH) {
         `<td ${CE} data-role="td" data-r="${ri}" data-c="${c}">${esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
     extraCtl = `<button type="button" data-d="row" title="Add row">+row</button><button type="button" data-d="delrow" title="Remove last row">&#8722;row</button><button type="button" data-d="col" title="Add column">+col</button><button type="button" data-d="delcol" title="Remove last column">&#8722;col</button>`;
   } else if (b.iconCols) {
+    const iconSlot = (c, ci) => {
+      if (c.icon) return `<img class="ic-img" data-icslot="${ci}" src="data:${esc(c.icon.type || "image/svg+xml")};base64,${c.icon.data}" title="Click to redo this icon" alt="">`;
+      if (c.iconPrompt && c.iconStatus !== "error") return `<span class="ic-slot busy" data-icslot="${ci}" title="${esc(c.iconPrompt)}">…</span>`;
+      return `<span class="ic-slot${c.iconStatus === "error" ? " err" : ""}" data-icslot="${ci}" title="${c.iconStatus === "error" ? esc("failed: " + (c.iconError || "") + " — click to retry") : "Click to add an AI icon"}">+</span>`;
+    };
     inner = `<div class="dp-iconcols">${b.iconCols.map((c, ci) =>
-      `<div class="dp-col"><div class="dp-subheader-callout" ${CE} data-role="ict" data-c="${ci}" data-ph="TITLE…">${esc(c.title)}</div><div class="dp-paragraph" ${CE} data-role="icx" data-c="${ci}" data-ph="Column text…">${esc(c.text)}</div></div>`).join("")}</div>`;
-    extraCtl = `<button type="button" data-d="col" title="Add column (max 4)">+col</button><button type="button" data-d="delcol" title="Remove last column (min 2)">&#8722;col</button>`;
+      `<div class="dp-col">${iconSlot(c, ci)}<div class="dp-subheader-callout" ${CE} data-role="ict" data-c="${ci}" data-ph="TITLE…">${esc(c.title)}</div><div class="dp-paragraph" ${CE} data-role="icx" data-c="${ci}" data-ph="Column text…">${esc(c.text)}</div></div>`).join("")}</div>`;
+    extraCtl = `<button type="button" data-d="aiicons" title="Generate a brand icon for every column from its title">AI icons</button><button type="button" data-d="col" title="Add column (max 4)">+col</button><button type="button" data-d="delcol" title="Remove last column (min 2)">&#8722;col</button>`;
   } else if (b.callout) {
     inner = `<div class="dp-callout"><div class="dp-subheader-callout-2" ${CE} data-role="co" data-ph="SECTION NAME…">${esc(b.callout.text)}</div></div>`;
   } else if (b.tintBox) {
@@ -3887,7 +3912,9 @@ function serializeInto(out, b) {
       const rows = b.table.rows.map((r) => r.map((c) => c.trim())).filter((r) => r.some(Boolean));
       if (headers.some(Boolean)) out.push({ table: { headers, rows } });
     } else if (b.iconCols) {
-      const cols = b.iconCols.map((c) => ({ title: c.title.trim(), text: c.text.trim() })).filter((c) => c.title || c.text);
+      const cols = b.iconCols.map((c) => ({ title: c.title.trim(), text: c.text.trim(),
+        ...(c.icon && c.icon.data ? { icon: { data: c.icon.data, type: c.icon.type || "image/svg+xml" } } : {}) }))
+        .filter((c) => c.title || c.text);
       if (cols.length >= 2) out.push({ iconCols: cols });
     } else if (b.callout) {
       if (b.callout.text.trim()) out.push({ callout: { text: b.callout.text.trim() } });
@@ -3935,7 +3962,11 @@ function blocksToDraft(blocks) { // normalize incoming AI blocks into the model
       headers: (b.table.headers || []).map((h) => String(h ?? "")),
       rows: (b.table.rows || []).map((r) => (r || []).map((c) => String(c ?? ""))),
     } };
-    if (b && Array.isArray(b.iconCols)) return { iconCols: b.iconCols.slice(0, 4).map((c) => ({ title: String(c?.title || ""), text: String(c?.text || "") })) };
+    if (b && Array.isArray(b.iconCols)) return { iconCols: b.iconCols.slice(0, 4).map((c) => ({
+      title: String(c?.title || ""), text: String(c?.text || ""),
+      ...(c?.icon?.data ? { icon: { data: String(c.icon.data), type: String(c.icon.type || "image/svg+xml") } } : {}),
+      ...(String(c?.iconPrompt || "").trim() ? { iconPrompt: String(c.iconPrompt).trim() } : {}),
+    })) };
     if (b && b.callout) return { callout: { text: String(b.callout.text || "") } };
     if (b && b.tintBox) return { tintBox: { title: String(b.tintBox.title || ""), text: String(b.tintBox.text || "") } };
     if (b && Array.isArray(b.arrows)) {
@@ -3994,6 +4025,8 @@ async function runDocBuild() {
       body.instruction += ' Any block shaped {"columns":[…]} lays its child blocks out side by side as equal-width columns on one row (left to right), not stacked.';
     if (blocks.some((b) => b.fontSize || (b.columns || []).some((c) => c.fontSize)))
       body.instruction += ' A "fontSize" number on a text block is a point-size override for that block.';
+    if (blocks.some((b) => (b.iconCols || []).some((c) => c.icon) || (b.columns || []).some((cb) => (cb.iconCols || []).some((c) => c.icon))))
+      body.instruction += ' An iconCols column with an "icon" image (base64) places that icon centered above the column title.';
     const f = $("doc-file").files[0];
     if (!blocks.length && f) { // brief-only build can still lean on a reference
       body.file = await fileToB64(f);
@@ -4441,6 +4474,26 @@ async function boot() {
   }
   $("docpage").addEventListener("click", (e) => {
     if (e.target.closest("#join-done")) { docs.joining = null; renderDraft(); return; }
+    // icon slot on an iconCols column: click to (re)generate that column's icon
+    const slot = e.target.closest("[data-icslot]");
+    if (slot && docs.joining == null) {
+      const bi = +slot.closest(".dp-block").dataset.i;
+      const blk = docs.draft[bi];
+      const cw = slot.closest("[data-colc]");
+      const target = blk && blk.columns && cw ? blk.columns[+cw.dataset.colc] : blk;
+      const c = target && target.iconCols && target.iconCols[+slot.dataset.icslot];
+      if (!c) return;
+      const p = prompt("Describe this column's icon (brand colors, flat):", c.iconPrompt || c.title || "");
+      if (!p || !p.trim()) return;
+      snapDraft();
+      c.iconPrompt = p.trim();
+      delete c.icon;
+      delete c.iconStatus;
+      delete c.iconError;
+      renderDraft();
+      resolveAiVisuals();
+      return;
+    }
     const insEl = e.target.closest(".dp-insert");
     if (insEl) {
       if (docs.joining != null) return; // finish joining first
@@ -4492,6 +4545,14 @@ async function boot() {
     else if (d === "airetry" && b.aiVisual) {
       delete b.aiVisual.status;
       delete b.aiVisual.error;
+      setTimeout(resolveAiVisuals, 0);
+    }
+    else if (d === "aiicons" && b.iconCols) {
+      for (const c of b.iconCols) {
+        if (c.icon || c.iconPrompt) continue; // keep what's already there
+        const hint = (c.title || "").trim() || (c.text || "").trim();
+        if (hint) c.iconPrompt = hint;
+      }
       setTimeout(resolveAiVisuals, 0);
     }
     else if ((d === "fplus" || d === "fminus") && !b.columns && !b.table && !b.iconCols && !b.callout && !b.tintBox && !b.arrows && !b.statBadge && !b.image) {
@@ -4640,7 +4701,7 @@ async function boot() {
     try {
       st.textContent = "analyzing & drafting…";
       const payload = { instruction: (brief || "Recreate this reference document as our branded version — keep its content, use our styles and objects.") +
-        ' Where a custom visual would strengthen the page, you may also include blocks {"aiIcon":{"prompt":"short description"}} for a flat brand-palette icon or {"aiImage":{"prompt":"description"}} for a brand-styled illustration — place them where they belong; they are generated automatically after drafting.' };
+        ' Where a custom visual would strengthen the page, you may also include blocks {"aiIcon":{"prompt":"short description"}} for a flat brand-palette icon or {"aiImage":{"prompt":"description"}} for a brand-styled illustration — place them where they belong; they are generated automatically after drafting. In "iconCols" blocks, give each column an "iconPrompt" string describing a simple icon for that column.' };
       if (f) { payload.file = await fileToB64(f); payload.fileType = f.type || "application/pdf"; }
       else if (tplSlug) {
         if (!docs.template || docs.template.slug !== tplSlug) docs.template = { slug: tplSlug, ...(await docsApi("/templates/get", { slug: tplSlug })) };

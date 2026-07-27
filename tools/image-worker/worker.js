@@ -12,9 +12,12 @@
 //
 // Secrets: TEAM_PW (required — use the report gate password),
 //          OPENAI_API_KEY / ANTHROPIC_API_KEY (optional, better quality).
+// NOTE: on this account a fresh `wrangler deploy` has been observed to leave
+// the new version without its secret bindings — after deploying worker code,
+// re-run `wrangler secret put TEAM_PW` (any secret put re-binds them all).
 
 const BRAND = "navy #315280, teal #1c80b8, green #abc269, soft blue-gray #abbad4";
-const BRAND_SUFFIX = ` — flat modern healthcare illustration, brand palette ${BRAND}, clean white background, no embedded text`;
+const BRAND_SUFFIX = ` — flat modern healthcare illustration, brand palette ${BRAND}, on a solid pure white #FFFFFF background (no tint, no gradient, no scene behind), no embedded text`;
 const ICON_SYS =
   "You draw flat vector icons as standalone SVG markup. Reply with ONLY an <svg> element, no prose, no code fences. " +
   `Rules: viewBox="0 0 100 100"; fills ONLY from this palette: ${BRAND}, plus white; ` +
@@ -82,7 +85,7 @@ async function makeImage(env, prompt, size) {
     const r = await fetch("https://api.openai.com/v1/images/generations", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${env.OPENAI_API_KEY}` },
-      body: JSON.stringify({ model: "gpt-image-1", prompt: full, size, quality: "medium", n: 1 }),
+      body: JSON.stringify({ model: "gpt-image-1", prompt: full, size, quality: "medium", n: 1, background: "opaque" }),
     });
     const out = await r.json();
     if (!r.ok) throw new Error(out.error?.message || `OpenAI ${r.status}`);
