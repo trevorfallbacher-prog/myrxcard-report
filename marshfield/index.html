@@ -1279,7 +1279,8 @@
         <div class="dp-add" style="position:relative">
           <button class="iconbtn" data-dpadd="text" type="button">+ TEXT</button>
           <button class="iconbtn" data-dpadd="table" type="button">+ TABLE</button>
-          <button class="iconbtn" data-dpadd="iconCols" type="button">+ COLUMNS</button>
+          <button class="iconbtn" data-dpadd="tableCols" type="button" title="Two tables side by side (add a third with join)">+ TABLE COLUMNS</button>
+          <button class="iconbtn" data-dpadd="iconCols" type="button" title="Feature columns: an icon over a title and a line of text">+ ICON COLUMNS</button>
           <button class="iconbtn" data-dpadd="callout" type="button">+ SECTION BANNER</button>
           <button class="iconbtn" data-dpadd="tintBox" type="button">+ CALLOUT BOX</button>
           <button class="iconbtn" data-dpadd="arrows" type="button">+ ARROW LIST</button>
@@ -4596,6 +4597,10 @@ async function boot() {
     snapDraft();
     docs.draft.push(
       k === "table" ? { table: { headers: ["Column A", "Column B"], rows: [["", ""]] } }
+      : k === "tableCols" ? { columns: [
+          { table: { headers: ["REQUIRED"], rows: [[""], [""], [""]] } },
+          { table: { headers: ["PREFERRED"], rows: [[""], [""], [""]] } },
+        ] }
       : k === "iconCols" ? { iconCols: [{ title: "", text: "" }, { title: "", text: "" }, { title: "", text: "" }] }
       : k === "callout" ? { callout: { text: "" } }
       : k === "tintBox" ? { tintBox: { title: "", text: "" } }
@@ -4701,7 +4706,8 @@ async function boot() {
     try {
       st.textContent = "analyzing & drafting…";
       const payload = { instruction: (brief || "Recreate this reference document as our branded version — keep its content, use our styles and objects.") +
-        ' Where a custom visual would strengthen the page, you may also include blocks {"aiIcon":{"prompt":"short description"}} for a flat brand-palette icon or {"aiImage":{"prompt":"description"}} for a brand-styled illustration — place them where they belong; they are generated automatically after drafting. In "iconCols" blocks, give each column an "iconPrompt" string describing a simple icon for that column.' };
+        ' Where a custom visual would strengthen the page, you may also include blocks {"aiIcon":{"prompt":"short description"}} for a flat brand-palette icon or {"aiImage":{"prompt":"description"}} for a brand-styled illustration — place them where they belong; they are generated automatically after drafting.' +
+        ' Column semantics — do not mix these up: "iconCols" is ONLY for short marketing feature columns (an icon above a 2-4 word title and one short line each; give each an "iconPrompt"). For field lists, requirement lists, or any tabular data side by side, use the layout wrapper {"columns":[{"table":{…}},{"table":{…}}]} — never iconCols.' };
       if (f) { payload.file = await fileToB64(f); payload.fileType = f.type || "application/pdf"; }
       else if (tplSlug) {
         if (!docs.template || docs.template.slug !== tplSlug) docs.template = { slug: tplSlug, ...(await docsApi("/templates/get", { slug: tplSlug })) };
