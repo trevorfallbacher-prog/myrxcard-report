@@ -1294,6 +1294,7 @@
         </div>
         <div class="docs-actions">
           <button class="iconbtn" id="doc-run" type="button">BUILD IN INDESIGN</button>
+          <button class="iconbtn" id="doc-word" type="button" title="Download this page as a Word document (.doc)">EXPORT WORD</button>
           <button class="iconbtn" id="doc-save-template" type="button" title="Save this page as a team template">SAVE AS TEMPLATE</button>
           <span class="docstatus" id="doc-status"></span>
         </div>
@@ -3745,6 +3746,129 @@ function draftExportHTML() {
     .docpage [data-ph]:empty::before { content: "" !important; }
   </style></head><body>${page.outerHTML}</body></html>`;
 }
+/* ---- export to Word: MIME-HTML (.doc) with images embedded as parts ---- */
+// rasterize an svg data URI to PNG base64 (Word's HTML import can't do SVG)
+function svgToPngB64(dataUri, wPt) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const w = Math.max(Math.round(wPt * 96 / 72) * 2, 80); // 2x for crispness
+        const ratio = img.naturalWidth > 0 ? img.naturalHeight / img.naturalWidth : 1;
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = Math.max(Math.round(w * (ratio || 1)), 10);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/png").split(",")[1]);
+      } catch (e) { reject(e); }
+    };
+    img.onerror = () => reject(new Error("could not rasterize an SVG for Word"));
+    img.src = dataUri;
+  });
+}
+async function draftToWordHtml() {
+  const parts = [];
+  const NAVY = "#315280", TEAL = "#1c80b8";
+  const addImg = async (image, wPt) => {
+    let data = image.data, type = image.type || "image/png";
+    if (/svg/.test(type)) {
+      data = await svgToPngB64(`data:${type};base64,${image.data}`, wPt);
+      type = "image/png";
+    }
+    const name = `image${parts.length + 1}.png`;
+    parts.push({ name, type, data });
+    return `<img src="file:///C:/mrx/${name}" width="${Math.round(wPt * 96 / 72)}" style="width:${wPt}pt">`;
+  };
+  const text = (t) => esc(t || "").replace(/\n/g, "<br>");
+  const heads = {
+    "H1": (b) => `<p style="font-size:${b.size || 16}pt;font-weight:bold;color:${NAVY};margin:0 0 6pt">${text(b.text)}</p>`,
+    "Subheader": (b) => `<p style="font-size:${b.size || 9}pt;letter-spacing:2pt;text-transform:uppercase;margin:10pt 0 4pt">${text(b.text)}</p>`,
+    "Subheader Callout": (b) => `<p style="font-size:${b.size || 9}pt;letter-spacing:2pt;text-transform:uppercase;color:${NAVY};margin:10pt 0 4pt">${text(b.text)}</p>`,
+    "Subheader Callout 2": (b) => `<p style="font-size:${b.size || 9}pt;letter-spacing:2pt;text-transform:uppercase;color:${NAVY};margin:10pt 0 4pt">${text(b.text)}</p>`,
+    "Bullet": (b) => `<p style="font-size:${b.size || 9}pt;margin:0 0 3pt 12pt;text-indent:-12pt"><span style="color:${TEAL}">&#9656;</span> ${text(b.text)}</p>`,
+  };
+  const tableHtml = (t) =>
+    `<table width="100%" cellspacing="0" cellpadding="4" style="border-collapse:collapse;margin:0 0 10pt"><tr>${
+      t.headers.map((h) => `<td style="background:${NAVY};color:#fff;font-weight:bold;font-size:8.5pt;letter-spacing:1pt;border:1pt solid ${NAVY}">${esc(h).toUpperCase()}</td>`).join("")}</tr>${
+      t.rows.map((r) => `<tr>${r.map((c) => `<td style="font-size:9pt;border-bottom:0.5pt solid #B9CEDD;border-left:0.5pt solid #E6EEF4;border-right:0.5pt solid #E6EEF4">${esc(c)}</td>`).join("")}</tr>`).join("")}</table>`;
+  const badgeHtmlW = (s) =>
+    `<table align="center" cellspacing="0" cellpadding="8" style="border:1pt solid ${NAVY};margin:10pt auto"><tr><td align="center" style="width:110pt">` +
+    `<p style="font-size:7.5pt;letter-spacing:2pt;text-transform:uppercase;color:${NAVY};margin:0">${esc(s.prefix || "")}</p>` +
+    `<p style="font-size:20pt;font-weight:bold;color:${NAVY};margin:2pt 0">${esc(s.value || "")}</p>` +
+    `<p style="font-size:7.5pt;letter-spacing:2pt;text-transform:uppercase;color:${NAVY};margin:0">${esc(s.caption || "")}</p>` +
+    `</td></tr></table>`;
+  const renderBlock = async (b) => {
+    if (!b || b.aiVisual) return "";
+    if (b.columns) {
+      const cells = [];
+      for (const cb of b.columns) cells.push(await renderBlock(cb));
+      const wPct = Math.floor(100 / cells.length);
+      return `<table width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 10pt"><tr>${
+        cells.map((c, i) => `<td width="${wPct}%" valign="top" style="${i ? "padding-left:8pt" : "padding-right:8pt"}">${c}</td>`).join("")}</tr></table>`;
+    }
+    if (b.table) return tableHtml(b.table);
+    if (b.iconCols) {
+      const cells = [];
+      for (const c of b.iconCols) {
+        const ic = c.icon && c.icon.data ? (await addImg(c.icon, 42)) + "<br>" : "";
+        cells.push(`<td width="${Math.floor(100 / b.iconCols.length)}%" align="center" valign="top" style="padding:0 6pt">` +
+          `${ic}<p style="font-size:9pt;letter-spacing:2pt;text-transform:uppercase;color:${NAVY};margin:4pt 0 3pt">${esc(c.title)}</p>` +
+          `<p style="font-size:9pt;margin:0">${esc(c.text)}</p></td>`);
+      }
+      return `<table width="100%" cellspacing="0" cellpadding="0" style="margin:8pt 0 10pt"><tr>${cells.join("")}</tr></table>`;
+    }
+    if (b.callout) return `<table width="100%" cellspacing="0" cellpadding="6" style="margin:8pt 0 10pt"><tr><td align="center" style="background:${NAVY};color:#fff;font-size:10pt;letter-spacing:2pt;text-transform:uppercase">${esc(b.callout.text)}</td></tr></table>`;
+    if (b.tintBox) return `<table width="100%" cellspacing="0" cellpadding="8" style="margin:8pt 0 10pt"><tr><td style="background:#D9E8FF">` +
+      (b.tintBox.title === null || !(b.tintBox.title || "").trim() ? "" : `<p style="font-size:9pt;letter-spacing:2pt;text-transform:uppercase;color:${NAVY};margin:0 0 3pt">${esc(b.tintBox.title)}</p>`) +
+      `<p style="font-size:9pt;margin:0">${text(b.tintBox.text)}</p></td></tr></table>`;
+    if (b.arrows) {
+      let s = b.arrows.map((a) => `<p style="font-size:9pt;margin:0 0 6pt 14pt;text-indent:-14pt"><span style="color:${TEAL};font-weight:bold">&#9656;</span> ` +
+        ((a.lead || "").trim() ? `<b style="color:${TEAL}">${esc(a.lead)}:</b> ` : "") + `${text(a.text)}</p>`).join("");
+      if (b.badge) s += badgeHtmlW(b.badge);
+      return s;
+    }
+    if (b.statBadge) return badgeHtmlW(b.statBadge);
+    if (b.image && b.image.data) return `<p align="center" style="margin:8pt 0 10pt">${await addImg(b.image, +b.image.w || 240)}</p>`;
+    if ((b.text || "").trim() || b.style) {
+      const fn = heads[b.style];
+      if (fn) return fn(b);
+      return `<p style="font-size:${b.size || 9}pt;margin:0 0 6pt">${text(b.text)}</p>`;
+    }
+    return "";
+  };
+  const logoImg = await addImg({ data: btoa(unescape(encodeURIComponent(AVALON_LOGO_SVG))), type: "image/svg+xml" }, 132);
+  let body = `<p align="right" style="margin:0 0 14pt">${logoImg}</p>`;
+  for (const b of docs.draft) body += await renderBlock(b);
+  body += `<p align="center" style="font-size:7pt;letter-spacing:2pt;text-transform:uppercase;color:${NAVY};margin:18pt 0 0">${esc(docs.footer)}</p>`;
+  const title = ((docs.draft.find((b) => b.style === "H1" && (b.text || "").trim()) || {}).text || "Avalon Document").trim();
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${esc(title)}</title>` +
+    `<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->` +
+    `<style>@page WordSection1 { size: 8.5in 11.0in; margin: 0.5in 0.5in 0.6in 0.5in; } div.WordSection1 { page: WordSection1; } body { font-family: "Century Gothic", Arial, sans-serif; }</style>` +
+    `</head><body><div class="WordSection1">${body}</div></body></html>`;
+  return { html, parts, title };
+}
+function mhtAssemble(html, parts) {
+  const B = "----=_NextPart_MyRxCard";
+  let s = `MIME-Version: 1.0\r\nContent-Type: multipart/related; boundary="${B}"; type="text/html"\r\n\r\n`;
+  s += `--${B}\r\nContent-Type: text/html; charset="utf-8"\r\nContent-Transfer-Encoding: 8bit\r\nContent-Location: file:///C:/mrx/doc.htm\r\n\r\n${html}\r\n\r\n`;
+  for (const p of parts)
+    s += `--${B}\r\nContent-Type: ${p.type}\r\nContent-Transfer-Encoding: base64\r\nContent-Location: file:///C:/mrx/${p.name}\r\n\r\n${p.data.replace(/(.{76})/g, "$1\r\n")}\r\n\r\n`;
+  return s + `--${B}--\r\n`;
+}
+async function exportWord() {
+  const st = $("doc-status");
+  try {
+    st.textContent = "building Word file…";
+    const { html, parts, title } = await draftToWordHtml();
+    const blob = new Blob([mhtAssemble(html, parts)], { type: "application/msword" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "myrxcard-document") + ".doc";
+    a.click();
+    URL.revokeObjectURL(a.href);
+    st.textContent = "Word file downloaded — layout is Word's approximation of the page";
+  } catch (e) { st.textContent = "Word export failed: " + e.message; }
+}
 function printDraft() {
   docs.joining = null;
   renderDraft(); // clean state before cloning
@@ -4750,6 +4874,7 @@ async function boot() {
     a.click();
     URL.revokeObjectURL(a.href);
   };
+  $("doc-word").addEventListener("click", exportWord);
   $("doc-print").addEventListener("click", downloadResultPdf);
   $("doc-download").addEventListener("click", downloadResultPdf);
   $("doc-reset").addEventListener("click", () => {
