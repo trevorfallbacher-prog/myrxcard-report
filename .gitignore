@@ -3,3 +3,5 @@ tools/node_modules/
 utilization.json
 tools/*.local.cmd
 tools/watcher.log
+# per-client site passwords — never publish
+tools/clients.secrets.json
