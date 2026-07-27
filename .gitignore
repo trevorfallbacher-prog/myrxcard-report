@@ -5,4 +5,4 @@ tools/*.local.cmd
 tools/watcher.log
 # per-client site passwords — never publish
 tools/clients.secrets.json
-tools/image-worker/.testpw
+tools/*/.testpw

@@ -5,11 +5,15 @@
 // checks, and content heuristics — anything unexpected is rejected wholesale,
 // never forwarded. Clean rows are upserted into Xano.
 //
-//   POST / { secret, rows: [ {bucket_key, process, month, ...metrics} ] }
+//   POST / { secret, rows: [ {bucket_key, client_name, month, ...metrics} ] }
 //
-// Secrets: SYNC_SECRET  shared with the Zoho Deluge function
-//          XANO_ENDPOINT  full URL of the Xano upsert endpoint
-//          XANO_API_KEY   optional bearer for that endpoint
+// The upsert happens here, directly against Xano's Metadata API content
+// endpoints (search by bucket_key → update or insert) — no Xano-side
+// endpoint to build or expose.
+//
+// Vars:    XANO_CONTENT_URL  the table's meta content base (wrangler.toml)
+// Secrets: SYNC_SECRET       shared with the Zoho Deluge function
+//          XANO_META_TOKEN   Xano Metadata API token (expires — see README)
 // (After any `wrangler deploy`, re-run a `wrangler secret put` to re-bind.)
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "content-type" };
@@ -82,7 +86,7 @@ export default {
     let body;
     try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
     if (!env.SYNC_SECRET || body.secret !== env.SYNC_SECRET) return json({ error: "bad secret" }, 403);
-    if (!env.XANO_ENDPOINT) return json({ error: "XANO_ENDPOINT not configured" }, 500);
+    if (!env.XANO_META_TOKEN || !env.XANO_CONTENT_URL) return json({ error: "Xano connection not configured" }, 500);
     const rows = body.rows;
     if (!Array.isArray(rows) || !rows.length) return json({ error: "rows[] required" }, 400);
     if (rows.length > 500) return json({ error: "too many rows in one push (max 500)" }, 400);
@@ -92,12 +96,20 @@ export default {
       const err = validateRow(rows[i]);
       if (err) return json({ error: `row ${i}: ${err}` }, 422);
     }
-    // the key travels in the body — trivial to verify with a Xano Precondition
-    const forward = { rows };
-    if (env.XANO_API_KEY) forward.key = env.XANO_API_KEY;
-    const r = await fetch(env.XANO_ENDPOINT, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(forward) });
-    const out = await r.text();
-    if (!r.ok) return json({ error: `Xano ${r.status}: ${out.slice(0, 300)}` }, 502);
+    // upsert each row by bucket_key via the Metadata API
+    const H = { "content-type": "application/json", authorization: `Bearer ${env.XANO_META_TOKEN}` };
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const sr = await fetch(`${env.XANO_CONTENT_URL}/search`, { method: "POST", headers: H,
+        body: JSON.stringify({ page: 1, per_page: 1, search: [{ field: "bucket_key", operator: "=", value: row.bucket_key }] }) });
+      const sout = await sr.json().catch(() => ({}));
+      if (!sr.ok) return json({ error: `Xano search ${sr.status} on row ${i}: ${JSON.stringify(sout).slice(0, 200)}` }, 502);
+      const existing = (sout.items || [])[0];
+      const wr = existing
+        ? await fetch(`${env.XANO_CONTENT_URL}/${existing.id}`, { method: "PUT", headers: H, body: JSON.stringify(row) })
+        : await fetch(env.XANO_CONTENT_URL, { method: "POST", headers: H, body: JSON.stringify(row) });
+      if (!wr.ok) return json({ error: `Xano write ${wr.status} on row ${i}: ${(await wr.text()).slice(0, 200)}` }, 502);
+    }
     return json({ ok: true, upserted: rows.length });
   },
 };
