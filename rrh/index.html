@@ -3628,6 +3628,38 @@ const AVALON_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60
 const AVALON_LOGO_SRC = "data:image/svg+xml;utf8," + encodeURIComponent(AVALON_LOGO_SVG);
 const CE = 'contenteditable="plaintext-only"';
 
+// self-contained HTML for exporting the drafted page alone: a clean US-Letter
+// document with editing chrome stripped and print margins zeroed (the page's
+// own 612×792pt geometry IS 8.5×11in)
+function draftExportHTML() {
+  const page = $("docpage").cloneNode(true);
+  page.querySelectorAll(".dp-chrome, .join-banner").forEach((el) => el.remove());
+  for (const el of page.querySelectorAll("[contenteditable]")) el.removeAttribute("contenteditable");
+  page.classList.remove("join-src", "join-target");
+  page.style.zoom = "";
+  const links = [...document.querySelectorAll('link[rel="stylesheet"], link[rel="preconnect"]')].map((l) => l.outerHTML).join("");
+  const styles = [...document.querySelectorAll("style")].map((s) => s.textContent).join("\n");
+  const title = ((docs.draft.find((b) => b.style === "H1" && (b.text || "").trim()) || {}).text || "Avalon Document").trim();
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title>${links}<style>${styles}</style><style>
+    @page { size: letter; margin: 0; }
+    html, body { margin: 0; padding: 0; background: #fff; }
+    .docpage { margin: 0 !important; box-shadow: none !important; zoom: 1 !important; }
+    .docpage .dp-block.join-src, .docpage .dp-block.join-target { outline: none !important; }
+    .docpage [data-ph]:empty::before { content: "" !important; }
+  </style></head><body>${page.outerHTML}</body></html>`;
+}
+function printDraft() {
+  docs.joining = null;
+  renderDraft(); // clean state before cloning
+  const w = open("", "_blank");
+  if (!w) { $("doc-status").textContent = "popup blocked — allow popups for this site to export the PDF"; return; }
+  w.document.write(draftExportHTML());
+  w.document.close();
+  const go = () => { try { w.focus(); w.print(); } catch { /* window closed */ } };
+  // wait for the brand fonts before opening the print dialog
+  if (w.document.fonts && w.document.fonts.ready) w.document.fonts.ready.then(() => setTimeout(go, 150));
+  else setTimeout(go, 800);
+}
 function fitDocpage(page) { // shrink the 612pt page to the panel, never enlarge
   const wrap = page.parentElement;
   if (!wrap || !wrap.clientWidth) return;
@@ -4099,7 +4131,9 @@ async function boot() {
     if (state.events.length) renderAll();
     if (util.loaded && util.data && state.tab === "util") renderUtil();
   });
-  $("pdf-btn").addEventListener("click", () => window.print());
+  // on the Documents tab, EXPORT PDF saves just the drafted page as a
+  // US-Letter PDF; everywhere else it prints the dashboard view
+  $("pdf-btn").addEventListener("click", () => state.tab === "docs" ? printDraft() : window.print());
   // styled instant tooltips: on first hover, any element's title attribute (or
   // an SVG shape's <title> child) migrates to data-tip and shows in #tip
   const tipEl = document.createElement("div");
