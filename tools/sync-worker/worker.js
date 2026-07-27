@@ -75,9 +75,10 @@ export default {
       const err = validateRow(rows[i]);
       if (err) return json({ error: `row ${i}: ${err}` }, 422);
     }
-    const headers = { "content-type": "application/json" };
-    if (env.XANO_API_KEY) headers.authorization = `Bearer ${env.XANO_API_KEY}`;
-    const r = await fetch(env.XANO_ENDPOINT, { method: "POST", headers, body: JSON.stringify({ rows }) });
+    // the key travels in the body — trivial to verify with a Xano Precondition
+    const forward = { rows };
+    if (env.XANO_API_KEY) forward.key = env.XANO_API_KEY;
+    const r = await fetch(env.XANO_ENDPOINT, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(forward) });
     const out = await r.text();
     if (!r.ok) return json({ error: `Xano ${r.status}: ${out.slice(0, 300)}` }, 502);
     return json({ ok: true, upserted: rows.length });
