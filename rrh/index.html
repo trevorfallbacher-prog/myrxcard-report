@@ -698,7 +698,7 @@
   .dp-aivis .t { font-size: 7.5pt; letter-spacing: 0.15em; }
   .dp-aivis .p { font-size: 9pt; margin: 3pt 0; }
   .dp-aivis .s { font-size: 8pt; color: #8a94a2; }
-  .dp-aivis.err { border-color: #C94F4E; }
+  .dp-aivis.err { border-color: #C94F4E; cursor: pointer; }
   .dp-aivis.err .s { color: #C94F4E; }
   /* uploaded image / icon */
   .dp-image { text-align: center; margin: 8pt 0 12pt; }
@@ -3598,14 +3598,16 @@ async function resolveAiVisuals() {
             const v = b.aiVisual;
             job = { kind: v.kind, prompt: v.prompt,
               apply: (out) => { arr[i] = { image: { ...visualResult(out), w: v.kind === "icon" ? (out.svg ? 90 : 120) : 300 } }; },
-              fail: (msg) => { v.status = "error"; v.error = msg; } };
+              fail: (msg) => { v.status = "error"; v.error = msg; },
+              markRetried: () => { const was = v.pwRetried; v.pwRetried = true; return was; } };
             return true;
           }
           if (b.iconCols) for (const c of b.iconCols) {
             if (c.iconPrompt && !c.icon && c.iconStatus !== "error") {
               job = { kind: "icon", prompt: c.iconPrompt,
                 apply: (out) => { c.icon = visualResult(out); },
-                fail: (msg) => { c.iconStatus = "error"; c.iconError = msg; } };
+                fail: (msg) => { c.iconStatus = "error"; c.iconError = msg; },
+                markRetried: () => { const was = c.pwRetried; c.pwRetried = true; return was; } };
               return true;
             }
           }
@@ -3619,6 +3621,12 @@ async function resolveAiVisuals() {
         job.apply(await imageApi(job.kind, job.prompt));
         st.textContent = "";
       } catch (e) {
+        // a secret rollout can briefly reject a good password — retry once
+        if (/bad password/i.test(e.message) && !job.markRetried()) {
+          st.textContent = "retrying…";
+          await new Promise((r) => setTimeout(r, 3000));
+          continue;
+        }
         job.fail(e.message);
         st.textContent = "visual failed: " + e.message;
       }
@@ -3817,7 +3825,7 @@ function blockInner(b, PH) {
     inner = `<div class="dp-aivis${b.aiVisual.status === "error" ? " err" : ""}">` +
       `<div class="t">${b.aiVisual.kind === "icon" ? "AI ICON" : "AI IMAGE"}</div>` +
       `<div class="p">${esc(b.aiVisual.prompt)}</div>` +
-      `<div class="s">${b.aiVisual.status === "error" ? esc("failed: " + (b.aiVisual.error || "")) : "generating…"}</div></div>`;
+      `<div class="s">${b.aiVisual.status === "error" ? esc("failed: " + (b.aiVisual.error || "")) + " — click to retry" : "generating…"}</div></div>`;
     if (b.aiVisual.status === "error") extraCtl = `<button type="button" data-d="airetry" title="Try again">retry</button>`;
   } else {
     const cls = (DOC_STYLES[b.style] || DOC_STYLES.Paragraph).css;
@@ -4475,6 +4483,20 @@ async function boot() {
   }
   $("docpage").addEventListener("click", (e) => {
     if (e.target.closest("#join-done")) { docs.joining = null; renderDraft(); return; }
+    // failed AI visual: click anywhere on it to retry
+    const errVis = e.target.closest(".dp-aivis.err");
+    if (errVis && docs.joining == null) {
+      const bi = +errVis.closest(".dp-block").dataset.i;
+      const blk = docs.draft[bi];
+      const cw = errVis.closest("[data-colc]");
+      const t = blk && blk.columns && cw ? blk.columns[+cw.dataset.colc] : blk;
+      if (t && t.aiVisual) {
+        delete t.aiVisual.status; delete t.aiVisual.error; delete t.aiVisual.pwRetried;
+        renderDraft();
+        resolveAiVisuals();
+      }
+      return;
+    }
     // icon slot on an iconCols column: click to (re)generate that column's icon
     const slot = e.target.closest("[data-icslot]");
     if (slot && docs.joining == null) {
