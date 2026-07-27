@@ -144,7 +144,15 @@
   #side-nav button:hover { background: var(--card-solid); color: var(--ink); }
   #side-nav button.on { background: var(--nav-on); color: var(--secondary); font-weight: 600; }
   #side-nav svg { width: 19px; height: 19px; flex: 0 0 auto; }
-  .side-foot { position: fixed; bottom: 0; left: 0; width: 250px; padding: 14px 26px; background: var(--card); border-right: 1px solid var(--hair); display: flex; align-items: center; gap: 9px; }
+  .side-foot { position: fixed; bottom: 0; left: 0; width: 250px; padding: 12px 26px 14px; background: var(--card); border-right: 1px solid var(--hair); display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+  .side-logout {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-soft); background: none; border: 1px solid var(--hair-bright); border-radius: 8px;
+    padding: 7px 12px; cursor: pointer; transition: color 0.15s, border-color 0.15s;
+  }
+  .side-logout:hover { color: var(--danger); border-color: currentColor; }
+  .side-logout svg { width: 14px; height: 14px; }
   .maincol { margin-left: 250px; min-height: 100vh; }
   .content { padding: 24px 24px 56px; max-width: 1420px; }
   header.top {
@@ -869,9 +877,15 @@
         Documents
       </button>
     </nav>
-    <div class="side-foot sync">
-      <span class="dot" id="sync-dot"></span>
-      <span class="stamp" id="sync-stamp">—</span>
+    <div class="side-foot">
+      <button type="button" id="logout-btn" class="side-logout" hidden title="Lock this report — the password will be required again">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+        Log out
+      </button>
+      <div class="sync">
+        <span class="dot" id="sync-dot"></span>
+        <span class="stamp" id="sync-stamp">—</span>
+      </div>
     </div>
   </aside>
   <div class="maincol">
@@ -3815,6 +3829,7 @@ function enterApp(mode) {
   $("gate").hidden = true;
   $("app").style.display = "block";
   $("sample-badge").hidden = mode !== "sample";
+  $("logout-btn").hidden = mode !== "live"; // nothing to lock in sample mode
   if (mode === "sample") {
     $("foot-src").textContent = "Source: bundled sample export (not live)";
     stamp(true, "STATIC SAMPLE");
@@ -3822,6 +3837,12 @@ function enterApp(mode) {
 }
 
 async function boot() {
+  // LOG OUT: forget every remembered passphrase for this origin (root site and
+  // client sites alike) and return to the gate
+  $("logout-btn").addEventListener("click", () => {
+    for (const k of Object.keys(sessionStorage)) if (k.startsWith("mrx-")) sessionStorage.removeItem(k);
+    location.reload();
+  });
   $("period-select").addEventListener("change", () => {
     state.period = { type: $("period-select").value, from: null, to: null };
     renderAll();
