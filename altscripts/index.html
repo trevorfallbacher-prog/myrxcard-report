@@ -693,6 +693,13 @@
   .dp-columns .dp-colc .dp-table { width: 100%; }
   .dp-columns .dp-colc .dp-badge, .dp-columns .dp-colc .dp-image { margin-top: 0; margin-bottom: 0; }
   .dp-columns .dp-colc .dp-arrows, .dp-columns .dp-colc .dp-tintbox { margin: 0; }
+  /* AI visual placeholder while it generates (or after a failure) */
+  .dp-aivis { border: 1.5pt dashed rgb(28,128,184); border-radius: 6pt; padding: 10pt 12pt; margin: 8pt 0 12pt; text-align: center; color: rgb(49,82,128); }
+  .dp-aivis .t { font-size: 7.5pt; letter-spacing: 0.15em; }
+  .dp-aivis .p { font-size: 9pt; margin: 3pt 0; }
+  .dp-aivis .s { font-size: 8pt; color: #8a94a2; }
+  .dp-aivis.err { border-color: #C94F4E; }
+  .dp-aivis.err .s { color: #C94F4E; }
   /* uploaded image / icon */
   .dp-image { text-align: center; margin: 8pt 0 12pt; }
   .dp-image img { max-width: 100%; }
@@ -1271,6 +1278,8 @@
           <button class="iconbtn" data-dpadd="arrows" type="button">+ ARROW LIST</button>
           <button class="iconbtn" data-dpadd="statBadge" type="button">+ STAT BADGE</button>
           <label class="docfile"><input type="file" id="dp-image-file" accept="image/png,image/jpeg,image/svg+xml" hidden><span class="iconbtn">+ IMAGE</span></label>
+          <button class="iconbtn" data-dpai="icon" type="button" title="AI draws a flat icon in the Avalon palette (SVG)">+ AI ICON</button>
+          <button class="iconbtn" data-dpai="image" type="button" title="AI generates a brand-styled illustration">+ AI IMAGE</button>
           <button class="iconbtn" id="dp-data-btn" type="button" title="Insert live numbers from the Utilization tab, using its current filters">+ REPORT DATA</button>
           <button class="iconbtn" id="dp-undo-btn" type="button" title="Undo the last change to the page (⌘Z)" disabled>&#8630; UNDO</button>
           <div id="docdata-pop" hidden></div>
@@ -3546,6 +3555,57 @@ function updateUndoBtn() { const b = $("dp-undo-btn"); if (b) b.disabled = !docs
 
 const docsPw = () => gatePw || sessionStorage.getItem("mrx-pw") || prompt("Team password");
 
+// AI visuals backend (tools/image-worker): brand-palette icons as SVG and
+// brand-styled illustrations; gated by the same report password
+const IMAGE_API = "https://myrxcard-image.trevorfallbacher.workers.dev";
+async function imageApi(kind, promptText) {
+  const pw = docsPw();
+  if (!pw) throw new Error("no password");
+  const resp = await fetch(IMAGE_API, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pw, kind, prompt: promptText }),
+  });
+  const out = await resp.json().catch(() => ({}));
+  if (!resp.ok || out.error) throw new Error(out.error || `HTTP ${resp.status}`);
+  return out;
+}
+// resolve every pending {aiVisual} placeholder in the draft, one at a time
+let aiVisBusy = false;
+async function resolveAiVisuals() {
+  if (aiVisBusy) return;
+  aiVisBusy = true;
+  const st = $("doc-status");
+  try {
+    for (;;) {
+      let holder = null, idx = -1;
+      const scan = (arr) => {
+        for (let i = 0; i < arr.length; i++) {
+          const b = arr[i];
+          if (b.aiVisual && b.aiVisual.status !== "error") { holder = arr; idx = i; return true; }
+          if (b.columns && scan(b.columns)) return true;
+        }
+        return false;
+      };
+      if (!scan(docs.draft)) break;
+      const v = holder[idx].aiVisual;
+      st.textContent = `generating ${v.kind === "icon" ? "icon" : "image"}: ${v.prompt.slice(0, 60)}…`;
+      try {
+        const out = await imageApi(v.kind, v.prompt);
+        holder[idx] = out.svg
+          ? { image: { data: btoa(unescape(encodeURIComponent(out.svg))), type: "image/svg+xml", w: v.kind === "icon" ? 90 : 300 } }
+          : { image: { data: out.image, type: out.type || "image/png", w: v.kind === "icon" ? 120 : 300 } };
+        st.textContent = "";
+      } catch (e) {
+        v.status = "error";
+        v.error = e.message;
+        st.textContent = "visual failed: " + e.message;
+      }
+      renderDraft();
+    }
+  } finally { aiVisBusy = false; }
+}
+
 async function docsApi(path, payload) {
   const pw = docsPw();
   if (!pw) throw new Error("no password");
@@ -3727,6 +3787,12 @@ function blockInner(b, PH) {
   } else if (b.image) {
     inner = `<div class="dp-image"><img src="data:${esc(b.image.type || "image/png")};base64,${b.image.data}" style="width:${+b.image.w || 240}pt" alt=""></div>`;
     extraCtl = `<button type="button" data-d="imgbig" title="Wider">+w</button><button type="button" data-d="imgsmall" title="Narrower">&#8722;w</button>`;
+  } else if (b.aiVisual) {
+    inner = `<div class="dp-aivis${b.aiVisual.status === "error" ? " err" : ""}">` +
+      `<div class="t">${b.aiVisual.kind === "icon" ? "AI ICON" : "AI IMAGE"}</div>` +
+      `<div class="p">${esc(b.aiVisual.prompt)}</div>` +
+      `<div class="s">${b.aiVisual.status === "error" ? esc("failed: " + (b.aiVisual.error || "")) : "generating…"}</div></div>`;
+    if (b.aiVisual.status === "error") extraCtl = `<button type="button" data-d="airetry" title="Try again">retry</button>`;
   } else {
     const cls = (DOC_STYLES[b.style] || DOC_STYLES.Paragraph).css;
     inner = `<div class="${cls}" ${CE} data-role="text" data-ph="${PH[b.style] || "Text…"}"${b.size ? ` style="font-size:${b.size}pt"` : ""}>${esc(b.text || "")}</div>`;
@@ -3841,6 +3907,8 @@ function serializeInto(out, b) {
       if (bd) out.push({ statBadge: bd });
     } else if (b.image) {
       if (b.image.data) out.push({ image: { data: b.image.data, type: b.image.type || "image/png", w: +b.image.w || 240 } });
+    } else if (b.aiVisual) {
+      // unresolved placeholder (still generating or failed) — never ships
     } else if ((b.text || "").trim()) {
       out.push({ style: DOC_STYLES[b.style] ? b.style : "Paragraph", text: b.text.trim(), ...(b.size ? { fontSize: b.size } : {}) });
     }
@@ -3853,6 +3921,12 @@ const badgeOut = (s) => s && (s.value || "").trim()
 function blocksToDraft(blocks) { // normalize incoming AI blocks into the model
   if (docs.draft.length) snapDraft(); // the pre-AI page stays one UNDO away
   const normOne = (b) => {
+    if (b && (b.aiIcon || b.aiImage)) {
+      const src = b.aiIcon || b.aiImage;
+      const p = String((src && src.prompt) || src || "").trim();
+      if (p) return { aiVisual: { kind: b.aiIcon ? "icon" : "image", prompt: p } };
+      return { style: "Paragraph", text: "" };
+    }
     if (b && Array.isArray(b.columns)) {
       const kids = b.columns.slice(0, 3).filter((c) => c && !c.columns).map(normOne);
       return kids.length >= 2 ? { columns: kids } : (kids[0] || { style: "Paragraph", text: "" });
@@ -4415,6 +4489,11 @@ async function boot() {
     else if (d === "arbadge" && b.arrows) { if (b.badge) delete b.badge; else b.badge = { prefix: "Savings up to", value: "75%", caption: "" }; }
     else if (d === "imgbig" && b.image) b.image.w = Math.min((+b.image.w || 240) + 40, 540);
     else if (d === "imgsmall" && b.image) b.image.w = Math.max((+b.image.w || 240) - 40, 60);
+    else if (d === "airetry" && b.aiVisual) {
+      delete b.aiVisual.status;
+      delete b.aiVisual.error;
+      setTimeout(resolveAiVisuals, 0);
+    }
     else if ((d === "fplus" || d === "fminus") && !b.columns && !b.table && !b.iconCols && !b.callout && !b.tintBox && !b.arrows && !b.statBadge && !b.image) {
       const dflt = DOC_SIZE[b.style] || 9;
       b.size = Math.max(6, Math.min(36, (b.size || dflt) + (d === "fplus" ? 1 : -1)));
@@ -4437,6 +4516,19 @@ async function boot() {
     }
   });
   document.querySelector(".dp-add").addEventListener("click", (e) => {
+    const ai = e.target.closest("button[data-dpai]");
+    if (ai) {
+      const what = ai.dataset.dpai;
+      const p = prompt(what === "icon"
+        ? "Describe the icon (e.g. “a shield with a pill capsule”) — drawn flat, in brand colors:"
+        : "Describe the image — generated in the Avalon brand style:");
+      if (!p || !p.trim()) return;
+      snapDraft();
+      docs.draft.push({ aiVisual: { kind: what, prompt: p.trim() } });
+      renderDraft();
+      resolveAiVisuals();
+      return;
+    }
     const btn = e.target.closest("button[data-dpadd]");
     if (!btn) return;
     const k = btn.dataset.dpadd;
@@ -4547,7 +4639,8 @@ async function boot() {
     if (!brief && !f && !tplSlug) { st.textContent = "write a brief above or choose a reference document first"; return; }
     try {
       st.textContent = "analyzing & drafting…";
-      const payload = { instruction: brief || "Recreate this reference document as our branded version — keep its content, use our styles and objects." };
+      const payload = { instruction: (brief || "Recreate this reference document as our branded version — keep its content, use our styles and objects.") +
+        ' Where a custom visual would strengthen the page, you may also include blocks {"aiIcon":{"prompt":"short description"}} for a flat brand-palette icon or {"aiImage":{"prompt":"description"}} for a brand-styled illustration — place them where they belong; they are generated automatically after drafting.' };
       if (f) { payload.file = await fileToB64(f); payload.fileType = f.type || "application/pdf"; }
       else if (tplSlug) {
         if (!docs.template || docs.template.slug !== tplSlug) docs.template = { slug: tplSlug, ...(await docsApi("/templates/get", { slug: tplSlug })) };
@@ -4557,6 +4650,7 @@ async function boot() {
       const out = await docsApi("/draft", payload);
       blocksToDraft(out.blocks);
       st.textContent = `drafted ${out.blocks.length} blocks — click any text to edit, then BUILD IN INDESIGN`;
+      resolveAiVisuals(); // fulfill any visuals the draft requested
     } catch (e2) { st.textContent = "draft failed: " + e2.message; }
   });
   const downloadResultPdf = () => {
