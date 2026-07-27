@@ -670,6 +670,12 @@
   .dp-badge .b-pre, .dp-badge .b-cap { font-size: 7.5pt; letter-spacing: 0.15em; text-transform: uppercase; color: rgb(49,82,128); }
   .dp-badge .b-val { font-size: 22pt; font-weight: 700; color: rgb(49,82,128); line-height: 1.15; word-break: keep-all; }
   .dp-arrows-row .dp-badge { flex: 0 0 112pt; margin: 4pt 0; }
+  /* side-by-side columns: any two or three blocks joined onto one row */
+  .dp-columns { display: flex; gap: 16pt; align-items: flex-start; margin: 8pt 0 12pt; }
+  .dp-columns .dp-colc { flex: 1; min-width: 0; }
+  .dp-columns .dp-colc .dp-table { width: 100%; }
+  .dp-columns .dp-colc .dp-badge, .dp-columns .dp-colc .dp-image { margin-top: 0; margin-bottom: 0; }
+  .dp-columns .dp-colc .dp-arrows, .dp-columns .dp-colc .dp-tintbox { margin: 0; }
   /* uploaded image / icon */
   .dp-image { text-align: center; margin: 8pt 0 12pt; }
   .dp-image img { max-width: 100%; }
@@ -3614,6 +3620,43 @@ const arrowsHtml = (items) =>
     `<div class="dp-arrow"><span class="ar-ico">${ARROW_SVG}</span><div class="ar-body">` +
     `<span class="ar-lead" ${CE} data-role="arl" data-c="${ai}" data-ph="Lead phrase">${esc(a.lead || "")}</span><span class="ar-sep">: </span>` +
     `<span class="ar-text" ${CE} data-role="art" data-c="${ai}" data-ph="Benefit text…">${esc(a.text || "")}</span></div></div>`).join("")}</div>`;
+// inner HTML + type-specific controls for one (non-columns) block — used for
+// top-level blocks and for each child inside a dp-columns row
+function blockInner(b, PH) {
+  let inner = "", extraCtl = "";
+  if (b.table) {
+    inner = `<table class="dp-table"><thead><tr>${b.table.headers.map((h, c) =>
+      `<th ${CE} data-role="th" data-c="${c}">${esc(h)}</th>`).join("")}</tr></thead><tbody>${
+      b.table.rows.map((r, ri) => `<tr>${r.map((cell, c) =>
+        `<td ${CE} data-role="td" data-r="${ri}" data-c="${c}">${esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    extraCtl = `<button type="button" data-d="row" title="Add row">+row</button><button type="button" data-d="delrow" title="Remove last row">&#8722;row</button><button type="button" data-d="col" title="Add column">+col</button><button type="button" data-d="delcol" title="Remove last column">&#8722;col</button>`;
+  } else if (b.iconCols) {
+    inner = `<div class="dp-iconcols">${b.iconCols.map((c, ci) =>
+      `<div class="dp-col"><div class="dp-subheader-callout" ${CE} data-role="ict" data-c="${ci}" data-ph="TITLE…">${esc(c.title)}</div><div class="dp-paragraph" ${CE} data-role="icx" data-c="${ci}" data-ph="Column text…">${esc(c.text)}</div></div>`).join("")}</div>`;
+    extraCtl = `<button type="button" data-d="col" title="Add column (max 4)">+col</button><button type="button" data-d="delcol" title="Remove last column (min 2)">&#8722;col</button>`;
+  } else if (b.callout) {
+    inner = `<div class="dp-callout"><div class="dp-subheader-callout-2" ${CE} data-role="co" data-ph="SECTION NAME…">${esc(b.callout.text)}</div></div>`;
+  } else if (b.tintBox) {
+    inner = `<div class="dp-tintbox">${b.tintBox.title === null ? "" :
+      `<div class="dp-subheader-callout" ${CE} data-role="tbt" data-ph="CALLOUT TITLE…">${esc(b.tintBox.title || "")}</div>`}<div class="dp-paragraph" ${CE} data-role="tbx" data-ph="Callout text…">${esc(b.tintBox.text || "")}</div></div>`;
+    extraCtl = `<button type="button" data-d="tbtitle" title="Show/hide the title line">&#177;title</button>`;
+  } else if (b.arrows) {
+    inner = b.badge
+      ? `<div class="dp-arrows-row">${arrowsHtml(b.arrows)}${badgeHtml(b.badge)}</div>`
+      : arrowsHtml(b.arrows);
+    extraCtl = `<button type="button" data-d="aritem" title="Add arrow">+item</button><button type="button" data-d="delaritem" title="Remove last arrow">&#8722;item</button><button type="button" data-d="arbadge" title="Toggle the framed stat on the right">&#177;stat</button>`;
+  } else if (b.statBadge) {
+    inner = badgeHtml(b.statBadge);
+  } else if (b.image) {
+    inner = `<div class="dp-image"><img src="data:${esc(b.image.type || "image/png")};base64,${b.image.data}" style="width:${+b.image.w || 240}pt" alt=""></div>`;
+    extraCtl = `<button type="button" data-d="imgbig" title="Wider">+w</button><button type="button" data-d="imgsmall" title="Narrower">&#8722;w</button>`;
+  } else {
+    const cls = (DOC_STYLES[b.style] || DOC_STYLES.Paragraph).css;
+    inner = `<div class="${cls}" ${CE} data-role="text" data-ph="${PH[b.style] || "Text…"}">${esc(b.text || "")}</div>`;
+    extraCtl = `<select data-d="style" title="Brand style">${DRAFT_STYLES.map((s) => `<option${s === b.style ? " selected" : ""}>${s}</option>`).join("")}</select>`;
+  }
+  return { inner, extraCtl };
+}
 function renderDraft() {
   if (!docs.draft.length) docs.draft = seedDraft(); // always an open, typeable page
   const page = $("docpage");
@@ -3624,38 +3667,23 @@ function renderDraft() {
     el.className = "dp-block";
     el.dataset.i = i;
     let inner = "", extraCtl = "";
-    if (b.table) {
-      inner = `<table class="dp-table"><thead><tr>${b.table.headers.map((h, c) =>
-        `<th ${CE} data-role="th" data-c="${c}">${esc(h)}</th>`).join("")}</tr></thead><tbody>${
-        b.table.rows.map((r, ri) => `<tr>${r.map((cell, c) =>
-          `<td ${CE} data-role="td" data-r="${ri}" data-c="${c}">${esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
-      extraCtl = `<button type="button" data-d="row" title="Add row">+row</button><button type="button" data-d="delrow" title="Remove last row">&#8722;row</button><button type="button" data-d="col" title="Add column">+col</button><button type="button" data-d="delcol" title="Remove last column">&#8722;col</button>`;
-    } else if (b.iconCols) {
-      inner = `<div class="dp-iconcols">${b.iconCols.map((c, ci) =>
-        `<div class="dp-col"><div class="dp-subheader-callout" ${CE} data-role="ict" data-c="${ci}" data-ph="TITLE…">${esc(c.title)}</div><div class="dp-paragraph" ${CE} data-role="icx" data-c="${ci}" data-ph="Column text…">${esc(c.text)}</div></div>`).join("")}</div>`;
-      extraCtl = `<button type="button" data-d="col" title="Add column (max 4)">+col</button><button type="button" data-d="delcol" title="Remove last column (min 2)">&#8722;col</button>`;
-    } else if (b.callout) {
-      inner = `<div class="dp-callout"><div class="dp-subheader-callout-2" ${CE} data-role="co" data-ph="SECTION NAME…">${esc(b.callout.text)}</div></div>`;
-    } else if (b.tintBox) {
-      inner = `<div class="dp-tintbox">${b.tintBox.title === null ? "" :
-        `<div class="dp-subheader-callout" ${CE} data-role="tbt" data-ph="CALLOUT TITLE…">${esc(b.tintBox.title || "")}</div>`}<div class="dp-paragraph" ${CE} data-role="tbx" data-ph="Callout text…">${esc(b.tintBox.text || "")}</div></div>`;
-      extraCtl = `<button type="button" data-d="tbtitle" title="Show/hide the title line">&#177;title</button>`;
-    } else if (b.arrows) {
-      inner = b.badge
-        ? `<div class="dp-arrows-row">${arrowsHtml(b.arrows)}${badgeHtml(b.badge)}</div>`
-        : arrowsHtml(b.arrows);
-      extraCtl = `<button type="button" data-d="aritem" title="Add arrow">+item</button><button type="button" data-d="delaritem" title="Remove last arrow">&#8722;item</button><button type="button" data-d="arbadge" title="Toggle the framed stat on the right">&#177;stat</button>`;
-    } else if (b.statBadge) {
-      inner = badgeHtml(b.statBadge);
-    } else if (b.image) {
-      inner = `<div class="dp-image"><img src="data:${esc(b.image.type || "image/png")};base64,${b.image.data}" style="width:${+b.image.w || 240}pt" alt=""></div>`;
-      extraCtl = `<button type="button" data-d="imgbig" title="Wider">+w</button><button type="button" data-d="imgsmall" title="Narrower">&#8722;w</button>`;
+    if (b.columns) {
+      // side-by-side columns: each child renders like a normal block, editable
+      // in place; per-child controls come back after a split
+      inner = `<div class="dp-columns">${b.columns.map((cb, ci) =>
+        `<div class="dp-colc" data-colc="${ci}">${blockInner(cb, PH).inner}</div>`).join("")}</div>`;
+      extraCtl = `<button type="button" data-d="split" title="Split the columns back into stacked blocks">split</button>`;
     } else {
-      const cls = (DOC_STYLES[b.style] || DOC_STYLES.Paragraph).css;
-      inner = `<div class="${cls}" ${CE} data-role="text" data-ph="${PH[b.style] || "Text…"}">${esc(b.text || "")}</div>`;
-      extraCtl = `<select data-d="style" title="Brand style">${DRAFT_STYLES.map((s) => `<option${s === b.style ? " selected" : ""}>${s}</option>`).join("")}</select>`;
+      const parts = blockInner(b, PH);
+      inner = parts.inner;
+      extraCtl = parts.extraCtl;
     }
-    el.innerHTML = inner + `<div class="dp-chrome" contenteditable="false">${extraCtl}<button type="button" data-d="up" title="Move up">&#9650;</button><button type="button" data-d="down" title="Move down">&#9660;</button><button type="button" data-d="x" title="Remove block">&#215;</button></div>`;
+    // any block can pull the one below it in as a side-by-side column (max 3)
+    const nxt = docs.draft[i + 1];
+    const joinCtl = nxt && !nxt.columns && (!b.columns || b.columns.length < 3)
+      ? `<button type="button" data-d="joinnext" title="${b.columns ? "Pull the block below in as another column" : "Combine with the block below into side-by-side columns"}">join&#8595;</button>`
+      : "";
+    el.innerHTML = inner + `<div class="dp-chrome" contenteditable="false">${extraCtl}${joinCtl}<button type="button" data-d="up" title="Move up">&#9650;</button><button type="button" data-d="down" title="Move down">&#9660;</button><button type="button" data-d="x" title="Remove block">&#215;</button></div>`;
     page.appendChild(el);
   });
   page.insertAdjacentHTML("beforeend",
@@ -3684,6 +3712,21 @@ function caretOffsetIn(el) {
 function draftToBlocks() { // serialize the model for /jobs/submit — skips empties
   const out = [];
   for (const b of docs.draft) {
+    if (b.columns) {
+      // serialize each child through the same rules; a columns row with one
+      // surviving child degrades to that child, with none it drops
+      const kids = [];
+      for (const cb of b.columns) serializeInto(kids, cb); // each child adds at most one block
+      if (kids.length >= 2) out.push({ columns: kids });
+      else if (kids.length === 1) out.push(kids[0]);
+      continue;
+    }
+    serializeInto(out, b);
+  }
+  return out;
+}
+function serializeInto(out, b) {
+  {
     if (b.table) {
       const headers = b.table.headers.map((h) => h.trim());
       const rows = b.table.rows.map((r) => r.map((c) => c.trim())).filter((r) => r.some(Boolean));
@@ -3719,7 +3762,11 @@ const badgeOut = (s) => s && (s.value || "").trim()
   ? { ...( (s.prefix || "").trim() ? { prefix: s.prefix.trim() } : {}), value: s.value.trim(), ...((s.caption || "").trim() ? { caption: s.caption.trim() } : {}) }
   : null;
 function blocksToDraft(blocks) { // normalize incoming AI blocks into the model
-  docs.draft = (blocks || []).map((b) => {
+  const normOne = (b) => {
+    if (b && Array.isArray(b.columns)) {
+      const kids = b.columns.slice(0, 3).filter((c) => c && !c.columns).map(normOne);
+      return kids.length >= 2 ? { columns: kids } : (kids[0] || { style: "Paragraph", text: "" });
+    }
     if (b && b.table) return { table: {
       headers: (b.table.headers || []).map((h) => String(h ?? "")),
       rows: (b.table.rows || []).map((r) => (r || []).map((c) => String(c ?? ""))),
@@ -3740,7 +3787,9 @@ function blocksToDraft(blocks) { // normalize incoming AI blocks into the model
       style: bulleted ? "Bullet" : (DOC_STYLES[b?.style] ? b.style : "Paragraph"),
       text: raw.replace(/^[•\-–]\s+/, ""),
     };
-  }).filter((b) => b.table ? b.table.headers.length : b.iconCols ? b.iconCols.length >= 2 : true);
+  };
+  docs.draft = (blocks || []).map(normOne)
+    .filter((b) => b.table ? b.table.headers.length : b.iconCols ? b.iconCols.length >= 2 : true);
   renderDraft();
 }
 // "intent vs actual": after a generate build, the source panel shows a frozen
@@ -3776,6 +3825,8 @@ async function runDocBuild() {
   try {
     const body = { kind: "generate", mode: "generate", footer: docs.footer, instruction: req || "Build the document exactly from the draft blocks." };
     if (blocks.length) body.blocks = blocks; // deterministic build from the page
+    if (blocks.some((b) => b.columns)) // teach the design agent the columns wrapper
+      body.instruction += ' Any block shaped {"columns":[…]} lays its child blocks out side by side as equal-width columns on one row (left to right), not stacked.';
     const f = $("doc-file").files[0];
     if (!blocks.length && f) { // brief-only build can still lean on a reference
       body.file = await fileToB64(f);
@@ -4129,7 +4180,10 @@ async function boot() {
     if (!t) return;
     const txt = t.textContent, role = t.dataset.role;
     if (role === "footer") { docs.footer = txt; return; }
-    const b = docs.draft[+t.closest(".dp-block")?.dataset.i];
+    let b = docs.draft[+t.closest(".dp-block")?.dataset.i];
+    // edits inside a columns row target the child block, not the wrapper
+    const cw = t.closest("[data-colc]");
+    if (b && b.columns && cw) b = b.columns[+cw.dataset.colc];
     if (!b) return;
     if (role === "text") b.text = txt;
     else if (role === "th") b.table.headers[+t.dataset.c] = txt;
@@ -4157,6 +4211,11 @@ async function boot() {
         e.preventDefault();
         e.target.blur();
       }
+      return;
+    }
+    if (t.closest("[data-colc]")) {
+      // text inside a columns row: no block splitting/merging — Enter just ends the edit
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); t.blur(); }
       return;
     }
     const i = +t.closest(".dp-block").dataset.i;
@@ -4205,6 +4264,13 @@ async function boot() {
     if (d === "x") docs.draft.splice(i, 1);
     else if (d === "up" && i > 0) docs.draft.splice(i - 1, 0, docs.draft.splice(i, 1)[0]);
     else if (d === "down" && i < docs.draft.length - 1) docs.draft.splice(i + 1, 0, docs.draft.splice(i, 1)[0]);
+    else if (d === "joinnext") {
+      const nxt = docs.draft[i + 1];
+      if (!nxt || nxt.columns) return;
+      if (b.columns) { if (b.columns.length >= 3) return; b.columns.push(nxt); docs.draft.splice(i + 1, 1); }
+      else docs.draft.splice(i, 2, { columns: [b, nxt] });
+    }
+    else if (d === "split" && b.columns) docs.draft.splice(i, 1, ...b.columns);
     else if (d === "row" && b.table) b.table.rows.push(b.table.headers.map(() => ""));
     else if (d === "delrow" && b.table && b.table.rows.length > 1) b.table.rows.pop();
     else if (d === "col") {
