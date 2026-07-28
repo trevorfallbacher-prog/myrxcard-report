@@ -5306,10 +5306,61 @@ async function boot() {
       return;
     }
     const pwKey = "mrx-pw-" + window.CLIENT_SITE.slug;
-    // Live search activity for this client only. Same public reporting feed the
-    // root dashboard reads (chosen deliberately: real-time over per-client data
-    // isolation) — rows are filtered to the client's own microsites before
-    // anything renders, and the auto-resync loop is not started here.
+
+    // ---- "your pharmacies across MyRxCard" (featured-exposure) ----
+    // The client's pharmacy roster comes from their own decrypted utilization
+    // store (names + NPI last-4 in pharmMeta) — same isolation model as
+    // utilization: what they can match against is exactly what's theirs.
+    const normPharmName = (s) => String(s || "").toUpperCase()
+      .replace(/[^A-Z0-9 ]/g, " ").replace(/\s+#?\d[\d-]*\s*$/, "").replace(/\s+/g, " ").trim();
+    const clientRoster = () => {
+      const names = new Set(), npi4 = new Set();
+      for (const p of Object.values((util.data && util.data.periods) || {})) {
+        ((p.dims && p.dims.pharmacies) || []).forEach((n) => { const k = normPharmName(n); if (k) names.add(k); });
+        (p.pharmMeta || []).forEach((m) => { if (m && m.npi4) npi4.add(String(m.npi4)); });
+      }
+      return { names, npi4 };
+    };
+    // A pharmacy in a search row is "theirs" on a normalized-name match or an
+    // NPI last-4 match (full NPIs aren't in the client store; last-4 collisions
+    // are ~roster-size-in-10,000 per candidate — fine for an exposure metric).
+    const isMinePharm = (roster, name, npi) =>
+      (name && roster.names.has(normPharmName(name))) ||
+      (npi && roster.npi4.has(String(npi).replace(/\D/g, "").slice(-4)));
+
+    function renderClientExposure() {
+      const el = document.getElementById("client-exposure");
+      if (!el || !state.clientExposure) return;
+      const [fromTs, toTs] = periodBounds(state.period);
+      const ev = state.clientExposure.filter((e) => e.t >= fromTs && e.t < toTs);
+      const feat = ev.filter((e) => e.featured);
+      const prints = ev.filter((e) => e.printedMine);
+      const count = (arr, key) => {
+        const m = new Map();
+        for (const e of arr) { const k = key(e); if (k) m.set(k, (m.get(k) || 0) + 1); }
+        return [...m.entries()].sort((a, b) => b[1] - a[1]);
+      };
+      const rows = (list) => list.slice(0, 6).map(([k, n]) =>
+        `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;">
+           <span>${esc(k)}</span><span class="num">${fmt(n)}</span></div>`).join("") ||
+        `<div style="color:var(--ink-mute)">None in this period.</div>`;
+      el.innerHTML =
+        `<div class="kicker">Your pharmacies across all MyRxCard sites</div>
+         <div style="display:flex;gap:28px;flex-wrap:wrap;margin:6px 0 10px;">
+           <div><span class="big num">${fmt(feat.length)}</span><div style="color:var(--ink-soft);font-size:12px;">searches where your pharmacy was featured — any site</div></div>
+           <div><span class="big num">${fmt(prints.length)}</span><div style="color:var(--ink-soft);font-size:12px;">card prints at your pharmacies — any site</div></div>
+         </div>
+         <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:13px;">
+           <div><div class="kicker">Featured — by site</div>${rows(count(feat, (e) => e.site))}</div>
+           <div><div class="kicker">Featured — top drugs</div>${rows(count(feat, (e) => e.drug))}</div>
+         </div>`;
+    }
+
+    // Live search activity. Same public reporting feed the root dashboard reads
+    // (chosen deliberately: real-time over per-client data isolation). Two
+    // scopes from one fetch: state.events = rows from the client's OWN
+    // microsites (drives the standard search dashboard); state.clientExposure =
+    // rows from ANY site where one of their pharmacies was featured or printed.
     const loadClientSearch = async () => {
       try {
         stamp(true, "SYNCING…");
@@ -5318,9 +5369,38 @@ async function boot() {
         state.events = raw
           .filter((r) => mine.has(micrositeSlugOf(r)))
           .map(normalize).filter((e) => Number.isFinite(e.t));
+
+        const roster = clientRoster();
+        state.clientExposure = [];
+        for (const r of raw) {
+          let rp = r.result_pharmacies;
+          if (typeof rp === "string") { try { rp = JSON.parse(rp); } catch { rp = []; } }
+          if (!Array.isArray(rp)) rp = [];
+          const featured = rp.some((p) => p && p.is_featured && isMinePharm(roster, p.name, p.npi));
+          const printedMine = truthy(r.printed) && isMinePharm(roster, r.printed_pharmacy_name, r.printed_pharmacy_npi);
+          if (!featured && !printedMine) continue;
+          let t = r.search_timestamp || r.created_at;
+          t = typeof t === "number" ? t : Date.parse(t);
+          if (!Number.isFinite(t)) continue;
+          state.clientExposure.push({ t, site: parseGroup(r.source_path), drug: (r.drug_name || "").trim(), featured, printedMine });
+        }
+        // panel sits above the standard search dashboard, outside the grid so
+        // the reveal-on-scroll machinery leaves it alone
+        if (!document.getElementById("client-exposure")) {
+          const host = document.querySelector("#view-search .grid");
+          const panel = document.createElement("div");
+          panel.className = "panel";
+          panel.id = "client-exposure";
+          panel.style.marginBottom = "14px";
+          host.parentNode.insertBefore(panel, host);
+        }
         state.lastSync = new Date();
         stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
         renderAll();
+        renderClientExposure();
+        // keep the exposure panel in step with the period selector
+        const baseRenderAll = renderAll;
+        renderAll = function () { baseRenderAll(); renderClientExposure(); };
       } catch (err) {
         stamp(false, "SEARCH DATA UNAVAILABLE");
       }
