@@ -1,7 +1,167 @@
-// backfill_avalon_cases — one-time history load (run manually, page 1..N)
-// Not attached to any rule. Create as Automation-category function with one
-// Int argument "page"; run via the editor's play button with page=1,2,3…
-// until the log says "no records — backfill complete".
-// Batches of 12 match the worker's per-push cap (events cost extra calls).
-// Body goes between the braces of: void automation.backfill_avalon_cases(int page)
-(body identical to chat version but with rows.size() == 12)
+// backfill_avalon_cases — one-time history load. NOT attached to any rule.
+// -------------------------------------------------------------------------
+// Where it lives: Zoho CRM → Setup → Developer Hub → Functions
+//   (create: + New Function → name backfill_avalon_cases → category Automation
+//    → add Int argument "page" via the (x) panel)
+// How to run it: open the function in the editor and press the ▶ play button
+//   (top-left of the editor toolbar). It asks for the page value: run with
+//   page = 1, then 2, then 3 … until the log prints
+//   "no records — backfill complete". ~400 cases = 3 runs.
+//
+// Paste the body below between the editor's braces. Batches of 12 match the
+// sync worker's per-push cap.
+
+void automation.backfill_avalon_cases(int page)
+{
+	syncUrl = "https://myrxcard-sync.trevorfallbacher.workers.dev";
+	syncSecret = "PASTE-YOUR-SYNC-SECRET-HERE";
+
+	normSource = Map();
+	normSource.put("medsdirect","MedsDirect");
+	normSource.put("meds direct","MedsDirect");
+	normSource.put("canada outreach","Canada Outreach");
+	normSource.put("canada outreached","Canada Outreach");
+	normSource.put("nash","NASH");
+	normSource.put("rxfree4me","RxFree4me");
+	normSource.put("global rx","GlobalRx");
+	normSource.put("globalrx","GlobalRx");
+
+	recs = zoho.crm.getRecords("Cases", page, 200);
+	if(recs.size() == 0)
+	{
+		info "page " + page + ": no records — backfill complete";
+		return;
+	}
+	rows = List();
+	pushed = 0;
+	skipped = 0;
+	for each rec in recs
+	{
+		cl = rec.get("Client_Name");
+		clientName = "";
+		if(cl != null)
+		{
+			clientName = ifnull(cl.get("name"),"").toString();
+		}
+		medName = ifnull(rec.get("Medication_Name"),"").toString().trim();
+		created = ifnull(rec.get("Created_Time"),"").toString();
+		if(clientName == "" || medName == "" || created.length() < 10)
+		{
+			skipped = skipped + 1;
+			continue;
+		}
+		srcRaw = ifnull(rec.get("Source"),"").toString().trim();
+		source = ifnull(normSource.get(srcRaw.toLowerCase()), if(srcRaw == "","Direct",srcRaw));
+		tpa = "";
+		tp = rec.get("TPA");
+		if(tp != null)
+		{
+			tpa = ifnull(tp.get("name"),"").toString();
+		}
+		closedDate = ifnull(rec.get("Closed_Date"),"").toString();
+		if(closedDate.length() >= 10)
+		{
+			closedDate = closedDate.subString(0,10);
+		}
+		row = Map();
+		row.put("case_key",ifnull(rec.get("id"),"").toString());
+		row.put("assist_number",ifnull(rec.get("Case_Number"),"").toString());
+		row.put("client_name",clientName);
+		row.put("tpa",tpa);
+		row.put("group_number",ifnull(rec.get("Group_Number"),"").toString());
+		row.put("source",source);
+		row.put("status",ifnull(rec.get("Status"),"").toString());
+		row.put("closed_reason",ifnull(rec.get("Closed_Reason"),"").toString());
+		row.put("medication_name",medName);
+		row.put("ndc",ifnull(rec.get("NDC"),"").toString().replaceAll("[^0-9]",""));
+		row.put("medication_type",ifnull(rec.get("Medication_Type"),"").toString());
+		row.put("month",created.subString(0,7));
+		row.put("created_date",created.subString(0,10));
+		row.put("closed_date",closedDate);
+		if(rec.get("AWP") != null)
+		{
+			row.put("awp",rec.get("AWP").toDecimal());
+		}
+		if(rec.get("Avalon_Fee") != null)
+		{
+			row.put("avalon_fee",rec.get("Avalon_Fee").toDecimal());
+		}
+		if(rec.get("AA_Price") != null)
+		{
+			row.put("aa_price",rec.get("AA_Price").toDecimal());
+		}
+		if(rec.get("AA_Savings") != null)
+		{
+			row.put("aa_savings",rec.get("AA_Savings").toDecimal());
+		}
+		if(rec.get("Avalon_Savings") != null)
+		{
+			row.put("avalon_savings",rec.get("Avalon_Savings").toDecimal());
+		}
+		if(rec.get("MyRXCard_Pricing") != null)
+		{
+			row.put("myrxcard_pricing",rec.get("MyRXCard_Pricing").toDecimal());
+		}
+		if(rec.get("MEDSDirect_Pricing") != null)
+		{
+			row.put("medsdirect_pricing",rec.get("MEDSDirect_Pricing").toDecimal());
+		}
+		if(rec.get("RxFree4me_Pricing") != null)
+		{
+			row.put("rxfree4me_pricing",rec.get("RxFree4me_Pricing").toDecimal());
+		}
+		if(rec.get("GlobalRx_Pricing") != null)
+		{
+			row.put("globalrx_pricing",rec.get("GlobalRx_Pricing").toDecimal());
+		}
+		if(rec.get("Canada_Pharmacy_Export_Pricing") != null)
+		{
+			row.put("canada_pricing",rec.get("Canada_Pharmacy_Export_Pricing").toDecimal());
+		}
+		if(rec.get("Shipping_Fees") != null)
+		{
+			row.put("shipping_fees",rec.get("Shipping_Fees").toDecimal());
+		}
+		if(rec.get("Physician_Fees") != null)
+		{
+			row.put("physician_fees",rec.get("Physician_Fees").toDecimal());
+		}
+		if(rec.get("Other_Fees") != null)
+		{
+			row.put("other_fees",rec.get("Other_Fees").toDecimal());
+		}
+		rows.add(row);
+		if(rows.size() == 12)
+		{
+			payload = Map();
+			payload.put("secret",syncSecret);
+			payload.put("rows",rows);
+			resp = invokeurl
+			[
+				url :syncUrl
+				type :POST
+				parameters:payload.toString()
+				headers:{"content-type":"application/json"}
+			];
+			info "batch: " + resp;
+			pushed = pushed + rows.size();
+			rows = List();
+		}
+	}
+	if(rows.size() > 0)
+	{
+		payload = Map();
+		payload.put("secret",syncSecret);
+		payload.put("rows",rows);
+		resp = invokeurl
+		[
+			url :syncUrl
+			type :POST
+			parameters:payload.toString()
+			headers:{"content-type":"application/json"}
+		];
+		info "final batch: " + resp;
+		pushed = pushed + rows.size();
+	}
+	info "page " + page + ": pushed " + pushed + ", skipped " + skipped + " (missing client/med/date)";
+}
