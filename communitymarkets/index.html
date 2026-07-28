@@ -1551,10 +1551,15 @@ function aggregate(all, period, filters, ranges) {
   }
 
   const sessions = new Set(ev.map((e) => e.session));
-  let hasFeatured = 0, printed = 0, printedFeatured = 0;
+  let hasFeatured = 0, printed = 0, printedFeatured = 0, walletSaves = 0, walletApple = 0, walletGoogle = 0;
   for (const e of ev) {
     if (e.hasFeatured) hasFeatured++;
     if (e.printed) { printed++; if (e.printedFeatured) printedFeatured++; }
+    if (e.walletSaved) {
+      walletSaves++;
+      if (e.platform.includes("apple")) walletApple++;
+      if (e.platform.includes("google")) walletGoogle++;
+    }
   }
 
   // buckets on LOCAL calendar days (weekly if window > 90 days)
@@ -1610,7 +1615,7 @@ function aggregate(all, period, filters, ranges) {
     uniqueStates: new Set(ev.filter((e) => e.state).map((e) => e.state)).size,
     uniqueCities: new Set(ev.filter((e) => e.city).map((e) => e.city + "|" + e.state)).size,
     perSession: sessions.size ? ev.length / sessions.size : 0,
-    hasFeatured, printed, printedFeatured,
+    hasFeatured, printed, printedFeatured, walletSaves, walletApple, walletGoogle,
     topDrugs: top(drugs, 10),
     topStates: top(states, 8),
     allStates: top(states, 99),
@@ -1738,6 +1743,7 @@ function renderStats(a, prev) {
     a.usState ? [esc(a.usState), "State", "pin", ""] : [fmt(a.uniqueStates), "States", "pin", badge(a.uniqueStates, prev && prev.uniqueStates)],
     [fmt(a.uniqueCities), "Cities", "city", badge(a.uniqueCities, prev && prev.uniqueCities)],
     [a.perSession.toFixed(1), "Searches / session", "gauge", badge(a.perSession, prev && prev.perSession)],
+    [fmt(a.walletSaves), "Wallet saves", "gauge", badge(a.walletSaves, prev && prev.walletSaves)],
   ];
   $("stats").innerHTML = items.map(([v, k, ico, bdg]) =>
     `<div class="stat"><span class="s-ico">${ICONS[ico] || ""}</span>` +
@@ -1817,6 +1823,7 @@ function renderFunnel(a) {
     ["Searches run", a.total, a.total, "var(--tertiary)"],
     ["Featured pharmacy in results", a.hasFeatured, a.total, "var(--secondary)"],
     ["Card printed", a.printed, a.total, "var(--accent)"],
+    ["Saved to digital wallet", a.walletSaves, a.total, "#0A4C70"],
   ];
   const html = rows.map(([name, v, base, color]) => {
     const pct = base ? (v / base) * 100 : 0;
@@ -1826,9 +1833,10 @@ function renderFunnel(a) {
       <div class="funnel-bar"><i style="width:${pct.toFixed(1)}%;background:${color}"></i></div>
     </div>`;
   }).join("");
-  const note = a.printed
-    ? `<b>${fmt(a.printedFeatured)}</b> of the ${fmt(a.printed)} printed cards went to a featured pharmacy`
-    : `No cards printed in this window yet`;
+  const bits = [];
+  if (a.printed) bits.push(`<b>${fmt(a.printedFeatured)}</b> of the ${fmt(a.printed)} printed cards went to a featured pharmacy`);
+  if (a.walletSaves) bits.push(`wallet saves: <b>${fmt(a.walletApple)}</b> Apple &middot; <b>${fmt(a.walletGoogle)}</b> Google`);
+  const note = bits.length ? bits.join(" &nbsp;&middot;&nbsp; ") : `No cards printed or saved in this window yet`;
   $("funnel").innerHTML = html + `<div class="funnel-note">${note}</div>`;
 }
 
@@ -2166,65 +2174,60 @@ function loadCustomCharts() { try { customCharts.list = JSON.parse(localStorage.
 function saveCustomCharts() { try { localStorage.setItem("mrx-custom-charts", JSON.stringify(customCharts.list)); } catch {} }
 
 const CHART_MEASURES = {
-  searches:      { label: "searches",       of: (ev) => ev.filter((e) => e.drug).length },
-  sessions:      { label: "sessions",       of: (ev) => new Set(ev.map((e) => e.session).filter(Boolean)).size },
-  prints:        { label: "prints",         of: (ev) => ev.filter((e) => e.printed).length },
-  wallet_saves:  { label: "wallet saves",   of: (ev) => ev.filter((e) => e.walletSaved).length },
-  featured_rate: { label: "featured rate",  pct: true, of: (ev) => { const s = ev.filter((e) => e.drug); return s.length ? 100 * s.filter((e) => e.hasFeatured).length / s.length : 0; } },
-  print_rate:    { label: "print rate",     pct: true, of: (ev) => { const s = ev.filter((e) => e.drug); return s.length ? 100 * s.filter((e) => e.printed).length / s.length : 0; } },
-  avg_top_price: { label: "avg best price", money: true, of: (ev) => { const v = ev.map((e) => e.topPrice).filter((x) => x > 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : 0; } },
+  paid_claims:      { label: "paid claims",      of: (t) => t.paidN },
+  reversed_claims:  { label: "reversed claims",  of: (t) => t.revN },
+  net_claims:       { label: "net claims",       of: (t) => t.paidN - t.revN },
+  paid_dollars:     { label: "paid $",           money: true, of: (t) => t.paid },
+  reversed_dollars: { label: "reversed $",       money: true, of: (t) => Math.abs(t.rev) },
+  net_dollars:      { label: "net $",            money: true, of: (t) => t.paid + t.rev },
+  reversal_rate:    { label: "reversal rate",    pct: true, of: (t) => t.paidN ? 100 * t.revN / t.paidN : 0 },
 };
-const CHART_GROUPS = {
-  microsite: (e) => [e.group], drug: (e) => e.drug ? [e.drug] : [], state: (e) => e.state ? [e.state] : [],
-  city: (e) => e.city ? [e.city] : [], device: (e) => [e.device], browser: (e) => e.browser ? [e.browser] : [],
-  platform: (e) => e.platform ? e.platform.split(",").map((s) => s.trim()).filter(Boolean) : [],
-  dosage: (e) => e.dosage ? [e.dosage] : [],
-};
-function chartEvents(spec) {
-  const [fromTs, toTs] = periodBounds(state.period);
-  const w = spec.where || {};
-  const eqi = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
-  const inc = (a, b) => String(a || "").toLowerCase().includes(String(b || "").toLowerCase());
-  return state.events.filter((e) => {
-    if (e.t < fromTs || e.t >= toTs) return false;
-    if (w.microsite !== undefined && !(eqi(e.group, w.microsite) || inc(e.group, w.microsite))) return false;
-    if (w.drug !== undefined && !(eqi(e.drug, w.drug) || inc(e.drug, w.drug))) return false;
-    if (w.state !== undefined && !eqi(e.state, normState(w.state))) return false;
-    if (w.city !== undefined && !eqi(e.city, w.city)) return false;
-    if (w.device !== undefined && !eqi(e.device, w.device)) return false;
-    if (w.platform !== undefined && !inc(e.platform, w.platform)) return false;
-    if (w.printed !== undefined && e.printed !== !!w.printed) return false;
-    if (w.wallet_saved !== undefined && e.walletSaved !== !!w.wallet_saved) return false;
-    if (w.featured !== undefined && e.hasFeatured !== !!w.featured) return false;
-    return true;
-  });
-}
+const CHART_BRAND_NAMES = { G: "Generic", B: "Brand", T: "Specialty", "\u2014": "\u2014" };
+// Executes a utilization chart spec over ALL loaded claim periods. Facts:
+// [monthIdx, groupIdx, stateIdx, pharmIdx, brandIdx, classIdx, drugIdx, uc,
+//  paid$, reversed$(neg), paidClaims, revClaims, ...]. Dim indexes are
+// per-period, so everything keys on the resolved LABEL, which merges periods.
 function execChartSpec(spec) {
-  const ev = chartEvents(spec);
-  const M = CHART_MEASURES[spec.measure] || CHART_MEASURES.searches;
+  const DIM_SLOT = { month: 0, group: 1, state: 2, pharmacy: 3, brand: 4, class: 5, drug: 6 };
+  const DIM_NAME = { month: "months", group: "groups", state: "states", pharmacy: "pharmacies", brand: "brands", class: "classes", drug: "drugs" };
+  const M = CHART_MEASURES[spec.measure] || CHART_MEASURES.paid_claims;
+  const w = spec.where || {};
+  const wantBrand = w.brand !== undefined ? (/gen/i.test(String(w.brand)) ? "G" : /brand/i.test(String(w.brand)) ? "B" : String(w.brand).toUpperCase()) : null;
+  const inc = (a, b) => String(a || "").toLowerCase().includes(String(b || "").toLowerCase());
+  const groupDim = spec.chart === "line" ? "month" : spec.groupBy;
+  const totals = new Map(); // label -> {paid, rev, paidN, revN}
+  const periods = (util.data && util.data.periods) || {};
+  for (const p of Object.values(periods)) {
+    const d = p.dims || {};
+    for (const f of p.facts || []) {
+      if (w.month !== undefined && !inc(d.months[f[0]], w.month)) continue;
+      if (w.group !== undefined && !inc(d.groups[f[1]], w.group)) continue;
+      if (w.state !== undefined && String(d.states[f[2]] || "").toUpperCase() !== String(w.state).toUpperCase()) continue;
+      if (w.pharmacy !== undefined && !inc(d.pharmacies[f[3]], w.pharmacy)) continue;
+      if (wantBrand !== null && String(d.brands[f[4]] || "").toUpperCase() !== wantBrand) continue;
+      if (w.class !== undefined && !inc(d.classes[f[5]], w.class)) continue;
+      if (w.drug !== undefined && !inc(d.drugs[f[6]], w.drug)) continue;
+      let key = "ALL";
+      if (groupDim) {
+        const raw = (d[DIM_NAME[groupDim]] || [])[f[DIM_SLOT[groupDim]]];
+        key = groupDim === "brand" ? (CHART_BRAND_NAMES[raw] || raw || "\u2014") : (raw || "\u2014");
+      }
+      const t = totals.get(key) || { paid: 0, rev: 0, paidN: 0, revN: 0 };
+      t.paid += f[8] || 0; t.rev += f[9] || 0; t.paidN += f[10] || 0; t.revN += f[11] || 0;
+      totals.set(key, t);
+    }
+  }
   if (spec.chart === "line") {
-    const bucketKey = (t) => {
-      const d = new Date(t);
-      if (spec.bucket === "day") return d.toISOString().slice(0, 10);
-      if (spec.bucket === "month") return d.toISOString().slice(0, 7);
-      const w = new Date(d); w.setDate(d.getDate() - d.getDay());
-      return w.toISOString().slice(0, 10);
-    };
-    const buckets = new Map();
-    for (const e of ev) { const k = bucketKey(e.t); if (!buckets.has(k)) buckets.set(k, []); buckets.get(k).push(e); }
-    const points = [...buckets.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, rows]) => [k, M.of(rows)]);
+    const points = [...totals.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, t]) => [k, M.of(t)]);
     return { kind: "line", points, M };
   }
-  if (!spec.groupBy) return { kind: "number", value: M.of(ev), M };
-  const gf = CHART_GROUPS[spec.groupBy] || CHART_GROUPS.microsite;
-  const groups = new Map();
-  for (const e of ev) for (const k of gf(e)) { if (!groups.has(k)) groups.set(k, []); groups.get(k).push(e); }
-  const rows = [...groups.entries()].map(([k, list]) => [k, M.of(list)]).filter((r) => r[1] > 0)
+  if (!groupDim) return { kind: "number", value: M.of(totals.get("ALL") || { paid: 0, rev: 0, paidN: 0, revN: 0 }), M };
+  const rows = [...totals.entries()].map(([k, t]) => [k, M.of(t)]).filter((r) => r[1] > 0)
     .sort((a, b) => b[1] - a[1]).slice(0, spec.limit || 10);
   return { kind: spec.chart, rows, M };
 }
 function chartHTML(spec, res) {
-  const val = (v) => res.M.money ? "$" + Number(v).toFixed(2) : res.M.pct ? Number(v).toFixed(1) + "%" : fmt(v);
+  const val = (v) => res.M.money ? "$" + Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 }) : res.M.pct ? Number(v).toFixed(1) + "%" : fmt(v);
   const empty = `<div style="color:var(--ink-mute);font-size:13px;padding:6px 0">Nothing matches in this period.</div>`;
   if (res.kind === "number")
     return `<div style="padding:6px 0"><span class="big num" style="font-size:34px">${val(res.value)}</span>
@@ -2279,6 +2282,7 @@ function chartHTML(spec, res) {
 function renderCustomCharts() {
   const box = document.getElementById("pc-saved");
   if (!box) return;
+  if (!util.loaded) { if (customCharts.list.length) box.innerHTML = `<div style="color:var(--ink-mute);font-size:12px;margin:4px 0 10px">My charts load with the utilization data.</div>`; return; }
   if (!customCharts.list.length) { box.innerHTML = ""; return; }
   box.innerHTML = `<div class="kicker" style="margin:2px 0 8px">My charts</div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px;margin-bottom:14px">` +
@@ -2300,6 +2304,7 @@ async function onPromptChart(e) {
   const q = $("pc-input").value.trim();
   if (!q) return;
   if (state.mode !== "live" || !gatePw) { $("pc-status").textContent = "Charts need the live report — unlock with the report password first."; return; }
+  if (!util.loaded) { $("pc-status").textContent = "Loading utilization data…"; await ensureUtilData(); $("pc-status").textContent = ""; if (!util.loaded) { $("pc-status").textContent = "Utilization data isn\u2019t available."; return; } }
   const btn = $("pc-btn");
   btn.disabled = true; $("pc-status").textContent = "Asking Claude…"; $("pc-preview").innerHTML = "";
   try {
@@ -2326,12 +2331,13 @@ async function onPromptChart(e) {
 }
 function initPromptCharts() {
   if (window.CLIENT_SITE) return; // root (Avalon) dashboard only — never on client microsite pages
-  const host = document.querySelector("#view-search .grid");
+  const host = document.getElementById("util-body");
   if (!host || document.getElementById("pc-wrap")) return;
   const wrap = document.createElement("div");
   wrap.id = "pc-wrap";
   wrap.innerHTML = `<div class="panel" style="margin-bottom:14px">
       <div class="kicker">Prompt a chart &middot; AI</div>
+      <div style="font-size:12px;color:var(--ink-mute);margin-top:4px">Charts claims utilization — paid/reversed claims and dollars, reversal rate — by month, pharmacy group, state, pharmacy, brand/generic, class or drug.</div>
       <form id="pc-form" style="display:flex;gap:8px;margin:8px 0 4px;flex-wrap:wrap">
         <input id="pc-input" placeholder='e.g. "wallet saves by platform" or "weekly searches on Vault"'
           style="flex:1;min-width:240px;padding:9px 12px;border:1px solid rgba(127,168,189,.4);border-radius:8px;font:inherit;background:transparent;color:inherit">
@@ -3770,6 +3776,7 @@ async function setTab(name) {
   if (name === "util" || name === "fees") {
     if (!util.loaded) { stamp(true, "LOADING…"); await ensureUtilData(); }
     renderUtil();
+    renderCustomCharts();
     const g = util.data && util.data.generatedAt;
     stamp(true, (name === "fees" ? "ADMIN FEES" : "UTILIZATION") + (g ? " · " + new Date(g).toLocaleDateString("en-US") : ""));
   } else if (state.mode === "live" && state.lastSync) {

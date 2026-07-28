@@ -119,55 +119,62 @@ async function makeImage(env, prompt, size) {
 // dashboard's own renderer executes against ALREADY-LOADED search events.
 // The model never sees data and never returns code — only a spec, which is
 // re-validated here so the client can trust every field.
-const CHART_SYS = `You translate an analytics request about MyRxCard's prescription-search data into ONE JSON chart spec. Reply with ONLY the JSON object — no prose, no code fences.
+const CHART_SYS = `You translate an analytics request about MyRxCard PHARMACY CLAIMS (utilization) data into ONE JSON chart spec. Reply with ONLY the JSON object — no prose, no code fences.
 
-The data: one row per drug search (or card-save) on myrxcard.com and its partner microsites.
+The data: quarterly pharmacy-claims facts — paid and reversed claims with dollar amounts, by month, pharmacy group, state, pharmacy, brand/generic, therapeutic class and drug.
 
 Spec shape:
 {"title": short human title,
  "chart": "bar"|"line"|"donut"|"number"|"table",
- "measure": "searches"|"sessions"|"prints"|"wallet_saves"|"featured_rate"|"print_rate"|"avg_top_price",
- "groupBy": null|"microsite"|"drug"|"state"|"city"|"device"|"browser"|"platform"|"dosage",
- "bucket": null|"day"|"week"|"month",
- "where": object with any of: microsite, drug, state (2-letter code), city, device ("mobile"|"desktop"), platform ("apple"|"google"|"physical"), printed (bool), wallet_saved (bool), featured (bool),
+ "measure": "paid_claims"|"reversed_claims"|"net_claims"|"paid_dollars"|"reversed_dollars"|"net_dollars"|"reversal_rate",
+ "groupBy": null|"month"|"group"|"state"|"pharmacy"|"brand"|"class"|"drug",
+ "where": object with any of: group, state (2-letter), pharmacy, brand ("brand"|"generic"), class, drug, month ("YYYY-MM"),
  "limit": integer 1-24 (top-N; default 10)}
 
 Rules:
-- "line" needs bucket (default "week") and uses groupBy null (single series).
-- "number" = one KPI, groupBy null.
-- "bar"/"donut"/"table" need groupBy.
-- measure meanings: searches = search count; sessions = unique visitors; prints = physical card prints; wallet_saves = Apple/Google wallet saves; featured_rate = share of searches showing a featured pharmacy; print_rate = prints per search; avg_top_price = average best price shown.
-- microsite values are partner names like "Vault Strategies", "Rochester Regional Health", "Brookshire Brothers", "UW Health (UWHC)", "VIP", "Direct site".
+- "line" = the measure over months (groupBy is forced to month; no other time axis exists).
+- "number" = one KPI, groupBy null. "bar"/"donut"/"table" need groupBy.
+- measure meanings: paid_claims/reversed_claims = claim counts; net_claims = paid minus reversed; *_dollars = gross plan amounts; reversal_rate = reversed/paid claims as a percent.
+- SCOPE: claims data ONLY. There is no website-search data here (no searches, sessions, wallet saves, prints, prices shown). If the request needs data outside this catalog, or an unexpressible shape, reply {"error":"<one sentence: what this can chart instead>"}. NEVER substitute a different measure under the requested title.
 
 Examples:
-"wallet saves by platform" -> {"title":"Wallet saves by platform","chart":"donut","measure":"wallet_saves","groupBy":"platform","bucket":null,"where":{},"limit":10}
-"weekly searches on vault" -> {"title":"Vault Strategies — searches per week","chart":"line","measure":"searches","groupBy":null,"bucket":"week","where":{"microsite":"Vault Strategies"},"limit":10}
-"top 5 drugs printed on mobile" -> {"title":"Top drugs printed on mobile","chart":"bar","measure":"prints","groupBy":"drug","bucket":null,"where":{"device":"mobile"},"limit":5}`;
+"reversed claims by drug" -> {"title":"Reversed claims by drug","chart":"bar","measure":"reversed_claims","groupBy":"drug","where":{},"limit":10}
+"paid dollars per month" -> {"title":"Paid dollars per month","chart":"line","measure":"paid_dollars","groupBy":"month","where":{},"limit":24}
+"reversal rate by pharmacy group" -> {"title":"Reversal rate by pharmacy group","chart":"bar","measure":"reversal_rate","groupBy":"group","where":{},"limit":10}`;
 
 const CHART_ENUM = {
   chart: ["bar", "line", "donut", "number", "table"],
-  measure: ["searches", "sessions", "prints", "wallet_saves", "featured_rate", "print_rate", "avg_top_price"],
-  groupBy: ["microsite", "drug", "state", "city", "device", "browser", "platform", "dosage"],
-  bucket: ["day", "week", "month"],
-  whereKeys: ["microsite", "drug", "state", "city", "device", "platform", "printed", "wallet_saved", "featured"],
+  measure: ["paid_claims", "reversed_claims", "net_claims", "paid_dollars", "reversed_dollars", "net_dollars", "reversal_rate"],
+  groupBy: ["month", "group", "state", "pharmacy", "brand", "class", "drug"],
+  bucket: [],
+  whereKeys: ["group", "state", "pharmacy", "brand", "class", "drug", "month"],
 };
 function validateChartSpec(raw) {
   const s = typeof raw === "object" && raw ? raw : {};
+  // A measure/groupBy OUTSIDE the enum means the model tried to chart data we
+  // don't have (e.g. "reversed_claims"). Refuse loudly — silently defaulting
+  // to "searches" once produced a chart wearing the user's title over the
+  // wrong data, which is worse than any error.
+  if (s.error) return { error: String(s.error).slice(0, 300) };
+  if (s.measure && !CHART_ENUM.measure.includes(s.measure))
+    return { error: `"${s.measure}" isn't in this dataset — chartable measures: ${CHART_ENUM.measure.join(", ")}.` };
+  if (s.groupBy && !CHART_ENUM.groupBy.includes(s.groupBy))
+    return { error: `Can't group by "${s.groupBy}" — available: ${CHART_ENUM.groupBy.join(", ")}.` };
   const spec = {
     title: String(s.title || "Untitled chart").slice(0, 120),
     chart: CHART_ENUM.chart.includes(s.chart) ? s.chart : "bar",
     measure: CHART_ENUM.measure.includes(s.measure) ? s.measure : "searches",
     groupBy: CHART_ENUM.groupBy.includes(s.groupBy) ? s.groupBy : null,
-    bucket: CHART_ENUM.bucket.includes(s.bucket) ? s.bucket : null,
+    bucket: null,
     where: {},
     limit: Math.max(1, Math.min(24, parseInt(s.limit, 10) || 10)),
   };
   if (s.where && typeof s.where === "object")
     for (const k of CHART_ENUM.whereKeys) if (s.where[k] !== undefined && s.where[k] !== null)
       spec.where[k] = typeof s.where[k] === "boolean" ? s.where[k] : String(s.where[k]).slice(0, 80);
-  // structural coherence: lines are single-series over time; KPIs have no axis
-  if (spec.chart === "line") { spec.groupBy = null; if (!spec.bucket) spec.bucket = "week"; }
-  else spec.bucket = null;
+  // structural coherence: a line is the measure over months; KPIs have no axis
+  spec.bucket = null;
+  if (spec.chart === "line") spec.groupBy = "month";
   if (spec.chart === "number") spec.groupBy = null;
   if (["bar", "donut", "table"].includes(spec.chart) && !spec.groupBy) spec.chart = "number";
   return spec;
@@ -189,7 +196,7 @@ async function makeChartSpec(env, prompt) {
       const out = await r.json();
       if (!r.ok) throw new Error(out.error?.message || `Anthropic ${r.status}`);
       const spec = parseSpecText((out.content || []).map((c) => c.text || "").join(""));
-      if (spec) return { spec: validateChartSpec(spec), via: "claude-sonnet-5" };
+      if (spec) { const v = validateChartSpec(spec); return v.error ? { error: v.error } : { spec: v, via: "claude-sonnet-5" }; }
       throw new Error("no JSON in reply");
     } catch (e) { premiumErr = `anthropic: ${e.message}`; }
   }
@@ -204,7 +211,7 @@ async function makeChartSpec(env, prompt) {
       const out = await r.json();
       if (!r.ok) throw new Error(out.error?.message || `OpenAI ${r.status}`);
       const spec = parseSpecText(out.choices?.[0]?.message?.content || "");
-      if (spec) return { spec: validateChartSpec(spec), via: "gpt-4o-mini", note: premiumErr ? `fell back (${premiumErr})` : undefined };
+      if (spec) { const v = validateChartSpec(spec); return v.error ? { error: v.error } : { spec: v, via: "gpt-4o-mini", note: premiumErr ? `fell back (${premiumErr})` : undefined }; }
       throw new Error("no JSON in reply");
     } catch (e) { premiumErr = `${premiumErr ? premiumErr + "; " : ""}openai: ${e.message}`; }
   }
@@ -215,7 +222,7 @@ async function makeChartSpec(env, prompt) {
         max_tokens: 600,
       });
       const spec = parseSpecText(res.response || "");
-      if (spec) return { spec: validateChartSpec(spec), via: "llama-3.3-70b", note: premiumErr ? `fell back (${premiumErr})` : undefined };
+      if (spec) { const v = validateChartSpec(spec); return v.error ? { error: v.error } : { spec: v, via: "llama-3.3-70b", note: premiumErr ? `fell back (${premiumErr})` : undefined }; }
       premiumErr = `${premiumErr ? premiumErr + "; " : ""}llama: no JSON (${String(res.response || "").slice(0, 80)})`;
     } catch (e) { premiumErr = `${premiumErr ? premiumErr + "; " : ""}llama: ${e.message}`; }
   }
@@ -234,7 +241,8 @@ export default {
     const size = ["1024x1024", "1536x1024", "1024x1536"].includes(body.size) ? body.size : "1024x1024";
     try {
       if (body.kind === "chart") {
-        return json(await makeChartSpec(env, prompt));
+        const out = await makeChartSpec(env, prompt);
+        return json(out, out.error ? 422 : 200);
       }
       if (body.kind === "icon") {
         const out = await makeIcon(env, prompt);
