@@ -115,6 +115,10 @@ export default {
       return [...new Uint8Array(sig)].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
     };
     for (const row of rows) if (row.member_ref) row.member_ref = await tokenize(row.member_ref);
+    // case_key arrives as a 19-digit Zoho id; prefix it so Xano's "=" search
+    // treats it as text, not a number (big-int coercion made distinct ids
+    // collide, collapsing every upsert onto one row).
+    for (const row of rows) row.case_key = "c" + row.case_key;
     let events = 0;
     const logEvent = async (row, type, field, oldV, newV) => {
       if (!env.XANO_EVENTS_URL) return;
@@ -128,8 +132,10 @@ export default {
     };
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
+      // Xano meta content search: [{col: value}] does an exact match; the
+      // {field,operator,value} form is silently ignored and returns all rows
       const sr = await fetch(`${env.XANO_CONTENT_URL}/search`, { method: "POST", headers: H,
-        body: JSON.stringify({ page: 1, per_page: 1, search: [{ field: "case_key", operator: "=", value: row.case_key }] }) });
+        body: JSON.stringify({ page: 1, per_page: 1, search: [{ case_key: row.case_key }] }) });
       const sout = await sr.json().catch(() => ({}));
       if (!sr.ok) return json({ error: `Xano search ${sr.status} on row ${i}: ${JSON.stringify(sout).slice(0, 200)}` }, 502);
       const existing = (sout.items || [])[0];
