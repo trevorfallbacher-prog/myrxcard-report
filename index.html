@@ -2202,10 +2202,17 @@ function execChartSpec(spec) {
   };
   const totals = new Map();  // single-dim accumulation
   const byMonth = new Map(); // multi-series: month -> Map(label -> totals)
-  const periods = (util.data && util.data.periods) || {};
-  for (const p of Object.values(periods)) {
+  // Charts read the SAME merged cube as every other utilization panel and
+  // pass every fact through factPass() first — so the universal slicers
+  // (date range, timeframe, clients, pharmacies, months, states, brands)
+  // bound the chart exactly like they bound the built-in panels. The
+  // prompt's own where-filters are applied on top of that.
+  const mp = util.merged || (util.data && util.data.periods ? (util.merged = mergedPeriod(util.data)) : null);
+  {
+    const p = mp || { facts: [], dims: {} };
     const d = p.dims || {};
     for (const f of p.facts || []) {
+      if (!factPass(f)) continue;
       if (w.month !== undefined && !inc(d.months[f[0]], w.month)) continue;
       if (w.group !== undefined && !inc(d.groups[f[1]], w.group)) continue;
       if (w.state !== undefined && String(d.states[f[2]] || "").toUpperCase() !== String(w.state).toUpperCase()) continue;
@@ -2434,7 +2441,7 @@ function initPromptCharts() {
   wrap.id = "pc-wrap";
   wrap.innerHTML = `<div class="panel" style="margin-bottom:14px">
       <div class="kicker">Prompt a chart &middot; AI</div>
-      <div style="font-size:12px;color:var(--ink-mute);margin-top:4px">Charts claims utilization — paid/reversed claims and dollars, reversal rate — by month, pharmacy group, state, pharmacy, brand/generic, class or drug.</div>
+      <div style="font-size:12px;color:var(--ink-mute);margin-top:4px">Charts claims utilization — paid/reversed claims and dollars, reversal rate — by month, pharmacy group, state, pharmacy, brand/generic, class or drug. Respects the active slicers and timeframe above.</div>
       <form id="pc-form" style="display:flex;gap:8px;margin:8px 0 4px;flex-wrap:wrap">
         <input id="pc-input" placeholder='e.g. "wallet saves by platform" or "weekly searches on Vault"'
           style="flex:1;min-width:240px;padding:9px 12px;border:1px solid rgba(127,168,189,.4);border-radius:8px;font:inherit;background:transparent;color:inherit">
@@ -3697,6 +3704,7 @@ function renderUtil() {
   for (const el of document.querySelectorAll("#kpi-money .v, #kpi-claims .v, #uc-count"))
     if (el.closest(".vis")) countUp(el); // below-fold numbers roll up at reveal instead
   $("view-desc").textContent = utilViewDesc(p);
+  renderCustomCharts(); // prompt-charts obey the same slicers — keep them in step
 }
 
 /* ---------------- admin fees tab (internal) ----------------
@@ -3873,7 +3881,6 @@ async function setTab(name) {
   if (name === "util" || name === "fees") {
     if (!util.loaded) { stamp(true, "LOADING…"); await ensureUtilData(); }
     renderUtil();
-    renderCustomCharts();
     const g = util.data && util.data.generatedAt;
     stamp(true, (name === "fees" ? "ADMIN FEES" : "UTILIZATION") + (g ? " · " + new Date(g).toLocaleDateString("en-US") : ""));
   } else if (state.mode === "live" && state.lastSync) {
