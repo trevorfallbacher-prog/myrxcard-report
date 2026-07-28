@@ -1,0 +1,7 @@
+// backfill_avalon_cases — one-time history load (run manually, page 1..N)
+// Not attached to any rule. Create as Automation-category function with one
+// Int argument "page"; run via the editor's play button with page=1,2,3…
+// until the log says "no records — backfill complete".
+// Batches of 12 match the worker's per-push cap (events cost extra calls).
+// Body goes between the braces of: void automation.backfill_avalon_cases(int page)
+(body identical to chat version but with rows.size() == 12)

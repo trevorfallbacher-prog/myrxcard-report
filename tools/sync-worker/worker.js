@@ -92,15 +92,30 @@ export default {
     if (!env.XANO_META_TOKEN || !env.XANO_CONTENT_URL) return json({ error: "Xano connection not configured" }, 500);
     const rows = body.rows;
     if (!Array.isArray(rows) || !rows.length) return json({ error: "rows[] required" }, 400);
-    if (rows.length > 500) return json({ error: "too many rows in one push (max 500)" }, 400);
+    // each row costs up to 4 Xano calls (search + write + up to 2 events);
+    // 12 keeps a full batch inside Cloudflare's per-request subrequest budget
+    if (rows.length > 12) return json({ error: "too many rows in one push (max 12)" }, 400);
     // all-or-nothing: one bad row rejects the whole batch, so a PHI leak
     // can't ride along with valid rows
     for (let i = 0; i < rows.length; i++) {
       const err = validateRow(rows[i]);
       if (err) return json({ error: `row ${i}: ${err}` }, 422);
     }
-    // upsert each row by case_key via the Metadata API
+    // upsert each row by case_key via the Metadata API, and append timeline
+    // events for what changed (compared against the row's previous state)
     const H = { "content-type": "application/json", authorization: `Bearer ${env.XANO_META_TOKEN}` };
+    const now = new Date().toISOString();
+    let events = 0;
+    const logEvent = async (row, type, field, oldV, newV) => {
+      if (!env.XANO_EVENTS_URL) return;
+      events++;
+      await fetch(env.XANO_EVENTS_URL, { method: "POST", headers: H, body: JSON.stringify({
+        case_key: row.case_key, assist_number: row.assist_number || "", client_name: row.client_name,
+        medication_name: row.medication_name, source: row.source || "",
+        event_type: type, field: field || "", old_value: String(oldV ?? ""), new_value: String(newV ?? ""),
+        occurred_at: now,
+      }) }).catch(() => {}); // the case row is the source of truth; a lost event never fails the sync
+    };
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const sr = await fetch(`${env.XANO_CONTENT_URL}/search`, { method: "POST", headers: H,
@@ -112,7 +127,29 @@ export default {
         ? await fetch(`${env.XANO_CONTENT_URL}/${existing.id}`, { method: "PUT", headers: H, body: JSON.stringify(row) })
         : await fetch(env.XANO_CONTENT_URL, { method: "POST", headers: H, body: JSON.stringify(row) });
       if (!wr.ok) return json({ error: `Xano write ${wr.status} on row ${i}: ${(await wr.text()).slice(0, 200)}` }, 502);
+      if (!existing) {
+        await logEvent(row, "created", "status", "", row.status || "");
+      } else {
+        // status change gets its own event (closed reason rides along)
+        const oldStatus = existing.status || "", newStatus = row.status || "";
+        if (oldStatus !== newStatus) {
+          const reason = (row.closed_reason || "") && newStatus.startsWith("Closed") ? ` — ${row.closed_reason}` : "";
+          await logEvent(row, "status_change", "status", oldStatus, newStatus + reason);
+        }
+        // everything else changed rolls into one compact event
+        const changed = [];
+        for (const k of Object.keys(FIELDS)) {
+          if (k === "case_key" || k === "status") continue;
+          const oldV = existing[k], newV = row[k];
+          if (newV === undefined) continue; // field not sent — not a change claim
+          const same = FIELDS[k].t === "number"
+            ? Math.abs((Number(oldV) || 0) - (Number(newV) || 0)) < 0.005
+            : String(oldV ?? "") === String(newV ?? "");
+          if (!same) changed.push(k);
+        }
+        if (changed.length) await logEvent(row, "updated", changed.join(","), "", "");
+      }
     }
-    return json({ ok: true, upserted: rows.length });
+    return json({ ok: true, upserted: rows.length, events });
   },
 };
