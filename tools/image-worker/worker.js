@@ -189,13 +189,16 @@ const parseSpecText = (text) => {
   return m ? JSON.parse(m[0]) : null;
 };
 async function makeChartSpec(env, prompt) {
+  // The model does not know the date and will otherwise invent month filters
+  // for "last N months" (seen live: where.month "2022-11" -> empty chart).
+  const chartSys = CHART_SYS + `\nToday is ${new Date().toISOString().slice(0, 10)}. The loaded data covers roughly the last four quarters. For "last N months" / "over time" ranges, OMIT the month filter entirely — the chart already plots every loaded month. Only set where.month when one specific month is named.`;
   let premiumErr = null;
   if (env.ANTHROPIC_API_KEY) {
     try {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 600, system: CHART_SYS,
+        body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 600, system: chartSys,
           messages: [{ role: "user", content: prompt }] }),
       });
       const out = await r.json();
@@ -211,7 +214,7 @@ async function makeChartSpec(env, prompt) {
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${env.OPENAI_API_KEY}` },
         body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: 600, response_format: { type: "json_object" },
-          messages: [{ role: "system", content: CHART_SYS }, { role: "user", content: prompt }] }),
+          messages: [{ role: "system", content: chartSys }, { role: "user", content: prompt }] }),
       });
       const out = await r.json();
       if (!r.ok) throw new Error(out.error?.message || `OpenAI ${r.status}`);
@@ -223,7 +226,7 @@ async function makeChartSpec(env, prompt) {
   if (env.AI) {
     try {
       const res = await env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast", {
-        messages: [{ role: "system", content: CHART_SYS }, { role: "user", content: prompt }],
+        messages: [{ role: "system", content: chartSys }, { role: "user", content: prompt }],
         max_tokens: 600,
       });
       const spec = parseSpecText(res.response || "");
