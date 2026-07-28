@@ -1165,6 +1165,10 @@
             <button type="button" data-tval="money">DOLLARS</button>
             <button type="button" data-tval="claims">CLAIMS</button>
           </div>
+          <div class="segbtns" data-tset="dims">
+            <button type="button" data-tval="2d">2D</button>
+            <button type="button" data-tval="3d">3D</button>
+          </div>
         </div>
         <div id="util-trend"></div>
         <div class="donut-legend trend-legend" id="util-trend-legend"></div>
@@ -2482,7 +2486,7 @@ async function sync() {
 /* ---------------- utilization tab ---------------- */
 // Reads utilization.json (published by tools/watch-utilization.mjs when a
 // quarterly claims .xlsx is dropped into the Avalon Reports folder).
-let util = { loaded: false, data: null, period: null, trend: { measure: "money" }, tf: { gran: "Q", sel: null } };
+let util = { loaded: false, data: null, period: null, trend: { measure: "money", dims: "2d" }, tf: { gran: "Q", sel: null } };
 
 // apply the saved theme before anything renders (charts read theme at render)
 if (localStorage.getItem("mrx-theme") === "dark") document.documentElement.classList.add("dark");
@@ -3403,9 +3407,15 @@ function renderUtilTrend(p, hasCube) {
   const avg = colTotal.length ? colTotal.reduce((s2, v) => s2 + v, 0) / colTotal.length : 0;
   const fmtV = isMoney ? shortMoney : fmt;
   const fmtFull = isMoney ? money0 : int0;
-  const bw = 46, gap = 22, padL = 56, padR = 14, padTop = 24, padBot = 34, h = 320;
+  const padL = 56, padR = 26, padTop = 24, padBot = 34, h = 320;
   const n = mOrder.length;
-  const w = padL + padR + n * bw + Math.max(n - 1, 0) * gap;
+  // distribute the columns across the full panel width (the svg is rendered
+  // at width:100%); wide bars capped so a 3-month slice doesn't look absurd
+  const w = 1120, plotW = w - padL - padR;
+  const bw = n ? Math.min(96, Math.max(18, (plotW / n) * 0.62)) : 46;
+  const gap = n > 1 ? (plotW - n * bw) / (n - 1) : 0;
+  const is3d = t.dims === "3d";
+  const DX = is3d ? Math.min(14, gap * 0.6) : 0, DY = is3d ? 8 : 0;
   const chartH = h - padTop - padBot, baseY = padTop + chartH;
   const max = Math.max(...colTotal, 1);
   let s = `<line class="axis" x1="${padL}" y1="${baseY}" x2="${w - padR}" y2="${baseY}"/>`;
@@ -3420,15 +3430,28 @@ function renderUtilTrend(p, hasCube) {
       const bh = chartH * (sg.v / max);
       y -= bh;
       const t = `<title>${esc(monthLabel(p.dims.months[mi]))} · ${esc(sg.sr.name)} · ${fmtFull(sg.v)}</title>`;
+      if (is3d) {
+        const yy = y.toFixed(1), bhh = Math.max(bh, 0.5).toFixed(1);
+        // front face
+        s += `<rect x="${x}" y="${yy}" width="${bw}" height="${bhh}" fill="${sg.sr.color}">${t}</rect>`;
+        // right side face (color + dark tint — colors are CSS vars, so shading is an overlay)
+        const side = `M${x + bw} ${yy} l${DX} ${-DY} v${bhh} l${-DX} ${DY} z`;
+        s += `<path d="${side}" fill="${sg.sr.color}"/><path d="${side}" fill="#000" opacity=".24"/>`;
+        if (si === segs.length - 1) { // top face on the stack's cap
+          const top = `M${x} ${yy} l${DX} ${-DY} h${bw} l${-DX} ${DY} z`;
+          s += `<path d="${top}" fill="${sg.sr.color}"/><path d="${top}" fill="#fff" opacity=".3"/>`;
+        }
+      } else {
       s += si === segs.length - 1 // topmost segment gets the rounded cap
         ? `<path class="seg" d="${colPath(x, y, bw, bh, 5)}" fill="${sg.sr.color}">${t}</path>`
         : `<rect x="${x}" y="${y.toFixed(1)}" width="${bw}" height="${Math.max(bh, 0.5).toFixed(1)}" fill="${sg.sr.color}">${t}</rect>`;
+      }
     });
     if (colTotal[k] > 0)
-      s += `<text class="val" x="${x + bw / 2}" y="${(y - 5).toFixed(1)}" text-anchor="middle" font-size="10">${fmtV(colTotal[k])}</text>`;
+      s += `<text class="val" x="${x + bw / 2}" y="${(y - 5 - DY).toFixed(1)}" text-anchor="middle" font-size="10">${fmtV(colTotal[k])}</text>`;
     s += `<text class="cat" x="${x + bw / 2}" y="${baseY + 16}" text-anchor="middle" font-size="9.5">${esc(monthLabel(p.dims.months[mi]))}</text>`;
   });
-  if (n > 1) { // smoothed curve through the column totals
+  if (n > 1 && !is3d) { // smoothed curve through the column totals
     const pts = mOrder.map((mi, k) => [padL + k * (bw + gap) + bw / 2, baseY - chartH * (colTotal[k] / max)]);
     let curve = `M${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
     for (let i = 0; i < pts.length - 1; i++) {
@@ -3445,7 +3468,7 @@ function renderUtilTrend(p, hasCube) {
     s += `<line class="avgline" x1="${padL}" y1="${yA.toFixed(1)}" x2="${w - padR}" y2="${yA.toFixed(1)}" data-tip="Average per month: ${fmtFull(avg)}"/>`;
     s += `<text class="avglbl" x="${w - padR}" y="${(yA - 6).toFixed(1)}" text-anchor="end">AVG ${fmtV(avg)}</text>`;
   }
-  $("util-trend").innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" style="--base:${baseY}px">${s}</svg>`;
+  $("util-trend").innerHTML = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" style="width:100%;height:auto;--base:${baseY}px">${s}</svg>`;
   $("util-trend-legend").innerHTML = series.map((sr) =>
     `<div class="li"><span class="sw" style="background:${sr.color}"></span>` +
     `<span><b>${esc(sr.name)}</b> <span class="p">${fmtV(sr.vals.reduce((a, b) => a + b, 0))}</span></span></div>`).join("") +
