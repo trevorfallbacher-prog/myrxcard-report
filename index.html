@@ -671,6 +671,22 @@
   .dp-badge .b-val { font-size: 22pt; font-weight: 700; color: rgb(49,82,128); line-height: 1.15; word-break: keep-all; }
   .dp-arrows-row .dp-badge { flex: 0 0 112pt; margin: 4pt 0; }
   /* hover-to-insert line between blocks (zero net height so the page measures true) */
+  /* live-data smart-field chip */
+  .dyn { background: rgba(28,128,184,0.11); color: rgb(20,90,140); border-radius: 4px; padding: 0 3px 0 4px; box-decoration-break: clone; -webkit-box-decoration-break: clone; white-space: nowrap; font-weight: 600; }
+  .dyn .dx { display: none; margin-left: 3px; color: rgb(28,128,184); font-weight: 700; cursor: pointer; opacity: 0.6; }
+  .dyn:hover .dx { display: inline; }
+  .dyn .dx:hover { opacity: 1; }
+  /* floating "link to data" toolbar over a text selection */
+  #dyn-bar { position: fixed; z-index: 50; display: none; background: rgb(48,82,128); color: #fff; border-radius: 8px; box-shadow: 0 6px 20px rgba(10,30,45,0.28); padding: 4px; gap: 2px; }
+  #dyn-bar.show { display: flex; }
+  #dyn-bar > button { background: none; border: 0; color: #fff; font: 600 12px/1 -apple-system,"Segoe UI",sans-serif; padding: 6px 9px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 5px; }
+  #dyn-bar > button:hover { background: rgba(255,255,255,0.15); }
+  #dyn-menu { position: fixed; z-index: 51; display: none; background: var(--card); border: 1px solid var(--hair); border-radius: 10px; box-shadow: var(--shadow); padding: 6px; min-width: 210px; max-height: 300px; overflow-y: auto; }
+  #dyn-menu.show { display: block; }
+  #dyn-menu .mh { font-size: 11px; color: var(--ink-mute); padding: 4px 8px 6px; letter-spacing: 0.04em; }
+  #dyn-menu button { display: flex; width: 100%; justify-content: space-between; gap: 10px; background: none; border: 0; color: var(--ink); text-align: left; padding: 7px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  #dyn-menu button:hover { background: var(--hair); }
+  #dyn-menu button .mv { font-family: var(--mono); font-size: 12px; color: var(--secondary); }
   .dp-insert { display: flex; align-items: center; gap: 6pt; height: 14px; margin: -7px 0; position: relative; z-index: 4; opacity: 0; cursor: pointer; transition: opacity 0.12s; }
   .dp-insert:hover { opacity: 1; }
   .dp-insert i { flex: 1; height: 0; border-top: 1.5px dashed rgb(28,128,184); }
@@ -1275,6 +1291,8 @@
         </div>
         <textarea id="doc-req" rows="2" placeholder="Optional brief for ANALYZE &amp; DRAFT — e.g. one-page flyer introducing MyRxCard to independent pharmacies. Or skip it and just type into the page below."></textarea>
         <div class="docpage-wrap"><div class="docpage" id="docpage"></div></div>
+        <div id="dyn-bar"><button type="button" id="dyn-link">🔗 Link to data</button></div>
+        <div id="dyn-menu"></div>
         <div class="dp-add" style="position:relative">
           <button class="iconbtn" data-dpadd="text" type="button">+ TEXT</button>
           <button class="iconbtn" data-dpadd="table" type="button">+ TABLE</button>
@@ -3725,12 +3743,78 @@ const AVALON_LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 60
 const AVALON_LOGO_SRC = "data:image/svg+xml;utf8," + encodeURIComponent(AVALON_LOGO_SVG);
 const CE = 'contenteditable="plaintext-only"';
 
+/* ---------- smart fields: text bound to live report data ----------
+   A binding is stored inline in the text string as a token ⟦key⟧. On render
+   it shows the current value as a non-editable chip; on read-back the chip
+   serializes back to ⟦key⟧; on export/build it resolves to the real number. */
+const DYN = {
+  collected:   { label: "Collected $",       get: (s) => money0(s.a.money.collected) },
+  paid:        { label: "Paid $",            get: (s) => money0(s.a.money.paid) },
+  reversed:    { label: "Reversed $",        get: (s) => money0(s.a.money.reversed) },
+  reversedPct: { label: "Reversed %",        get: (s) => pctInt(s.a.money.reversedPct) },
+  collClaims:  { label: "Collected claims",  get: (s) => int0(s.a.claims.collected) },
+  paidClaims:  { label: "Paid claims",       get: (s) => int0(s.a.claims.paid) },
+  ucClaims:    { label: "U&C claims",        get: (s) => s.a.ucCount != null ? int0(s.a.ucCount) : "—" },
+  ucPct:       { label: "U&C % of claims",   get: (s) => s.a.ucCount != null && s.a.claims.collected ? pctInt(s.a.ucCount / s.a.claims.collected) : "—" },
+  feesNet:     { label: "Admin fees (net)",  get: (s) => s.a.fees ? money0(s.a.fees.net) : "—" },
+  topPharm:    { label: "Top pharmacy",      get: (s) => (s.a.pharmacies[0] || {}).name || "—" },
+  topPharmVal: { label: "Top pharmacy $",    get: (s) => s.a.pharmacies[0] ? money0(Math.max(s.a.pharmacies[0].collected, 0)) : "—" },
+  window:      { label: "Report period",     get: (s) => s.p.periodLabel || "—" },
+  today:       { label: "Today's date",      get: () => new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) },
+};
+// merged utilization aggregate under current filters, or null if not loaded
+function docLiveAgg() {
+  const d = window.util && util.data;
+  if (!d || !d.periods || !Object.keys(d.periods).length) return null;
+  if (!util.merged) { util.merged = mergedPeriod(d); utilFilterReset(); }
+  const p = util.merged;
+  if (!Array.isArray(p && p.facts) || !p.dims) return null;
+  return { p, a: utilAgg(p) };
+}
+function resolveDyn(key) {
+  const f = DYN[key];
+  if (!f) return "⟨?⟩";
+  if (key === "today") return f.get();
+  const s = docLiveAgg();
+  if (!s) return "⟨" + f.label + "⟩";
+  try { return f.get(s); } catch { return "⟨" + f.label + "⟩"; }
+}
+const DYN_RE = /⟦([a-zA-Z0-9_]+)⟧/g;
+// text (already escaped) → HTML with live chips in place of tokens
+function withDyn(text) {
+  return esc(text || "").replace(DYN_RE, (m, k) =>
+    `<span class="dyn" data-key="${k}" contenteditable="false" title="Live: ${esc((DYN[k] || {}).label || k)}">${esc(resolveDyn(k))}<span class="dx" data-unbind title="Unlink">×</span></span>`);
+}
+// resolve tokens to plain current values (for export / InDesign build)
+const resolveText = (text) => (text || "").replace(DYN_RE, (m, k) => resolveDyn(k));
+// in a cloned page (for print/export), turn live chips into plain resolved text
+function flattenChips(root) {
+  root.querySelectorAll(".dyn").forEach((chip) => {
+    const dx = chip.querySelector(".dx"); if (dx) dx.remove();
+    chip.replaceWith(document.createTextNode(chip.textContent));
+  });
+}
+// read an editable element back to a string, turning chips into ⟦key⟧ tokens
+function readEditable(el) {
+  let out = "";
+  el.childNodes.forEach((n) => {
+    if (n.nodeType === 3) out += n.nodeValue;
+    else if (n.nodeType === 1) {
+      if (n.classList && n.classList.contains("dyn")) out += "⟦" + n.dataset.key + "⟧";
+      else if (n.classList && n.classList.contains("dx")) { /* skip the × */ }
+      else out += readEditable(n);
+    }
+  });
+  return out;
+}
+
 // self-contained HTML for exporting the drafted page alone: a clean US-Letter
 // document with editing chrome stripped and print margins zeroed (the page's
 // own 612×792pt geometry IS 8.5×11in)
 function draftExportHTML() {
   const page = $("docpage").cloneNode(true);
   page.querySelectorAll(".dp-chrome, .join-banner, .dp-insert").forEach((el) => el.remove());
+  flattenChips(page);
   for (const el of page.querySelectorAll("[contenteditable]")) el.removeAttribute("contenteditable");
   page.classList.remove("join-src", "join-target");
   page.style.zoom = "";
@@ -3778,7 +3862,7 @@ async function draftToWordHtml() {
     parts.push({ name, type, data });
     return `<img src="file:///C:/mrx/${name}" width="${Math.round(wPt * 96 / 72)}" style="width:${wPt}pt">`;
   };
-  const text = (t) => esc(t || "").replace(/\n/g, "<br>");
+  const text = (t) => esc(resolveText(t || "")).replace(/\n/g, "<br>");
   const heads = {
     "H1": (b) => `<p style="font-size:${b.size || 16}pt;font-weight:bold;color:${NAVY};margin:0 0 6pt">${text(b.text)}</p>`,
     "Subheader": (b) => `<p style="font-size:${b.size || 9}pt;letter-spacing:2pt;text-transform:uppercase;margin:10pt 0 4pt">${text(b.text)}</p>`,
@@ -3788,8 +3872,8 @@ async function draftToWordHtml() {
   };
   const tableHtml = (t) =>
     `<table width="100%" cellspacing="0" cellpadding="4" style="border-collapse:collapse;margin:0 0 10pt"><tr>${
-      t.headers.map((h) => `<td style="background:${NAVY};color:#fff;font-weight:bold;font-size:8.5pt;letter-spacing:1pt;border:1pt solid ${NAVY}">${esc(h).toUpperCase()}</td>`).join("")}</tr>${
-      t.rows.map((r) => `<tr>${r.map((c) => `<td style="font-size:9pt;border-bottom:0.5pt solid #B9CEDD;border-left:0.5pt solid #E6EEF4;border-right:0.5pt solid #E6EEF4">${esc(c)}</td>`).join("")}</tr>`).join("")}</table>`;
+      t.headers.map((h) => `<td style="background:${NAVY};color:#fff;font-weight:bold;font-size:8.5pt;letter-spacing:1pt;border:1pt solid ${NAVY}">${esc(resolveText(h)).toUpperCase()}</td>`).join("")}</tr>${
+      t.rows.map((r) => `<tr>${r.map((c) => `<td style="font-size:9pt;border-bottom:0.5pt solid #B9CEDD;border-left:0.5pt solid #E6EEF4;border-right:0.5pt solid #E6EEF4">${esc(resolveText(c))}</td>`).join("")}</tr>`).join("")}</table>`;
   const badgeHtmlW = (s) =>
     `<table align="center" cellspacing="0" cellpadding="8" style="border:1pt solid ${NAVY};margin:10pt auto"><tr><td align="center" style="width:110pt">` +
     `<p style="font-size:7.5pt;letter-spacing:2pt;text-transform:uppercase;color:${NAVY};margin:0">${esc(s.prefix || "")}</p>` +
@@ -3915,9 +3999,9 @@ function blockInner(b, PH) {
   let inner = "", extraCtl = "";
   if (b.table) {
     inner = `<table class="dp-table"><thead><tr>${b.table.headers.map((h, c) =>
-      `<th ${CE} data-role="th" data-c="${c}">${esc(h)}</th>`).join("")}</tr></thead><tbody>${
+      `<th ${CE} data-role="th" data-c="${c}">${withDyn(h)}</th>`).join("")}</tr></thead><tbody>${
       b.table.rows.map((r, ri) => `<tr>${r.map((cell, c) =>
-        `<td ${CE} data-role="td" data-r="${ri}" data-c="${c}">${esc(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+        `<td ${CE} data-role="td" data-r="${ri}" data-c="${c}">${withDyn(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
     extraCtl = `<button type="button" data-d="row" title="Add row">+row</button><button type="button" data-d="delrow" title="Remove last row">&#8722;row</button><button type="button" data-d="col" title="Add column">+col</button><button type="button" data-d="delcol" title="Remove last column">&#8722;col</button>`;
   } else if (b.iconCols) {
     const iconSlot = (c, ci) => {
@@ -3952,7 +4036,7 @@ function blockInner(b, PH) {
     if (b.aiVisual.status === "error") extraCtl = `<button type="button" data-d="airetry" title="Try again">retry</button>`;
   } else {
     const cls = (DOC_STYLES[b.style] || DOC_STYLES.Paragraph).css;
-    inner = `<div class="${cls}" ${CE} data-role="text" data-ph="${PH[b.style] || "Text…"}"${b.size ? ` style="font-size:${b.size}pt"` : ""}>${esc(b.text || "")}</div>`;
+    inner = `<div class="${cls}" ${CE} data-role="text" data-ph="${PH[b.style] || "Text…"}"${b.size ? ` style="font-size:${b.size}pt"` : ""}>${withDyn(b.text || "")}</div>`;
     extraCtl = `<select data-d="style" title="Brand style">${DRAFT_STYLES.map((s) => `<option${s === b.style ? " selected" : ""}>${s}</option>`).join("")}</select>` +
       `<button type="button" data-d="fminus" title="Smaller text">A&#8722;</button><span class="fsize num">${b.size || DOC_SIZE[b.style] || 9}pt</span><button type="button" data-d="fplus" title="Bigger text">A+</button>`;
   }
@@ -4040,8 +4124,8 @@ function draftToBlocks() { // serialize the model for /jobs/submit — skips emp
 function serializeInto(out, b) {
   {
     if (b.table) {
-      const headers = b.table.headers.map((h) => h.trim());
-      const rows = b.table.rows.map((r) => r.map((c) => c.trim())).filter((r) => r.some(Boolean));
+      const headers = b.table.headers.map((h) => resolveText(h).trim());
+      const rows = b.table.rows.map((r) => r.map((c) => resolveText(c).trim())).filter((r) => r.some(Boolean));
       if (headers.some(Boolean)) out.push({ table: { headers, rows } });
     } else if (b.iconCols) {
       const cols = b.iconCols.map((c) => ({ title: c.title.trim(), text: c.text.trim(),
@@ -4069,7 +4153,7 @@ function serializeInto(out, b) {
     } else if (b.aiVisual) {
       // unresolved placeholder (still generating or failed) — never ships
     } else if ((b.text || "").trim()) {
-      out.push({ style: DOC_STYLES[b.style] ? b.style : "Paragraph", text: b.text.trim(), ...(b.size ? { fontSize: b.size } : {}) });
+      out.push({ style: DOC_STYLES[b.style] ? b.style : "Paragraph", text: resolveText(b.text).trim(), ...(b.size ? { fontSize: b.size } : {}) });
     }
   }
   return out;
@@ -4124,6 +4208,7 @@ function blocksToDraft(blocks) { // normalize incoming AI blocks into the model
 // copy of the draft preview beside the InDesign result
 function showIntentPreview() {
   const clone = $("docpage").cloneNode(true);
+  flattenChips(clone);
   clone.removeAttribute("id");
   clone.style.zoom = "";
   for (const c of clone.querySelectorAll(".dp-chrome")) c.remove();
@@ -4507,13 +4592,79 @@ async function boot() {
     } catch (e) { $("doc-status").textContent = "delete failed: " + e.message; }
   });
   $("doc-run").addEventListener("click", runDocBuild);
+  // ---- smart fields: bind a text selection to live report data ----
+  let dynRange = null; // saved selection Range while the toolbar is up
+  const dynBar = $("dyn-bar"), dynMenu = $("dyn-menu");
+  const hideDyn = () => { dynBar.classList.remove("show"); dynMenu.classList.remove("show"); dynRange = null; };
+  function updateDynBar() {
+    const sel = getSelection();
+    if (!sel.rangeCount || sel.isCollapsed) { if (!dynMenu.classList.contains("show")) hideDyn(); return; }
+    const r = sel.getRangeAt(0);
+    const host = r.commonAncestorContainer.nodeType === 1 ? r.commonAncestorContainer : r.commonAncestorContainer.parentElement;
+    const region = host && host.closest('[data-role="text"],[data-role="td"],[data-role="th"]');
+    if (!region || !$("docpage").contains(region)) { hideDyn(); return; }
+    dynRange = r.cloneRange();
+    const rect = r.getBoundingClientRect();
+    dynBar.style.left = Math.max(8, rect.left) + "px";
+    dynBar.style.top = Math.max(8, rect.top - 42) + "px";
+    dynBar.classList.add("show"); dynMenu.classList.remove("show");
+  }
+  document.addEventListener("selectionchange", () => { if (state.tab === "docs") setTimeout(updateDynBar, 0); });
+  document.addEventListener("mousedown", (e) => { if (!e.target.closest("#dyn-bar,#dyn-menu,.dyn")) hideDyn(); });
+  $("dyn-link").addEventListener("mousedown", (e) => e.preventDefault()); // keep the selection
+  $("dyn-link").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const s = docLiveAgg();
+    dynMenu.innerHTML = `<div class="mh">${s ? "Bind to a live figure — current filters" : "Load the Performance Summary tab first to see live values"}</div>` +
+      Object.entries(DYN).map(([k, f]) => `<button type="button" data-dyn="${k}">${f.label}<span class="mv">${esc(resolveDyn(k))}</span></button>`).join("");
+    const br = dynBar.getBoundingClientRect();
+    dynMenu.style.left = br.left + "px"; dynMenu.style.top = (br.bottom + 6) + "px";
+    dynMenu.classList.add("show");
+  });
+  dynMenu.addEventListener("mousedown", (e) => e.preventDefault());
+  dynMenu.addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-dyn]"); if (!btn || !dynRange) return;
+    const key = btn.dataset.dyn;
+    const region = (dynRange.commonAncestorContainer.nodeType === 1 ? dynRange.commonAncestorContainer : dynRange.commonAncestorContainer.parentElement)
+      .closest('[data-role="text"],[data-role="td"],[data-role="th"]');
+    if (!region) { hideDyn(); return; }
+    snapDraft();
+    // swap the selected text for a token in the DOM, then read the region back
+    dynRange.deleteContents();
+    dynRange.insertNode(document.createTextNode("⟦" + key + "⟧"));
+    commitEditable(region);
+    hideDyn();
+    renderDraft();
+  });
+  // unbind: click the × on a chip
+  $("docpage").addEventListener("click", (e) => {
+    const dx = e.target.closest(".dx"); if (!dx) return;
+    const chip = dx.closest(".dyn"), region = chip.closest('[data-role="text"],[data-role="td"],[data-role="th"]');
+    if (!region) return;
+    snapDraft();
+    chip.replaceWith(document.createTextNode(chip.firstChild.nodeValue)); // keep the resolved value as plain text
+    commitEditable(region);
+    renderDraft();
+  });
+  // write an edited region back into the model (mirrors the input handler)
+  function commitEditable(t) {
+    const role = t.dataset.role, txt = readEditable(t);
+    let b = docs.draft[+t.closest(".dp-block")?.dataset.i];
+    const cw = t.closest("[data-colc]"); if (b && b.columns && cw) b = b.columns[+cw.dataset.colc];
+    if (!b) return;
+    if (role === "text") b.text = txt;
+    else if (role === "th") b.table.headers[+t.dataset.c] = txt;
+    else if (role === "td") b.table.rows[+t.dataset.r][+t.dataset.c] = txt;
+  }
   // page editor wiring — text edits sync per keystroke, structural changes
   // mutate docs.draft and re-render
   $("docpage").addEventListener("input", (e) => {
     const t = e.target.closest("[data-role]");
     if (!t) return;
-    const txt = t.textContent, role = t.dataset.role;
-    if (role === "footer") { docs.footer = txt; return; }
+    const role = t.dataset.role;
+    // text & table cells can carry live-data chips → read tokens, not values
+    const txt = (role === "text" || role === "td" || role === "th") ? readEditable(t) : t.textContent;
+    if (role === "footer") { docs.footer = t.textContent; return; }
     let b = docs.draft[+t.closest(".dp-block")?.dataset.i];
     // edits inside a columns row target the child block, not the wrapper
     const cw = t.closest("[data-colc]");
