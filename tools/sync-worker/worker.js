@@ -37,6 +37,7 @@ const FIELDS = {
   medication_name: { t: "string", max: 80 },
   ndc: { t: "string", max: 11, re: /^\d{0,11}$/ },
   medication_type: { t: "string", max: 20 },            // Brand / Generic
+  member_ref: { t: "string", max: 30, re: /^\d*$/ },    // Zoho member record id — tokenized (HMAC) before storage, never persisted raw
   month: { t: "string", max: 7, re: /^\d{4}-\d{2}$/ },  // created month (bucketing)
   created_date: { t: "string", max: 10, re: /^\d{4}-\d{2}-\d{2}$/ },
   closed_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
@@ -105,13 +106,22 @@ export default {
     // events for what changed (compared against the row's previous state)
     const H = { "content-type": "application/json", authorization: `Bearer ${env.XANO_META_TOKEN}` };
     const now = new Date().toISOString();
+    // pseudonymize member linkage: same member → same opaque token; the raw
+    // Zoho id is used only in-memory and the salt exists only as a secret here
+    const tokenize = async (raw) => {
+      if (!raw || !env.MEMBER_SALT) return "";
+      const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.MEMBER_SALT), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+      const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(raw));
+      return [...new Uint8Array(sig)].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
+    };
+    for (const row of rows) if (row.member_ref) row.member_ref = await tokenize(row.member_ref);
     let events = 0;
     const logEvent = async (row, type, field, oldV, newV) => {
       if (!env.XANO_EVENTS_URL) return;
       events++;
       await fetch(env.XANO_EVENTS_URL, { method: "POST", headers: H, body: JSON.stringify({
         case_key: row.case_key, assist_number: row.assist_number || "", client_name: row.client_name,
-        medication_name: row.medication_name, source: row.source || "",
+        medication_name: row.medication_name, source: row.source || "", member_ref: row.member_ref || "",
         event_type: type, field: field || "", old_value: String(oldV ?? ""), new_value: String(newV ?? ""),
         occurred_at: now,
       }) }).catch(() => {}); // the case row is the source of truth; a lost event never fails the sync

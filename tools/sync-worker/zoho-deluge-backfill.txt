@@ -78,6 +78,11 @@ void automation.backfill_avalon_cases(int page)
 		row.put("month",created.subString(0,7));
 		row.put("created_date",created.subString(0,10));
 		row.put("closed_date",closedDate);
+	mem = rec.get("Member");
+	if(mem != null)
+	{
+		row.put("member_ref",ifnull(mem.get("id"),"").toString());
+	}
 		if(rec.get("AWP") != null)
 		{
 			row.put("awp",rec.get("AWP").toDecimal());
