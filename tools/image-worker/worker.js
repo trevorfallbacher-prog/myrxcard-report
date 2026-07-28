@@ -125,25 +125,28 @@ The data: quarterly pharmacy-claims facts — paid and reversed claims with doll
 
 Spec shape:
 {"title": short human title,
- "chart": "bar"|"line"|"donut"|"number"|"table",
+ "chart": "bar"|"line"|"donut"|"number"|"table"|"bump"|"multiline",
  "measure": "paid_claims"|"reversed_claims"|"net_claims"|"paid_dollars"|"reversed_dollars"|"net_dollars"|"reversal_rate",
  "groupBy": null|"month"|"group"|"state"|"pharmacy"|"brand"|"class"|"drug",
  "where": object with any of: group, state (2-letter), pharmacy, brand ("brand"|"generic"), class, drug, month ("YYYY-MM"),
  "limit": integer 1-24 (top-N; default 10)}
 
 Rules:
-- "line" = the measure over months (groupBy is forced to month; no other time axis exists).
+- "line" = the TOTAL measure over months (single series; groupBy forced to month).
+- "bump" = rank-over-time: one line per groupBy item, y = that item's rank in each month's top-N. USE THIS for any "<measure> by <dimension> over time / per month" request — it is the expected look. limit = top-N per month (default 10, max 13).
+- "multiline" = raw values over months, one line per top groupBy item — when they explicitly want values per item over time.
 - "number" = one KPI, groupBy null. "bar"/"donut"/"table" need groupBy.
 - measure meanings: paid_claims/reversed_claims = claim counts; net_claims = paid minus reversed; *_dollars = gross plan amounts; reversal_rate = reversed/paid claims as a percent.
 - SCOPE: claims data ONLY. There is no website-search data here (no searches, sessions, wallet saves, prints, prices shown). If the request needs data outside this catalog, or an unexpressible shape, reply {"error":"<one sentence: what this can chart instead>"}. NEVER substitute a different measure under the requested title.
 
 Examples:
 "reversed claims by drug" -> {"title":"Reversed claims by drug","chart":"bar","measure":"reversed_claims","groupBy":"drug","where":{},"limit":10}
+"reversals by drug over time" -> {"title":"Reversed claims by drug — rank over time","chart":"bump","measure":"reversed_claims","groupBy":"drug","where":{},"limit":10}
 "paid dollars per month" -> {"title":"Paid dollars per month","chart":"line","measure":"paid_dollars","groupBy":"month","where":{},"limit":24}
 "reversal rate by pharmacy group" -> {"title":"Reversal rate by pharmacy group","chart":"bar","measure":"reversal_rate","groupBy":"group","where":{},"limit":10}`;
 
 const CHART_ENUM = {
-  chart: ["bar", "line", "donut", "number", "table"],
+  chart: ["bar", "line", "donut", "number", "table", "bump", "multiline"],
   measure: ["paid_claims", "reversed_claims", "net_claims", "paid_dollars", "reversed_dollars", "net_dollars", "reversal_rate"],
   groupBy: ["month", "group", "state", "pharmacy", "brand", "class", "drug"],
   bucket: [],
@@ -175,6 +178,8 @@ function validateChartSpec(raw) {
   // structural coherence: a line is the measure over months; KPIs have no axis
   spec.bucket = null;
   if (spec.chart === "line") spec.groupBy = "month";
+  if ((spec.chart === "bump" || spec.chart === "multiline") && (!spec.groupBy || spec.groupBy === "month")) spec.chart = "line";
+  if (spec.chart === "bump") spec.limit = Math.min(spec.limit, 13);
   if (spec.chart === "number") spec.groupBy = null;
   if (["bar", "donut", "table"].includes(spec.chart) && !spec.groupBy) spec.chart = "number";
   return spec;

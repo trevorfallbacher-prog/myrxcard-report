@@ -2194,8 +2194,15 @@ function execChartSpec(spec) {
   const w = spec.where || {};
   const wantBrand = w.brand !== undefined ? (/gen/i.test(String(w.brand)) ? "G" : /brand/i.test(String(w.brand)) ? "B" : String(w.brand).toUpperCase()) : null;
   const inc = (a, b) => String(a || "").toLowerCase().includes(String(b || "").toLowerCase());
+  const multi = spec.chart === "bump" || spec.chart === "multiline";
   const groupDim = spec.chart === "line" ? "month" : spec.groupBy;
-  const totals = new Map(); // label -> {paid, rev, paidN, revN}
+  const acc = (map, key, f) => {
+    const t = map.get(key) || { paid: 0, rev: 0, paidN: 0, revN: 0 };
+    t.paid += f[8] || 0; t.rev += f[9] || 0; t.paidN += f[10] || 0; t.revN += f[11] || 0;
+    map.set(key, t);
+  };
+  const totals = new Map();  // single-dim accumulation
+  const byMonth = new Map(); // multi-series: month -> Map(label -> totals)
   const periods = (util.data && util.data.periods) || {};
   for (const p of Object.values(periods)) {
     const d = p.dims || {};
@@ -2207,15 +2214,38 @@ function execChartSpec(spec) {
       if (wantBrand !== null && String(d.brands[f[4]] || "").toUpperCase() !== wantBrand) continue;
       if (w.class !== undefined && !inc(d.classes[f[5]], w.class)) continue;
       if (w.drug !== undefined && !inc(d.drugs[f[6]], w.drug)) continue;
-      let key = "ALL";
-      if (groupDim) {
-        const raw = (d[DIM_NAME[groupDim]] || [])[f[DIM_SLOT[groupDim]]];
-        key = groupDim === "brand" ? (CHART_BRAND_NAMES[raw] || raw || "\u2014") : (raw || "\u2014");
+      const rawLabel = groupDim ? (d[DIM_NAME[groupDim]] || [])[f[DIM_SLOT[groupDim]]] : null;
+      const label = groupDim === "brand" ? (CHART_BRAND_NAMES[rawLabel] || rawLabel || "—") : (rawLabel || "—");
+      if (multi) {
+        const month = d.months[f[0]] || "—";
+        if (!byMonth.has(month)) byMonth.set(month, new Map());
+        acc(byMonth.get(month), label, f);
+      } else {
+        acc(totals, groupDim ? label : "ALL", f);
       }
-      const t = totals.get(key) || { paid: 0, rev: 0, paidN: 0, revN: 0 };
-      t.paid += f[8] || 0; t.rev += f[9] || 0; t.paidN += f[10] || 0; t.revN += f[11] || 0;
-      totals.set(key, t);
     }
+  }
+  if (multi) {
+    const months = [...byMonth.keys()].sort();
+    const N = Math.max(1, Math.min(spec.limit || (spec.chart === "bump" ? 10 : 8), 13));
+    if (spec.chart === "bump") {
+      const ranks = new Map();
+      months.forEach((m, i) => {
+        const top = [...byMonth.get(m).entries()].map(([k, t]) => [k, M.of(t)]).filter((r) => r[1] > 0)
+          .sort((a, b) => b[1] - a[1]).slice(0, N);
+        top.forEach(([k], idx) => {
+          if (!ranks.has(k)) ranks.set(k, Array(months.length).fill(null));
+          ranks.get(k)[i] = idx + 1;
+        });
+      });
+      const series = [...ranks.entries()].map(([name, pts]) => ({ name, pts }));
+      return { kind: "bump", months, series, M, topN: N };
+    }
+    const overall = new Map();
+    for (const m of months) for (const [k, t] of byMonth.get(m)) acc(overall, k, [0, 0, 0, 0, 0, 0, 0, 0, t.paid, t.rev, t.paidN, t.revN]);
+    const keep = [...overall.entries()].map(([k, t]) => [k, M.of(t)]).sort((a, b) => b[1] - a[1]).slice(0, N).map((r) => r[0]);
+    const series = keep.map((name) => ({ name, pts: months.map((m) => { const t = byMonth.get(m).get(name); return t ? M.of(t) : null; }) }));
+    return { kind: "multiline", months, series, M };
   }
   if (spec.chart === "line") {
     const points = [...totals.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([k, t]) => [k, M.of(t)]);
@@ -2226,41 +2256,108 @@ function execChartSpec(spec) {
     .sort((a, b) => b[1] - a[1]).slice(0, spec.limit || 10);
   return { kind: spec.chart, rows, M };
 }
+const CHART_PALETTE = ["#2f6fd6", "#e8712e", "#e0a92e", "#2e8b57", "#35b0a2", "#e26fa8", "#5b4bd6", "#1f6f4a", "#d64545", "#8b4a2f", "#0A4C70", "#b8478f", "#7a8b2e"];
+const chartMonthShort = (ym) => {
+  const m = String(ym).match(/^(\d{4})-(\d{2})$/);
+  if (!m) return String(ym);
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return names[+m[2] - 1] + " ’" + m[1].slice(2);
+};
+// Multi-series SVG used by bump (rank) and multiline (value) charts: real axes,
+// month ticks, dots on every data point, dashed segments across months an item
+// drops out, colored end labels (collision-nudged) and a presence legend.
+function renderMultiSeriesChart(res, val) {
+  const months = res.months, series = res.series;
+  if (!months.length || !series.length) return `<div style="color:var(--ink-mute);font-size:13px;padding:6px 0">Nothing matches.</div>`;
+  const isBump = res.kind === "bump";
+  const LP = isBump ? 48 : 64, RG = 200, W = 960;
+  const plotW = W - LP - RG;
+  const x = (i) => LP + (months.length === 1 ? plotW / 2 : i * plotW / (months.length - 1));
+  let H, y, grid = "";
+  if (isBump) {
+    const rowH = 34, top = 26;
+    H = top + (res.topN - 1) * rowH + 46;
+    y = (r) => top + (r - 1) * rowH;
+    for (let r = 1; r <= res.topN; r += 2)
+      grid += `<line x1="${LP - 6}" y1="${y(r)}" x2="${W - RG + 10}" y2="${y(r)}" stroke="rgba(127,168,189,.22)"/>` +
+              `<text x="${LP - 12}" y="${y(r) + 4}" text-anchor="end" font-size="11" fill="var(--ink-mute)">#${r}</text>`;
+  } else {
+    H = 320;
+    const top = 18, bot = 42;
+    const max = Math.max(...series.flatMap((s) => s.pts.filter((v) => v != null)), 1);
+    y = (v) => top + (1 - v / max) * (H - top - bot);
+    for (let i = 0; i <= 4; i++) {
+      const v = max * i / 4, yy = y(v);
+      grid += `<line x1="${LP - 6}" y1="${yy}" x2="${W - RG + 10}" y2="${yy}" stroke="rgba(127,168,189,.22)"/>` +
+              `<text x="${LP - 12}" y="${yy + 4}" text-anchor="end" font-size="11" fill="var(--ink-mute)">${val(v)}</text>`;
+    }
+  }
+  const ticks = months.map((m, i) =>
+    `<text x="${x(i)}" y="${H - 14}" text-anchor="middle" font-size="12" fill="var(--ink-soft)">${esc(chartMonthShort(m))}</text>`).join("");
+  let lines = "", dots = "";
+  const endLabels = [];
+  series.forEach((s, si) => {
+    const c = CHART_PALETTE[si % CHART_PALETTE.length];
+    const idxs = s.pts.map((v, i) => (v != null ? i : -1)).filter((i) => i >= 0);
+    for (let k = 0; k + 1 < idxs.length; k++) {
+      const i = idxs[k], j = idxs[k + 1];
+      lines += `<line x1="${x(i).toFixed(1)}" y1="${y(s.pts[i]).toFixed(1)}" x2="${x(j).toFixed(1)}" y2="${y(s.pts[j]).toFixed(1)}"
+        stroke="${c}" stroke-width="2.6" stroke-linecap="round"${j > i + 1 ? ` stroke-dasharray="4 6" opacity=".55"` : ""}/>`;
+    }
+    for (const i of idxs) dots += `<circle cx="${x(i).toFixed(1)}" cy="${y(s.pts[i]).toFixed(1)}" r="4.2" fill="${c}"/>`;
+    const last = idxs[idxs.length - 1];
+    endLabels.push({ x: x(last) + 10, y: y(s.pts[last]) + 4, c, name: s.name });
+  });
+  endLabels.sort((a, b) => a.y - b.y);
+  for (let i = 1; i < endLabels.length; i++)
+    if (endLabels[i].y - endLabels[i - 1].y < 14) endLabels[i].y = endLabels[i - 1].y + 14;
+  const labels = endLabels.map((l) =>
+    `<text x="${l.x.toFixed(1)}" y="${l.y.toFixed(1)}" font-size="11.5" font-weight="600" fill="${l.c}">${esc(String(l.name).slice(0, 26))}</text>`).join("");
+  const presence = (s) => {
+    const idxs = s.pts.map((v, i) => (v != null ? i : -1)).filter((i) => i >= 0);
+    if (idxs.length === months.length) return isBump ? `top ${res.topN} all ${months.length} months` : `all ${months.length} months`;
+    const gaps = months.filter((m, i) => i >= idxs[0] && i <= idxs[idxs.length - 1] && s.pts[i] == null).map(chartMonthShort);
+    return chartMonthShort(months[idxs[0]]) + "–" + chartMonthShort(months[idxs[idxs.length - 1]]) + (gaps.length ? ` (out ${gaps.join(", ")})` : "");
+  };
+  const legend = series.map((s, si) =>
+    `<div style="display:flex;align-items:center;gap:7px;font-size:12px;min-width:0">
+       <span style="width:14px;height:3px;border-radius:2px;background:${CHART_PALETTE[si % CHART_PALETTE.length]};flex:none"></span>
+       <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.name)} <span style="color:var(--ink-mute)">— ${esc(presence(s))}</span></span>
+     </div>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">${grid}${ticks}${lines}${dots}${labels}</svg>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:4px 20px;margin-top:10px">${legend}</div>`;
+}
 function chartHTML(spec, res) {
-  const val = (v) => res.M.money ? "$" + Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 }) : res.M.pct ? Number(v).toFixed(1) + "%" : fmt(v);
-  const empty = `<div style="color:var(--ink-mute);font-size:13px;padding:6px 0">Nothing matches in this period.</div>`;
+  const val = (v) => res.M.money
+    ? "$" + (Math.abs(v) >= 10000 ? (v / 1000).toLocaleString("en-US", { maximumFractionDigits: 0 }) + "k" : Number(v).toLocaleString("en-US", { maximumFractionDigits: 0 }))
+    : res.M.pct ? Number(v).toFixed(1) + "%" : fmt(Math.round(v));
+  const empty = `<div style="color:var(--ink-mute);font-size:13px;padding:6px 0">Nothing matches.</div>`;
+  if (res.kind === "bump" || res.kind === "multiline") return renderMultiSeriesChart(res, val);
   if (res.kind === "number")
     return `<div style="padding:6px 0"><span class="big num" style="font-size:34px">${val(res.value)}</span>
       <div style="color:var(--ink-soft);font-size:12px">${esc(res.M.label)}</div></div>`;
   if (res.kind === "line") {
+    // single total series, but with real axes: y gridlines + value ticks,
+    // month ticks on x, and a dot on every data point
     const pts = res.points; if (!pts.length) return empty;
-    const w = 520, h = 120, pad = 8;
-    const max = Math.max(...pts.map((p) => p[1]), 1);
-    const x = (i) => pad + i * (w - 2 * pad) / Math.max(pts.length - 1, 1);
-    const y = (v) => h - pad - (v / max) * (h - 2 * pad);
-    const poly = pts.map((p, i) => `${x(i).toFixed(1)},${y(p[1]).toFixed(1)}`).join(" ");
-    return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block">
-        <polyline points="${poly}" fill="none" stroke="#3884A4" stroke-width="2.5" stroke-linejoin="round"/>
-      </svg>
-      <div style="display:flex;justify-content:space-between;color:var(--ink-mute);font-size:10px">
-        <span>${esc(pts[0][0])}</span><span class="num">peak ${val(max)}</span><span>${esc(pts[pts.length - 1][0])}</span></div>`;
+    const asSeries = { kind: "multiline", months: pts.map((p) => p[0]), series: [{ name: res.M.label, pts: pts.map((p) => p[1]) }], M: res.M };
+    return renderMultiSeriesChart(asSeries, val);
   }
   if (res.kind === "donut") {
     const rows = res.rows; if (!rows.length) return empty;
     const total = rows.reduce((a, r) => a + r[1], 0) || 1;
-    const colors = ["#16688F", "#3884A4", "#E9AE2E", "#0A4C70", "#7fb3c8", "#c98a00", "#88a0ae", "#d9c58a"];
-    let acc = 0; const C = 2 * Math.PI * 40;
+    let accf = 0; const C = 2 * Math.PI * 40;
     const segs = rows.map((r, i) => {
       const frac = r[1] / total;
-      const seg = `<circle r="40" cx="60" cy="60" fill="none" stroke="${colors[i % colors.length]}" stroke-width="18"
-        stroke-dasharray="${(frac * C).toFixed(2)} ${(C - frac * C).toFixed(2)}" stroke-dashoffset="${(-acc * C).toFixed(2)}" transform="rotate(-90 60 60)"/>`;
-      acc += frac; return seg;
+      const seg = `<circle r="40" cx="60" cy="60" fill="none" stroke="${CHART_PALETTE[i % CHART_PALETTE.length]}" stroke-width="18"
+        stroke-dasharray="${(frac * C).toFixed(2)} ${(C - frac * C).toFixed(2)}" stroke-dashoffset="${(-accf * C).toFixed(2)}" transform="rotate(-90 60 60)"/>`;
+      accf += frac; return seg;
     }).join("");
     const legend = rows.map((r, i) =>
       `<div style="display:flex;align-items:center;gap:6px;font-size:12px">
-        <span style="width:10px;height:10px;border-radius:2px;background:${colors[i % colors.length]};flex:none"></span>
+        <span style="width:10px;height:10px;border-radius:2px;background:${CHART_PALETTE[i % CHART_PALETTE.length]};flex:none"></span>
         <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r[0])}</span>
-        <span class="num">${val(r[1])}</span></div>`).join("");
+        <span class="num">${val(r[1])} <span style="color:var(--ink-mute)">${(100 * r[1] / total).toFixed(1)}%</span></span></div>`).join("");
     return `<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap">
       <svg viewBox="0 0 120 120" style="width:120px;height:120px;flex:none">${segs}</svg>
       <div style="flex:1;min-width:160px;display:grid;gap:4px">${legend}</div></div>`;
@@ -2279,6 +2376,7 @@ function chartHTML(spec, res) {
       <span style="flex:1;height:12px;border-radius:6px;background:linear-gradient(90deg,#3884A4 ${(100 * r[1] / max).toFixed(1)}%,rgba(127,168,189,.15) ${(100 * r[1] / max).toFixed(1)}%)"></span>
       <span class="num" style="flex:0 0 70px;text-align:right">${val(r[1])}</span></div>`).join("");
 }
+
 function renderCustomCharts() {
   const box = document.getElementById("pc-saved");
   if (!box) return;
