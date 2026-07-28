@@ -4765,6 +4765,23 @@ async function boot() {
     $("dp-image-file").value = "";
     renderDraft();
   });
+  // compact snapshot of the loaded report (current filters) for the AI draft —
+  // real figures it can cite verbatim; kept small to stay within the prompt
+  function reportDataForAI() {
+    const s = docDataStats();
+    if (!s) return null;
+    const { p, a } = s;
+    const r0 = (n) => Math.round(n);
+    const data = {
+      dollars: { paid: r0(a.money.paid), reversed: r0(a.money.reversed), collected: r0(a.money.collected), reversedPct: +(a.money.reversedPct * 100).toFixed(1) },
+      claims: { paid: a.claims.paid, reversed: a.claims.reversed, collected: a.claims.collected, reversedPct: +(a.claims.reversedPct * 100).toFixed(1) },
+      usualAndCustomary: a.ucCount != null ? { claims: a.ucCount, pctOfClaims: a.claims.collected ? +(100 * a.ucCount / a.claims.collected).toFixed(1) : 0 } : undefined,
+      topPharmacies: (a.pharmacies || []).slice(0, 10).map((x) => ({ name: x.name, collected: r0(Math.max(x.collected, 0)), reversed: r0(x.reversed) })),
+      topClasses: (a.classes || []).slice(0, 8).map((x) => ({ name: x.name, collected: r0(x.v) })),
+      adminFees: a.fees ? { net: r0(a.fees.net), billed: r0(a.fees.paid), reversed: r0(a.fees.reversed) } : undefined,
+    };
+    return { window: p.periodLabel || "", data };
+  }
   // live report data: numbers from the Utilization tab, current slicers applied
   function docDataStats() {
     const d = util?.data;
@@ -4853,6 +4870,11 @@ async function boot() {
       const payload = { instruction: (brief || "Recreate this reference document as our branded version — keep its content, use our styles and objects.") +
         ' Where a custom visual would strengthen the page, you may also include blocks {"aiIcon":{"prompt":"short description"}} for a flat brand-palette icon or {"aiImage":{"prompt":"description"}} for a brand-styled illustration — place them where they belong; they are generated automatically after drafting.' +
         ' Column semantics — do not mix these up: "iconCols" is ONLY for short marketing feature columns (an icon above a 2-4 word title and one short line each; give each an "iconPrompt"). For field lists, requirement lists, or any tabular data side by side, use the layout wrapper {"columns":[{"table":{…}},{"table":{…}}]} — never iconCols.' };
+      // live report data: hand the AI the actual figures from the loaded
+      // Performance Summary (current filters) so it drafts with real numbers
+      const rd = reportDataForAI();
+      if (rd) payload.instruction += "\n\nLIVE REPORT DATA — these are the real, current figures from the loaded MyRxCard Performance Summary" +
+        (rd.window ? " ("+rd.window+")" : "") + ". When the document calls for metrics, USE THESE EXACT VALUES — never invent or estimate numbers. Put headline figures in statBadge blocks and detail in table blocks:\n" + JSON.stringify(rd.data);
       if (f) { payload.file = await fileToB64(f); payload.fileType = f.type || "application/pdf"; }
       else if (tplSlug) {
         if (!docs.template || docs.template.slug !== tplSlug) docs.template = { slug: tplSlug, ...(await docsApi("/templates/get", { slug: tplSlug })) };
