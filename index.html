@@ -1403,14 +1403,53 @@ async function fetchXano(cfg) {
   return events;
 }
 
+// Microsite registry: URL slug (myrxcard.com/s/<slug> or /p/<slug>) → friendly
+// display name. Unlisted slugs fall back to title-cased slug, so a brand-new
+// microsite shows up automatically and only needs an entry here for its
+// pretty name.
+const MICROSITES = {
+  "uwhc":                 "UW Health (UWHC)",
+  "rochesterregional":    "Rochester Regional Health",
+  "brookshire-brothers":  "Brookshire Brothers",
+  "marshfield":           "Marshfield Clinic",
+  "sunlife":              "Sun Life Pharmacies",
+  "altscripts":           "AltScripts Specialty Pharmacy",
+  "ryan":                 "Ryan Pharmacy",
+  "candc":                "C & C Pharmacy",
+  "communitymarkets":     "Community Markets",
+  "greatscot":            "Great Scot Pharmacies",
+  "vault":                "Vault Strategies",
+  "vip":                  "VIP",
+};
+// Per-client report sites (reports.myrxcard.com/<folder>/) → which microsite
+// URL slugs belong to that client. NOTE folder slugs and URL slugs differ
+// (rrh vs rochesterregional); entries not yet seen in live data assume
+// folder slug == URL slug and may need correcting.
+const CLIENT_MICROSITES = {
+  uwhc: ["uwhc"], rrh: ["rochesterregional"], brookshire: ["brookshire-brothers"],
+  marshfield: ["marshfield"], sunlife: ["sunlife"], altscripts: ["altscripts"],
+  ryan: ["ryan"], candc: ["candc"], communitymarkets: ["communitymarkets"],
+  greatscot: ["greatscot"],
+};
+const micrositeName = (slug) =>
+  MICROSITES[slug] || slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+// Which microsite (by URL slug) a raw search_events row belongs to; "" = the
+// main myrxcard.com site. The path carries this on every row; partner_slug
+// (newer rows) is the fallback.
+function micrositeSlugOf(raw) {
+  const m = String(raw.source_path || "").match(/^\/[sp]\/([^/?#]+)/);
+  if (m) return m[1].toLowerCase();
+  return String(raw.partner_slug || "").trim().toLowerCase();
+}
+
 // group identity is encoded in the page path: /s/<group> (card groups),
 // /p/<partner> (partner pages), "/" = direct site
 function parseGroup(sourcePath) {
   const p = String(sourcePath || "").trim();
   let m = p.match(/^\/s\/([^/?#]+)/);
-  if (m) return m[1] === "vip" ? "VIP" : m[1].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  if (m) return micrositeName(m[1].toLowerCase());
   m = p.match(/^\/p\/([^/?#]+)/);
-  if (m) return m[1].replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) + " (partner)";
+  if (m) return micrositeName(m[1].toLowerCase()) + " (pharmacy site)";
   if (p === "/" || p === "") return "Direct site";
   return p;
 }
@@ -5246,10 +5285,12 @@ async function boot() {
   // contains ONLY that client's rows. The gate validates the password by
   // decrypting the client's own utilization.enc.json; the app is utilization-only.
   if (window.CLIENT_SITE) {
+    // Clients get their utilization report AND live website-search activity
+    // (scoped to their own microsites); Avalon-internal tabs stay hidden.
     for (const b of document.querySelectorAll("#side-nav button, #tabs button"))
-      if (b.dataset.tab !== "util") b.style.display = "none";
+      if (b.dataset.tab !== "util" && b.dataset.tab !== "search") b.style.display = "none";
     document.querySelector("#gate .gate-panel h1").textContent = window.CLIENT_SITE.name;
-    document.querySelector("#gate .gate-panel p").textContent = "Enter your report password to view your utilization report.";
+    document.querySelector("#gate .gate-panel p").textContent = "Enter your report password to view your reports.";
     document.title = window.CLIENT_SITE.name + " · MyRxCard Report";
     let clientBlob = null;
     try {
@@ -5264,12 +5305,32 @@ async function boot() {
       return;
     }
     const pwKey = "mrx-pw-" + window.CLIENT_SITE.slug;
+    // Live search activity for this client only. Same public reporting feed the
+    // root dashboard reads (chosen deliberately: real-time over per-client data
+    // isolation) — rows are filtered to the client's own microsites before
+    // anything renders, and the auto-resync loop is not started here.
+    const loadClientSearch = async () => {
+      try {
+        stamp(true, "SYNCING…");
+        const raw = await fetchXano({ apiUrl: "https://xy2f-yrzu-6a37.n7d.xano.io/api:3NPcU-a5/search_events" });
+        const mine = new Set(CLIENT_MICROSITES[window.CLIENT_SITE.slug] || []);
+        state.events = raw
+          .filter((r) => mine.has(micrositeSlugOf(r)))
+          .map(normalize).filter((e) => Number.isFinite(e.t));
+        state.lastSync = new Date();
+        stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
+        renderAll();
+      } catch (err) {
+        stamp(false, "SEARCH DATA UNAVAILABLE");
+      }
+    };
     const enterClient = async (data, pw) => {
       gatePw = pw;
       util.data = data;
       util.loaded = true;
       enterApp("live");
       await setTab("util");
+      loadClientSearch(); // background; the search tab fills in when it lands
     };
     const tryPw = async (password) => {
       const tries = [...new Set([password, password.trim(), password.trim().toLowerCase()])];
