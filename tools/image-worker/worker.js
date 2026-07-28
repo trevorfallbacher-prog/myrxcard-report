@@ -114,6 +114,114 @@ async function makeImage(env, prompt, size) {
   throw new Error(premiumErr || "no image backend — set OPENAI_API_KEY or enable Workers AI");
 }
 
+// ---------------- prompt → chart spec (reports dashboard) ----------------
+// Turns a plain-English request into a strict JSON chart spec that the
+// dashboard's own renderer executes against ALREADY-LOADED search events.
+// The model never sees data and never returns code — only a spec, which is
+// re-validated here so the client can trust every field.
+const CHART_SYS = `You translate an analytics request about MyRxCard's prescription-search data into ONE JSON chart spec. Reply with ONLY the JSON object — no prose, no code fences.
+
+The data: one row per drug search (or card-save) on myrxcard.com and its partner microsites.
+
+Spec shape:
+{"title": short human title,
+ "chart": "bar"|"line"|"donut"|"number"|"table",
+ "measure": "searches"|"sessions"|"prints"|"wallet_saves"|"featured_rate"|"print_rate"|"avg_top_price",
+ "groupBy": null|"microsite"|"drug"|"state"|"city"|"device"|"browser"|"platform"|"dosage",
+ "bucket": null|"day"|"week"|"month",
+ "where": object with any of: microsite, drug, state (2-letter code), city, device ("mobile"|"desktop"), platform ("apple"|"google"|"physical"), printed (bool), wallet_saved (bool), featured (bool),
+ "limit": integer 1-24 (top-N; default 10)}
+
+Rules:
+- "line" needs bucket (default "week") and uses groupBy null (single series).
+- "number" = one KPI, groupBy null.
+- "bar"/"donut"/"table" need groupBy.
+- measure meanings: searches = search count; sessions = unique visitors; prints = physical card prints; wallet_saves = Apple/Google wallet saves; featured_rate = share of searches showing a featured pharmacy; print_rate = prints per search; avg_top_price = average best price shown.
+- microsite values are partner names like "Vault Strategies", "Rochester Regional Health", "Brookshire Brothers", "UW Health (UWHC)", "VIP", "Direct site".
+
+Examples:
+"wallet saves by platform" -> {"title":"Wallet saves by platform","chart":"donut","measure":"wallet_saves","groupBy":"platform","bucket":null,"where":{},"limit":10}
+"weekly searches on vault" -> {"title":"Vault Strategies — searches per week","chart":"line","measure":"searches","groupBy":null,"bucket":"week","where":{"microsite":"Vault Strategies"},"limit":10}
+"top 5 drugs printed on mobile" -> {"title":"Top drugs printed on mobile","chart":"bar","measure":"prints","groupBy":"drug","bucket":null,"where":{"device":"mobile"},"limit":5}`;
+
+const CHART_ENUM = {
+  chart: ["bar", "line", "donut", "number", "table"],
+  measure: ["searches", "sessions", "prints", "wallet_saves", "featured_rate", "print_rate", "avg_top_price"],
+  groupBy: ["microsite", "drug", "state", "city", "device", "browser", "platform", "dosage"],
+  bucket: ["day", "week", "month"],
+  whereKeys: ["microsite", "drug", "state", "city", "device", "platform", "printed", "wallet_saved", "featured"],
+};
+function validateChartSpec(raw) {
+  const s = typeof raw === "object" && raw ? raw : {};
+  const spec = {
+    title: String(s.title || "Untitled chart").slice(0, 120),
+    chart: CHART_ENUM.chart.includes(s.chart) ? s.chart : "bar",
+    measure: CHART_ENUM.measure.includes(s.measure) ? s.measure : "searches",
+    groupBy: CHART_ENUM.groupBy.includes(s.groupBy) ? s.groupBy : null,
+    bucket: CHART_ENUM.bucket.includes(s.bucket) ? s.bucket : null,
+    where: {},
+    limit: Math.max(1, Math.min(24, parseInt(s.limit, 10) || 10)),
+  };
+  if (s.where && typeof s.where === "object")
+    for (const k of CHART_ENUM.whereKeys) if (s.where[k] !== undefined && s.where[k] !== null)
+      spec.where[k] = typeof s.where[k] === "boolean" ? s.where[k] : String(s.where[k]).slice(0, 80);
+  // structural coherence: lines are single-series over time; KPIs have no axis
+  if (spec.chart === "line") { spec.groupBy = null; if (!spec.bucket) spec.bucket = "week"; }
+  else spec.bucket = null;
+  if (spec.chart === "number") spec.groupBy = null;
+  if (["bar", "donut", "table"].includes(spec.chart) && !spec.groupBy) spec.chart = "number";
+  return spec;
+}
+const parseSpecText = (text) => {
+  const m = String(text).match(/\{[\s\S]*\}/);
+  return m ? JSON.parse(m[0]) : null;
+};
+async function makeChartSpec(env, prompt) {
+  let premiumErr = null;
+  if (env.ANTHROPIC_API_KEY) {
+    try {
+      const r = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 600, system: CHART_SYS,
+          messages: [{ role: "user", content: prompt }] }),
+      });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error?.message || `Anthropic ${r.status}`);
+      const spec = parseSpecText((out.content || []).map((c) => c.text || "").join(""));
+      if (spec) return { spec: validateChartSpec(spec), via: "claude-sonnet-5" };
+      throw new Error("no JSON in reply");
+    } catch (e) { premiumErr = `anthropic: ${e.message}`; }
+  }
+  if (env.OPENAI_API_KEY) {
+    try {
+      const r = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${env.OPENAI_API_KEY}` },
+        body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: 600, response_format: { type: "json_object" },
+          messages: [{ role: "system", content: CHART_SYS }, { role: "user", content: prompt }] }),
+      });
+      const out = await r.json();
+      if (!r.ok) throw new Error(out.error?.message || `OpenAI ${r.status}`);
+      const spec = parseSpecText(out.choices?.[0]?.message?.content || "");
+      if (spec) return { spec: validateChartSpec(spec), via: "gpt-4o-mini", note: premiumErr ? `fell back (${premiumErr})` : undefined };
+      throw new Error("no JSON in reply");
+    } catch (e) { premiumErr = `${premiumErr ? premiumErr + "; " : ""}openai: ${e.message}`; }
+  }
+  if (env.AI) {
+    try {
+      const res = await env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast", {
+        messages: [{ role: "system", content: CHART_SYS }, { role: "user", content: prompt }],
+        max_tokens: 600,
+      });
+      const spec = parseSpecText(res.response || "");
+      if (spec) return { spec: validateChartSpec(spec), via: "llama-3.3-70b", note: premiumErr ? `fell back (${premiumErr})` : undefined };
+      premiumErr = `${premiumErr ? premiumErr + "; " : ""}llama: no JSON (${String(res.response || "").slice(0, 80)})`;
+    } catch (e) { premiumErr = `${premiumErr ? premiumErr + "; " : ""}llama: ${e.message}`; }
+  }
+  throw new Error(premiumErr || "chart generation needs an AI backend");
+}
+
 export default {
   async fetch(req, env) {
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
@@ -125,6 +233,9 @@ export default {
     if (!prompt) return json({ error: "empty prompt" }, 400);
     const size = ["1024x1024", "1536x1024", "1024x1536"].includes(body.size) ? body.size : "1024x1024";
     try {
+      if (body.kind === "chart") {
+        return json(await makeChartSpec(env, prompt));
+      }
       if (body.kind === "icon") {
         const out = await makeIcon(env, prompt);
         if (!out.svg) return json({ error: "model did not return usable SVG — try rewording" }, 502);
