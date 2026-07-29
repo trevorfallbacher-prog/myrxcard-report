@@ -2267,7 +2267,11 @@ function execChartSpec(spec) {
     .sort((a, b) => b[1] - a[1]).slice(0, spec.limit || 10);
   return { kind: spec.chart, rows, M };
 }
-const CHART_PALETTE = ["#2f6fd6", "#e8712e", "#e0a92e", "#2e8b57", "#35b0a2", "#e26fa8", "#5b4bd6", "#1f6f4a", "#d64545", "#8b4a2f", "#0A4C70", "#b8478f", "#7a8b2e"];
+// Brand-anchored series ramp: every line comes from the MyRxCard families
+// (teal #16688F / #3884A4, deep navy #0A4C70, gold #E9AE2E, Avalon green)
+// at different depths — 13 distinguishable steps that still read as one
+// brand. Ordered so adjacent series alternate hue families for contrast.
+const CHART_PALETTE = ["#16688F", "#E9AE2E", "#0A4C70", "#ABC269", "#3884A4", "#C98A00", "#4A6FA5", "#6B8F3D", "#7FB3C8", "#B08D2F", "#2E7D74", "#8FA0C9", "#5E8CA7"];
 const chartMonthShort = (ym) => {
   const m = String(ym).match(/^(\d{4})-(\d{2})$/);
   if (!m) return String(ym);
@@ -2391,6 +2395,11 @@ function chartHTML(spec, res) {
 function renderCustomCharts() {
   const box = document.getElementById("pc-saved");
   if (!box) return;
+  // an unsaved preview must track the slicers like everything else
+  const pb = document.getElementById("pc-preview-body");
+  if (pb && customCharts.preview && util.loaded) {
+    try { pb.innerHTML = chartHTML(customCharts.preview, execChartSpec(customCharts.preview)); } catch (e) {}
+  }
   if (!util.loaded) { if (customCharts.list.length) box.innerHTML = `<div style="color:var(--ink-mute);font-size:12px;margin:4px 0 10px">My charts load with the utilization data.</div>`; return; }
   if (!customCharts.list.length) { box.innerHTML = ""; return; }
   box.innerHTML = `<div class="kicker" style="margin:2px 0 8px">My charts</div>
@@ -2423,16 +2432,18 @@ async function onPromptChart(e) {
     if (!r.ok || out.error) throw new Error(out.error || ("HTTP " + r.status));
     const spec = out.spec;
     $("pc-status").textContent = "";
+    customCharts.preview = spec; // so slicer changes re-execute the preview too
     $("pc-preview").innerHTML = `<div class="panel" style="margin-top:10px">
-        <div class="kicker">${esc(spec.title)}</div>${chartHTML(spec, execChartSpec(spec))}
+        <div class="kicker">${esc(spec.title)}</div><div id="pc-preview-body">${chartHTML(spec, execChartSpec(spec))}</div>
         <div style="display:flex;gap:8px;margin-top:10px">
           <button type="button" class="iconbtn" id="pc-save">SAVE TO MY CHARTS</button>
           <button type="button" class="iconbtn" id="pc-discard">DISCARD</button></div></div>`;
     $("pc-save").onclick = () => {
       customCharts.list.push({ id: Date.now().toString(36), prompt: q, spec });
+      customCharts.preview = null;
       saveCustomCharts(); $("pc-preview").innerHTML = ""; $("pc-input").value = ""; renderCustomCharts();
     };
-    $("pc-discard").onclick = () => { $("pc-preview").innerHTML = ""; };
+    $("pc-discard").onclick = () => { customCharts.preview = null; $("pc-preview").innerHTML = ""; };
   } catch (err) {
     $("pc-status").textContent = "Couldn't build that chart: " + err.message;
   }
