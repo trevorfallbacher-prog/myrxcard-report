@@ -1441,6 +1441,13 @@ const MICROSITES = {
 // URL slugs belong to that client. NOTE folder slugs and URL slugs differ
 // (rrh vs rochesterregional); entries not yet seen in live data assume
 // folder slug == URL slug and may need correcting.
+// Client report-site TYPE: "pharmacy" partners have physical locations, so
+// they get the featured-exposure funnel; "group"/TPA partners (no locations
+// to be featured) get microsite search performance + utilization only.
+// A type in the CLIENT_SITE marker wins; unlisted slugs default to pharmacy.
+const CLIENT_TYPES = { vault: "group", vip: "group" };
+const clientSiteType = () =>
+  (window.CLIENT_SITE && (window.CLIENT_SITE.type || CLIENT_TYPES[window.CLIENT_SITE.slug])) || "pharmacy";
 const CLIENT_MICROSITES = {
   uwhc: ["uwhc"], rrh: ["rochesterregional"], brookshire: ["brookshire-brothers"],
   marshfield: ["marshfield"], sunlife: ["sunlife"], altscripts: ["altscripts"],
@@ -5992,6 +5999,23 @@ async function boot() {
           .filter((r) => mine.has(micrositeSlugOf(r)))
           .map(normalize).filter((e) => Number.isFinite(e.t));
 
+        if (clientSiteType() !== "pharmacy") {
+          // TPA/group partner: no physical pharmacies — the exposure funnel
+          // would mislabel whatever pharmacies their members happen to use.
+          state.clientExposure = null;
+          if (!document.getElementById("client-sect")) {
+            const host2 = document.querySelector("#view-search .grid");
+            const sect = document.createElement("div");
+            sect.id = "client-sect";
+            sect.innerHTML = `<div class="kicker" style="font-size:13px;letter-spacing:.08em;margin-top:6px">Your microsite &mdash; search performance</div>
+              <div style="color:var(--ink-mute);font-size:12px;margin:2px 0 12px">Everything below counts only searches made on your own MyRxCard microsite. Claims utilization lives on the Utilization tab.</div>`;
+            if (host2) host2.parentNode.insertBefore(sect, host2);
+          }
+          state.lastSync = new Date();
+          stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
+          renderAll();
+          return;
+        }
         const roster = clientRoster();
         state.clientExposure = [];
         for (const r of raw) {

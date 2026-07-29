@@ -32,16 +32,16 @@ const SECRETS_PATH = join(__dirname, "clients.secrets.json");
 
 // slug -> which "Pharmacy Group" values (uppercased) belong to the client
 const CLIENTS = [
-  { slug: "uwhc", name: "UW Health (UWHC)", match: (g) => g === "UWHC PHARMACIES" },
-  { slug: "marshfield", name: "Marshfield Clinic", match: (g) => g === "MARSHFIELD PHARMACIES" },
-  { slug: "brookshire", name: "Brookshire Brothers", match: (g) => g === "BROOKSHIRE BROTHERS PHARMACY" },
-  { slug: "rrh", name: "Rochester Regional Health", match: (g) => g.startsWith("RRH") },
-  { slug: "sunlife", name: "Sun Life Pharmacies", match: (g) => g === "SUN LIFE PHARMACIES" },
-  { slug: "altscripts", name: "AltScripts Specialty Pharmacy", match: (g) => g === "ALTSCRIPTS SPECIALTY PHARMACY" },
-  { slug: "ryan", name: "Ryan Pharmacy", match: (g) => g === "RYAN PHARMACY" },
-  { slug: "candc", name: "C & C Pharmacy", match: (g) => g === "C & C PHARMACY" },
-  { slug: "communitymarkets", name: "Community Markets", match: (g) => g === "COMMUNITY MARKETS" },
-  { slug: "greatscot", name: "Great Scot Pharmacies", match: (g) => g === "GREAT SCOT PHARMACIES" },
+  { slug: "uwhc", name: "UW Health (UWHC)", type: "pharmacy", match: (g) => g === "UWHC PHARMACIES" },
+  { slug: "marshfield", name: "Marshfield Clinic", type: "pharmacy", match: (g) => g === "MARSHFIELD PHARMACIES" },
+  { slug: "brookshire", name: "Brookshire Brothers", type: "pharmacy", match: (g) => g === "BROOKSHIRE BROTHERS PHARMACY" },
+  { slug: "rrh", name: "Rochester Regional Health", type: "pharmacy", match: (g) => g.startsWith("RRH") },
+  { slug: "sunlife", name: "Sun Life Pharmacies", type: "pharmacy", match: (g) => g === "SUN LIFE PHARMACIES" },
+  { slug: "altscripts", name: "AltScripts Specialty Pharmacy", type: "pharmacy", match: (g) => g === "ALTSCRIPTS SPECIALTY PHARMACY" },
+  { slug: "ryan", name: "Ryan Pharmacy", type: "pharmacy", match: (g) => g === "RYAN PHARMACY" },
+  { slug: "candc", name: "C & C Pharmacy", type: "pharmacy", match: (g) => g === "C & C PHARMACY" },
+  { slug: "communitymarkets", name: "Community Markets", type: "pharmacy", match: (g) => g === "COMMUNITY MARKETS" },
+  { slug: "greatscot", name: "Great Scot Pharmacies", type: "pharmacy", match: (g) => g === "GREAT SCOT PHARMACIES" },
 ];
 
 const norm = (s) => String(s ?? "").trim();
@@ -119,7 +119,7 @@ for (const client of CLIENTS) {
   mkdirSync(dir, { recursive: true });
   const enc = await encryptJSON(store, secrets[client.slug]);
   writeFileSync(join(dir, "utilization.enc.json"), JSON.stringify(enc) + "\n");
-  const marker = `<script>window.CLIENT_SITE = ${JSON.stringify({ slug: client.slug, name: client.name })};</script>`;
+  const marker = `<script>window.CLIENT_SITE = ${JSON.stringify({ slug: client.slug, name: client.name, type: client.type || "pharmacy" })};</script>`;
   writeFileSync(join(dir, "index.html"), rootIndex.replace("<body>", "<body>\n" + marker));
 
   const p = store.periods[store.latest];
