@@ -5910,7 +5910,7 @@ async function boot() {
         mbars = `<div style="margin:8px 0 4px"><svg viewBox="0 0 ${W2} ${H2}" style="width:100%;max-width:760px;height:auto;display:block">${sv}</svg></div>`;
       }
       el.innerHTML =
-        `<div class="kicker">Your pharmacies across all MyRxCard sites</div>` + mbars + `
+        `<div class="kicker">Your pharmacies across ALL MyRxCard channels <span class="hint">&middot; featured slots in searches on any site, not just your microsite</span></div>` + mbars + `
          <div style="display:flex;gap:28px;flex-wrap:wrap;margin:6px 0 10px;">
            <div><span class="big num">${fmt(feat.length)}</span><div style="color:var(--ink-soft);font-size:12px;">searches where your pharmacy was featured — any site</div></div>
            <div><span class="big num">${fmt(prints.length)}</span><div style="color:var(--ink-soft);font-size:12px;">card prints at your pharmacies — any site</div></div>
@@ -5958,6 +5958,16 @@ async function boot() {
           panel.id = "client-exposure";
           panel.style.marginBottom = "14px";
           host.parentNode.insertBefore(panel, host);
+        }
+        // clear sectioning: exposure (ANY channel) above, then the microsite-
+        // scoped dashboard below — so the two scopes can't be confused
+        if (!document.getElementById("client-sect")) {
+          const host2 = document.querySelector("#view-search .grid");
+          const sect = document.createElement("div");
+          sect.id = "client-sect";
+          sect.innerHTML = `<div class="kicker" style="font-size:13px;letter-spacing:.08em;margin-top:6px">Your microsite &mdash; search performance</div>
+            <div style="color:var(--ink-mute);font-size:12px;margin:2px 0 12px">Everything below counts only searches made on your own MyRxCard microsite. Claims utilization lives on the Utilization tab.</div>`;
+          host2.parentNode.insertBefore(sect, host2);
         }
         state.lastSync = new Date();
         stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
