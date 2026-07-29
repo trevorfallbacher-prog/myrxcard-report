@@ -917,7 +917,7 @@
     <nav id="side-nav">
       <button type="button" data-tab="search" class="on">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
-        Search Records
+        Consumer Web Searches
       </button>
       <button type="button" data-tab="util">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/></svg>
@@ -948,7 +948,7 @@
     <div style="display:flex;align-items:center;gap:14px">
       <button class="iconbtn" id="menu-btn" type="button" aria-label="Toggle menu">&#9776;</button>
       <div class="brand">
-        <h1 id="app-title">Search performance</h1>
+        <h1 id="app-title">Consumer web searches</h1>
         <div class="view-desc num" id="view-desc"></div>
       </div>
     </div>
@@ -1043,7 +1043,7 @@
   <div class="content">
 
   <nav class="tabs" id="tabs" hidden>
-    <button type="button" data-tab="search" class="on">Website Search Records</button>
+    <button type="button" data-tab="search" class="on">Consumer Web Searches</button>
     <button type="button" data-tab="util">Utilization</button>
     <button type="button" data-tab="fees">Admin Fees</button>
   </nav>
@@ -1125,7 +1125,7 @@
     </div>
 
     <div class="panel span12">
-      <div class="kicker">Latest searches</div>
+      <div class="kicker" id="recent-kicker">Last searches</div>
       <div class="table-wrap" id="recent"></div>
     </div>
   </div>
@@ -2003,6 +2003,8 @@ function renderSpread(a) {
 }
 
 function renderRecent(a) {
+  const rk = document.getElementById("recent-kicker");
+  if (rk) rk.innerHTML = `Last ${fmt(a.recent.length)} searches <span class="hint">&middot; most recent of ${fmt(a.total)} in this window</span>`;
   const rows = a.recent.map((e) => {
     const when = new Date(e.t).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     const outcome = e.printed
@@ -2154,7 +2156,7 @@ function renderAll() {
   $("foot-window").textContent = a.total ? `Window: ${fd(a.first)} – ${fd(a.anchor)}` : "";
   const gen = new Date().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
   $("print-meta").textContent =
-    `LIVE SEARCH REPORT · GENERATED ${gen.toUpperCase()}` +
+    `CONSUMER WEB SEARCH REPORT · GENERATED ${gen.toUpperCase()}` +
     (a.total ? ` · WINDOW ${fd(a.first).toUpperCase()} – ${fd(a.anchor).toUpperCase()}` : "") +
     ` · PERIOD: ${(state.tfLabel || PERIOD_LABELS[state.period.type]).toUpperCase()}` +
     DIMS.filter((d) => (f[d] || []).length).map((d) =>
@@ -4098,7 +4100,7 @@ async function setTab(name) {
   document.querySelectorAll("#tabs button, #side-nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   $("search-only").style.display = name === "search" ? "contents" : "none";
   $("util-slicers").style.display = name === "util" || name === "fees" ? "contents" : "none";
-  $("app-title").textContent = name === "search" ? "Search performance"
+  $("app-title").textContent = name === "search" ? "Consumer web searches"
     : name === "util" ? "Performance Summary - MyRxCard"
     : name === "fees" ? "Admin Fees - Internal" : "Document Studio - MyRxCard";
   if (name === "docs") {
