@@ -392,6 +392,10 @@
     letter-spacing: 0.04em; margin: -12px 0 18px;
   }
   @media print {
+    #pc-form, #pc-status { display: none !important; }
+    #pc-wrap:not(.pc-has-preview):not(.pc-has-saved) { display: none !important; }
+    #pc-wrap.pc-has-saved:not(.pc-has-preview) > .panel:first-child { display: none !important; }
+
     @page { margin: 12mm; }
     html, body { background: #fff !important; }
     * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -2549,6 +2553,12 @@ function chartHTML(spec, res) {
 function renderCustomCharts() {
   const box = document.getElementById("pc-saved");
   if (!box) return;
+  // print CSS keys off these: an empty prompt panel must not reach the PDF
+  const wrap = document.getElementById("pc-wrap");
+  if (wrap) {
+    wrap.classList.toggle("pc-has-saved", customCharts.list.length > 0);
+    wrap.classList.toggle("pc-has-preview", !!customCharts.preview);
+  }
   // an unsaved preview must track the slicers like everything else
   const pb = document.getElementById("pc-preview-body");
   if (pb && customCharts.preview && util.loaded) {
@@ -2592,12 +2602,13 @@ async function onPromptChart(e) {
         <div style="display:flex;gap:8px;margin-top:10px">
           <button type="button" class="iconbtn" id="pc-save">SAVE TO MY CHARTS</button>
           <button type="button" class="iconbtn" id="pc-discard">DISCARD</button></div></div>`;
+    renderCustomCharts(); // refresh the has-preview state class for print
     $("pc-save").onclick = () => {
       customCharts.list.push({ id: Date.now().toString(36), prompt: q, spec });
       customCharts.preview = null;
       saveCustomCharts(); $("pc-preview").innerHTML = ""; $("pc-input").value = ""; renderCustomCharts();
     };
-    $("pc-discard").onclick = () => { customCharts.preview = null; $("pc-preview").innerHTML = ""; };
+    $("pc-discard").onclick = () => { customCharts.preview = null; $("pc-preview").innerHTML = ""; renderCustomCharts(); };
   } catch (err) {
     $("pc-status").textContent = "Couldn't build that chart: " + err.message;
   }
