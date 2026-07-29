@@ -1103,6 +1103,12 @@
       <div id="top-users"></div>
     </div>
 
+    <div class="panel span12" id="featured-partner-panel">
+      <div class="kicker">Featured results by pharmacy partner <span class="hint">&middot; searches where a partner pharmacy held the featured slot, per month &middot; prints/saves = conversions on those</span></div>
+      <div id="featured-partner"></div>
+      <div id="featured-partner-legend" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:4px 18px;margin-top:10px"></div>
+    </div>
+
     <div class="panel span6">
       <div class="kicker">Devices</div>
       <div id="devices"></div>
@@ -1493,6 +1499,9 @@ function normalize(raw) {
     platform: (raw.platform || "").trim().toLowerCase(), // "physical, apple, google" accumulates
     walletSaved: truthy(raw.wallet_saved),
     prices: pharm.map((p) => Number(p.price)).filter((p) => p > 0),
+    // who held the featured slots — drives the featured-by-partner panels
+    featPharms: pharm.filter((p) => p && p.is_featured).map((p) => ({ name: String(p.name || ""), npi: String(p.npi || "") })),
+    printedNpi: String(raw.printed_pharmacy_npi || ""),
   };
 }
 
@@ -2152,7 +2161,84 @@ function renderAll() {
       ` · ${d.toUpperCase()}S: ${f[d].map((v) => FILTER_LABELS[d](v).toUpperCase()).join(", ")}`).join("") +
     (state.mode === "sample" ? " · SAMPLE DATA" : "");
   renderUsers();
+  renderFeaturedByPartner();
   renderCustomCharts(); // saved prompt-charts track the period selector
+}
+
+// Featured-slot exposure per pharmacy partner, monthly, with conversions.
+// Attribution runs through partnerIndex() (claims store + PHARM_GROUPS rules),
+// so "Brookshire featured on VIP's microsite" still counts for Brookshire.
+// Avalon-only: client sites get their own scoped version in the exposure panel.
+let _fbpLoading = false;
+function renderFeaturedByPartner() {
+  const el = document.getElementById("featured-partner");
+  const panel = document.getElementById("featured-partner-panel");
+  if (!el || !panel) return;
+  if (window.CLIENT_SITE) { panel.style.display = "none"; return; }
+  const leg = document.getElementById("featured-partner-legend");
+  const idx = partnerIndex();
+  if (!idx) {
+    if (state.mode === "live" && gatePw && !_fbpLoading) {
+      _fbpLoading = true;
+      el.innerHTML = `<div style="color:var(--ink-mute);font-size:13px">Loading pharmacy rosters&hellip;</div>`;
+      ensureUtilData().then(() => { _fbpLoading = false; renderFeaturedByPartner(); })
+        .catch(() => { _fbpLoading = false; el.innerHTML = `<div style="color:var(--ink-mute);font-size:13px">Couldn&rsquo;t load the pharmacy rosters.</div>`; });
+    } else if (!_fbpLoading) {
+      el.innerHTML = `<div style="color:var(--ink-mute);font-size:13px">Partner rosters come from the live utilization data.</div>`;
+    }
+    return;
+  }
+  const [fromTs, toTs] = periodBounds(state.period);
+  const mk = (t) => new Date(t).toISOString().slice(0, 7);
+  const monthsSet = new Set(), agg = new Map(); // partner -> {feat:Map, prints, saves, total}
+  const get = (pl) => { let a = agg.get(pl); if (!a) { a = { feat: new Map(), prints: 0, saves: 0, total: 0 }; agg.set(pl, a); } return a; };
+  for (const e of searchEvents()) {
+    if (e.t < fromTs || e.t >= toTs) continue;
+    const here = new Set();
+    for (const fp of (e.featPharms || [])) { const pl = partnerOf(idx, fp.name, fp.npi); if (pl) here.add(pl); }
+    const printedPl = e.printed ? partnerOf(idx, e.printedName, e.printedNpi) : null;
+    if (!here.size && !printedPl) continue;
+    const m = mk(e.t); monthsSet.add(m);
+    for (const pl of here) { const a = get(pl); a.feat.set(m, (a.feat.get(m) || 0) + 1); a.total++; if (e.walletSaved) a.saves++; }
+    if (printedPl) get(printedPl).prints++;
+  }
+  const months = [...monthsSet].sort();
+  const partners = [...agg.entries()].sort((x, y) => y[1].total - x[1].total).map(([pl]) => pl);
+  if (!months.length || !partners.length) {
+    el.innerHTML = `<div style="color:var(--ink-mute);font-size:13px">No partner pharmacy was featured in this window.</div>`;
+    leg.innerHTML = ""; return;
+  }
+  // stacked monthly bars, one segment per partner
+  const W = 1120, H = 280, padL = 44, padR = 16, padT = 18, padB = 36;
+  const plotW = W - padL - padR, chartH = H - padT - padB, baseY = padT + chartH;
+  const bw = Math.min(80, Math.max(16, (plotW / months.length) * 0.6));
+  const gap = months.length > 1 ? (plotW - months.length * bw) / (months.length - 1) : 0;
+  const colTotal = months.map((m) => partners.reduce((s2, pl) => s2 + (agg.get(pl).feat.get(m) || 0), 0));
+  const max = Math.max(...colTotal, 1);
+  let s = `<line x1="${padL}" y1="${baseY}" x2="${W - padR}" y2="${baseY}" stroke="rgba(127,168,189,.4)"/>`;
+  s += `<text x="${padL - 8}" y="${padT + 4}" text-anchor="end" font-size="11" fill="var(--ink-mute)">${fmt(max)}</text>`;
+  s += `<text x="${padL - 8}" y="${baseY + 4}" text-anchor="end" font-size="11" fill="var(--ink-mute)">0</text>`;
+  months.forEach((m, k) => {
+    const x = padL + k * (bw + gap);
+    let y = baseY;
+    partners.forEach((pl, pi) => {
+      const v = agg.get(pl).feat.get(m) || 0;
+      if (!v) return;
+      const bh = chartH * (v / max);
+      y -= bh;
+      s += `<rect x="${x}" y="${y.toFixed(1)}" width="${bw}" height="${Math.max(bh, .5).toFixed(1)}" fill="${CHART_PALETTE[pi % CHART_PALETTE.length]}"><title>${esc(chartMonthShort(m))} &middot; ${esc(pl)} &middot; featured in ${fmt(v)} searches</title></rect>`;
+    });
+    if (colTotal[k]) s += `<text x="${x + bw / 2}" y="${(y - 5).toFixed(1)}" text-anchor="middle" font-size="10" class="num" fill="var(--ink-soft)">${fmt(colTotal[k])}</text>`;
+    s += `<text x="${x + bw / 2}" y="${baseY + 16}" text-anchor="middle" font-size="10.5" fill="var(--ink-soft)">${esc(chartMonthShort(m))}</text>`;
+  });
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">${s}</svg>`;
+  leg.innerHTML = partners.map((pl, pi) => {
+    const a = agg.get(pl);
+    return `<div style="display:flex;align-items:center;gap:7px;font-size:12.5px">
+      <span style="width:11px;height:11px;border-radius:3px;background:${CHART_PALETTE[pi % CHART_PALETTE.length]};flex:none"></span>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><b>${esc(pl)}</b></span>
+      <span class="num" style="color:var(--ink-soft)">${fmt(a.total)} featured &middot; ${fmt(a.prints)} prints &middot; ${fmt(a.saves)} saves</span></div>`;
+  }).join("");
 }
 
 // Heavy-user roster for the current period (computed BEFORE exclusions so an
@@ -2760,6 +2846,35 @@ function pharmChain(p, i) {
   for (const [label, test] of PHARM_GROUPS) if (test(n, m)) return label;
   return null;
 }
+
+// name/NPI-last-4 → partner label, built from the claims store through the
+// SAME PHARM_GROUPS rules (so meta-based rules like Rochester's city test
+// work — search rows carry no city). Used to attribute featured slots in
+// search results to a pharmacy partner.
+const pharmNameKey = (s) => String(s || "").toUpperCase()
+  .replace(/[^A-Z0-9 ]/g, " ").replace(/s+#?d[d-]*s*$/, "").replace(/s+/g, " ").trim();
+let _partnerIdx = null;
+function partnerIndex() {
+  if (_partnerIdx) return _partnerIdx;
+  if (!util.data || !util.data.periods) return null;
+  if (!util.merged) util.merged = mergedPeriod(util.data);
+  const p = util.merged;
+  if (!p || !Array.isArray(p.dims && p.dims.pharmacies)) return null;
+  const byName = new Map(), byNpi4 = new Map(), partners = new Set();
+  p.dims.pharmacies.forEach((name, i) => {
+    const label = pharmChain(p, i);
+    if (!label) return;
+    partners.add(label);
+    const k = pharmNameKey(name);
+    if (k) byName.set(k, label);
+    const m = p.pharmMeta && p.pharmMeta[i];
+    if (m && m.npi4) byNpi4.set(String(m.npi4), label);
+  });
+  _partnerIdx = { byName, byNpi4, partners: [...partners] };
+  return _partnerIdx;
+}
+const partnerOf = (idx, name, npi) =>
+  (npi && idx.byNpi4.get(String(npi).replace(/D/g, "").slice(-4))) || idx.byName.get(pharmNameKey(name)) || null;
 
 /* --- map: project lat/lon onto the bundled 959x593 US map --- */
 // Albers equal-area conic (lower 48: parallels 29.5/45.5, central meridian -96),
@@ -5771,8 +5886,31 @@ async function boot() {
         `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;">
            <span>${esc(k)}</span><span class="num">${fmt(n)}</span></div>`).join("") ||
         `<div style="color:var(--ink-mute)">None in this period.</div>`;
+      // monthly featured bars — same brand teal, tooltips carry prints/saves
+      const mkM = (t) => new Date(t).toISOString().slice(0, 7);
+      const byM = new Map();
+      for (const e2 of ev) { if (!e2.featured && !e2.printedMine) continue; const m = mkM(e2.t);
+        const b = byM.get(m) || { f: 0, p: 0, s: 0 };
+        if (e2.featured) b.f++; if (e2.printedMine) b.p++; if (e2.saved) b.s++; byM.set(m, b); }
+      const mns = [...byM.keys()].sort();
+      let mbars = "";
+      if (mns.length) {
+        const W2 = 700, H2 = 120, pL = 8, pB = 26, pT = 14;
+        const bw2 = Math.min(64, Math.max(14, ((W2 - pL * 2) / mns.length) * 0.6));
+        const gp2 = mns.length > 1 ? ((W2 - pL * 2) - mns.length * bw2) / (mns.length - 1) : 0;
+        const mx = Math.max(...mns.map((m) => byM.get(m).f), 1);
+        let sv = "";
+        mns.forEach((m, k) => {
+          const b = byM.get(m); const x2 = pL + k * (bw2 + gp2);
+          const bh2 = (H2 - pT - pB) * (b.f / mx); const y2 = H2 - pB - bh2;
+          sv += `<rect x="${x2}" y="${y2.toFixed(1)}" width="${bw2}" height="${Math.max(bh2, 1).toFixed(1)}" rx="3" fill="#16688F"><title>${esc(chartMonthShort(m))} &middot; featured ${b.f} &middot; prints ${b.p} &middot; saves ${b.s}</title></rect>`;
+          if (b.f) sv += `<text x="${x2 + bw2 / 2}" y="${(y2 - 4).toFixed(1)}" text-anchor="middle" font-size="10" fill="var(--ink-soft)" class="num">${b.f}</text>`;
+          sv += `<text x="${x2 + bw2 / 2}" y="${H2 - 10}" text-anchor="middle" font-size="9.5" fill="var(--ink-mute)">${esc(chartMonthShort(m))}</text>`;
+        });
+        mbars = `<div style="margin:8px 0 4px"><svg viewBox="0 0 ${W2} ${H2}" style="width:100%;max-width:760px;height:auto;display:block">${sv}</svg></div>`;
+      }
       el.innerHTML =
-        `<div class="kicker">Your pharmacies across all MyRxCard sites</div>
+        `<div class="kicker">Your pharmacies across all MyRxCard sites</div>` + mbars + `
          <div style="display:flex;gap:28px;flex-wrap:wrap;margin:6px 0 10px;">
            <div><span class="big num">${fmt(feat.length)}</span><div style="color:var(--ink-soft);font-size:12px;">searches where your pharmacy was featured — any site</div></div>
            <div><span class="big num">${fmt(prints.length)}</span><div style="color:var(--ink-soft);font-size:12px;">card prints at your pharmacies — any site</div></div>
@@ -5809,7 +5947,7 @@ async function boot() {
           let t = r.search_timestamp || r.created_at;
           t = typeof t === "number" ? t : Date.parse(t);
           if (!Number.isFinite(t)) continue;
-          state.clientExposure.push({ t, site: parseGroup(r.source_path), drug: (r.drug_name || "").trim(), featured, printedMine });
+          state.clientExposure.push({ t, site: parseGroup(r.source_path), drug: (r.drug_name || "").trim(), featured, printedMine, saved: featured && truthy(r.wallet_saved) });
         }
         // panel sits above the standard search dashboard, outside the grid so
         // the reveal-on-scroll machinery leaves it alone
