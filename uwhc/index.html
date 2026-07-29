@@ -5878,44 +5878,92 @@ async function boot() {
       const [fromTs, toTs] = periodBounds(state.period);
       const ev = state.clientExposure.filter((e) => e.t >= fromTs && e.t < toTs);
       const feat = ev.filter((e) => e.featured);
-      const prints = ev.filter((e) => e.printedMine);
+      // "chosen" = the shopper PRINTED this pharmacy's card on a search where it
+      // was featured; "lost" = featured but the card printed was a competitor's.
+      // (The raw selected_pharmacy field is auto-logged for the first card on
+      // ~99% of searches, so prints are the only honest choice signal.)
+      const chosen = feat.filter((e) => e.printedMine);
+      const lost = feat.filter((e) => e.printedOther);
+      const saves = feat.filter((e) => e.saved);
+      const printsAny = ev.filter((e) => e.printedMine);
+      // previous equal-length window drives the up/down badges
+      const span = Number.isFinite(fromTs) && Number.isFinite(toTs) ? toTs - fromTs : null;
+      let prev = null;
+      if (span && span > 0 && span < 1e12) {
+        const pv = state.clientExposure.filter((e) => e.t >= fromTs - span && e.t < fromTs);
+        prev = {
+          feat: pv.filter((e) => e.featured).length,
+          chosen: pv.filter((e) => e.featured && e.printedMine).length,
+          lost: pv.filter((e) => e.featured && e.printedOther).length,
+        };
+        if (!prev.feat && !prev.chosen && !prev.lost) prev = null;
+      }
+      const badge = (cur, pv, goodWhenUp = true) => {
+        if (!prev || !Number.isFinite(pv)) return "";
+        if (pv <= 0) return cur > 0 ? `<span style="font-size:11px;font-weight:700;color:${goodWhenUp ? "#2E7D51" : "#B23333"}">&#8599; new</span>` : "";
+        const d = ((cur - pv) / pv) * 100;
+        const up = d >= 0;
+        const good = up === goodWhenUp;
+        return `<span title="vs previous period: ${fmt(pv)}" style="font-size:11px;font-weight:700;color:${good ? "#2E7D51" : "#B23333"}">${up ? "&#8599;" : "&#8600;"}&nbsp;${Math.abs(d).toFixed(0)}%</span>`;
+      };
+      const decided = chosen.length + lost.length;
+      const winRate = decided ? (100 * chosen.length / decided) : null;
       const count = (arr, key) => {
         const m = new Map();
         for (const e of arr) { const k = key(e); if (k) m.set(k, (m.get(k) || 0) + 1); }
         return [...m.entries()].sort((a, b) => b[1] - a[1]);
       };
-      const rows = (list) => list.slice(0, 6).map(([k, n]) =>
+      const rows = (list) => list.slice(0, 6).map(([k, n2]) =>
         `<div style="display:flex;justify-content:space-between;gap:12px;padding:3px 0;">
-           <span>${esc(k)}</span><span class="num">${fmt(n)}</span></div>`).join("") ||
+           <span>${esc(k)}</span><span class="num">${fmt(n2)}</span></div>`).join("") ||
         `<div style="color:var(--ink-mute)">None in this period.</div>`;
-      // monthly featured bars — same brand teal, tooltips carry prints/saves
+      // monthly bars: solid = featured AND chosen (printed yours), light = featured
+      // without a print of yours — the featured→chosen story month by month
       const mkM = (t) => new Date(t).toISOString().slice(0, 7);
       const byM = new Map();
-      for (const e2 of ev) { if (!e2.featured && !e2.printedMine) continue; const m = mkM(e2.t);
-        const b = byM.get(m) || { f: 0, p: 0, s: 0 };
-        if (e2.featured) b.f++; if (e2.printedMine) b.p++; if (e2.saved) b.s++; byM.set(m, b); }
+      for (const e2 of ev) {
+        if (!e2.featured && !e2.printedMine) continue;
+        const m = mkM(e2.t);
+        const b = byM.get(m) || { f: 0, c: 0, l: 0, s: 0 };
+        if (e2.featured) { b.f++; if (e2.printedMine) b.c++; if (e2.printedOther) b.l++; if (e2.saved) b.s++; }
+        byM.set(m, b);
+      }
       const mns = [...byM.keys()].sort();
       let mbars = "";
       if (mns.length) {
-        const W2 = 700, H2 = 120, pL = 8, pB = 26, pT = 14;
+        const W2 = 700, H2 = 130, pL = 8, pB = 26, pT = 14;
         const bw2 = Math.min(64, Math.max(14, ((W2 - pL * 2) / mns.length) * 0.6));
         const gp2 = mns.length > 1 ? ((W2 - pL * 2) - mns.length * bw2) / (mns.length - 1) : 0;
         const mx = Math.max(...mns.map((m) => byM.get(m).f), 1);
         let sv = "";
         mns.forEach((m, k) => {
           const b = byM.get(m); const x2 = pL + k * (bw2 + gp2);
-          const bh2 = (H2 - pT - pB) * (b.f / mx); const y2 = H2 - pB - bh2;
-          sv += `<rect x="${x2}" y="${y2.toFixed(1)}" width="${bw2}" height="${Math.max(bh2, 1).toFixed(1)}" rx="3" fill="#16688F"><title>${esc(chartMonthShort(m))} &middot; featured ${b.f} &middot; prints ${b.p} &middot; saves ${b.s}</title></rect>`;
-          if (b.f) sv += `<text x="${x2 + bw2 / 2}" y="${(y2 - 4).toFixed(1)}" text-anchor="middle" font-size="10" fill="var(--ink-soft)" class="num">${b.f}</text>`;
+          const fullH = (H2 - pT - pB) * (b.f / mx);
+          const chosenH = b.f ? fullH * (b.c / b.f) : 0;
+          const yTop = H2 - pB - fullH;
+          const tip = `<title>${esc(chartMonthShort(m))} &middot; featured ${b.f} &middot; chosen ${b.c} &middot; lost to competitor ${b.l} &middot; saves ${b.s}</title>`;
+          sv += `<rect x="${x2}" y="${yTop.toFixed(1)}" width="${bw2}" height="${Math.max(fullH - chosenH, 0).toFixed(1)}" rx="3" fill="#16688F" opacity=".32">${tip}</rect>`;
+          if (chosenH > 0) sv += `<rect x="${x2}" y="${(H2 - pB - chosenH).toFixed(1)}" width="${bw2}" height="${chosenH.toFixed(1)}" fill="#16688F">${tip}</rect>`;
+          if (b.f) sv += `<text x="${x2 + bw2 / 2}" y="${(yTop - 4).toFixed(1)}" text-anchor="middle" font-size="10" fill="var(--ink-soft)" class="num">${b.f}</text>`;
           sv += `<text x="${x2 + bw2 / 2}" y="${H2 - 10}" text-anchor="middle" font-size="9.5" fill="var(--ink-mute)">${esc(chartMonthShort(m))}</text>`;
         });
-        mbars = `<div style="margin:8px 0 4px"><svg viewBox="0 0 ${W2} ${H2}" style="width:100%;max-width:760px;height:auto;display:block">${sv}</svg></div>`;
+        mbars = `<div style="margin:8px 0 2px"><svg viewBox="0 0 ${W2} ${H2}" style="width:100%;max-width:760px;height:auto;display:block">${sv}</svg>
+          <div style="display:flex;gap:16px;font-size:11px;color:var(--ink-mute);margin-top:2px">
+            <span><span style="display:inline-block;width:10px;height:10px;background:#16688F;border-radius:2px;vertical-align:-1px"></span> featured &amp; chosen (card printed)</span>
+            <span><span style="display:inline-block;width:10px;height:10px;background:#16688F;opacity:.32;border-radius:2px;vertical-align:-1px"></span> featured, no print of yours</span>
+          </div></div>`;
       }
       el.innerHTML =
         `<div class="kicker">Your pharmacies across ALL MyRxCard channels <span class="hint">&middot; featured slots in searches on any site, not just your microsite</span></div>` + mbars + `
-         <div style="display:flex;gap:28px;flex-wrap:wrap;margin:6px 0 10px;">
-           <div><span class="big num">${fmt(feat.length)}</span><div style="color:var(--ink-soft);font-size:12px;">searches where your pharmacy was featured — any site</div></div>
-           <div><span class="big num">${fmt(prints.length)}</span><div style="color:var(--ink-soft);font-size:12px;">card prints at your pharmacies — any site</div></div>
+         <div style="display:flex;gap:26px;flex-wrap:wrap;margin:10px 0 10px;">
+           <div><span class="big num">${fmt(feat.length)}</span> ${badge(feat.length, prev && prev.feat)}
+             <div style="color:var(--ink-soft);font-size:12px;">searches featuring your pharmacy</div></div>
+           <div><span class="big num">${fmt(chosen.length)}</span> ${badge(chosen.length, prev && prev.chosen)}
+             <div style="color:var(--ink-soft);font-size:12px;">chosen when featured &middot; card printed${winRate != null ? ` &middot; <b>${winRate.toFixed(0)}% win rate</b>` : ""}</div></div>
+           <div><span class="big num">${fmt(lost.length)}</span> ${badge(lost.length, prev && prev.lost, false)}
+             <div style="color:var(--ink-soft);font-size:12px;">featured but a competitor&rsquo;s card printed</div></div>
+           <div><span class="big num">${fmt(printsAny.length)}</span>
+             <div style="color:var(--ink-soft);font-size:12px;">card prints at your pharmacies &mdash; any site</div></div>
          </div>
          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;font-size:13px;">
            <div><div class="kicker">Featured — by site</div>${rows(count(feat, (e) => e.site))}</div>
@@ -5949,7 +5997,8 @@ async function boot() {
           let t = r.search_timestamp || r.created_at;
           t = typeof t === "number" ? t : Date.parse(t);
           if (!Number.isFinite(t)) continue;
-          state.clientExposure.push({ t, site: parseGroup(r.source_path), drug: (r.drug_name || "").trim(), featured, printedMine, saved: featured && truthy(r.wallet_saved) });
+          state.clientExposure.push({ t, site: parseGroup(r.source_path), drug: (r.drug_name || "").trim(), featured, printedMine,
+            printedOther: featured && truthy(r.printed) && !printedMine, saved: featured && truthy(r.wallet_saved) });
         }
         // panel sits above the standard search dashboard, outside the grid so
         // the reveal-on-scroll machinery leaves it alone
