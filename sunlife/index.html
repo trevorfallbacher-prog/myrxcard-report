@@ -1099,6 +1099,11 @@
     </div>
 
     <div class="panel span6">
+      <div class="kicker">Top users <span class="hint">&middot; by persistent session &middot; FOCUS scopes every panel, EXCLUDE hides test traffic</span></div>
+      <div id="top-users"></div>
+    </div>
+
+    <div class="panel span6">
       <div class="kicker">Devices</div>
       <div id="devices"></div>
     </div>
@@ -1642,6 +1647,19 @@ let state = { events: [], period: { type: "QTD", from: null, to: null }, mode: "
   ranges: null,   // [[fromTs, toTs)] when a multi-selection is active
   tfLabel: null,  // human label for print-meta ("Q2 2026 + Q3 2026")
   filters: { state: null, drug: null, group: null, device: null } }; // each: null | array of values
+// Heavy-user controls: sessions excluded from every panel (persisted per
+// browser) and an optional single-session focus for behavior drill-downs.
+state.exclSessions = new Set(function () { try { return JSON.parse(localStorage.getItem("mrx-excl-sessions") || "[]"); } catch { return []; } }());
+state.userFocus = null;
+function persistExcl() { try { localStorage.setItem("mrx-excl-sessions", JSON.stringify([...state.exclSessions])); } catch {} }
+// The event set every panel, badge and export sees: minus excluded sessions,
+// narrowed to one session while a user is focused.
+function searchEvents() {
+  let ev = state.events;
+  if (state.exclSessions.size) ev = ev.filter((e) => !state.exclSessions.has(e.session));
+  if (state.userFocus) ev = ev.filter((e) => e.session === state.userFocus);
+  return ev;
+}
 
 /* --- search timeframe drill-down: same two-dropdown treatment as the
        utilization tab, over the live events' date domain --- */
@@ -2026,7 +2044,7 @@ function searchViewDesc() {
 // per search, matching what the charts are showing.
 function downloadSearchCsv() {
   const f = state.filters;
-  const a = aggregate(state.events, state.period, f, state.ranges);
+  const a = aggregate(searchEvents(), state.period, f, state.ranges);
   const rows = [["Timestamp", "State", "City", "Drug", "Dosage", "Qty", "Group", "Device", "Browser", "Session",
     "Results", "TopPrice", "MinPrice", "MaxPrice", "HasFeatured", "Printed", "PrintedPharmacy"]];
   for (const e of a.ev) {
@@ -2057,7 +2075,7 @@ function renderAll() {
     }
   }
   renderSearchTf();
-  const a = aggregate(state.events, state.period, f, state.ranges);
+  const a = aggregate(searchEvents(), state.period, f, state.ranges);
   // chips: condensed by default — 3+ selections in one dimension roll up
   const SDIM_LABEL = { state: "States", drug: "Drugs", group: "Groups", device: "Devices" };
   const chips = [];
@@ -2076,6 +2094,10 @@ function renderAll() {
     for (const v of sel)
       chips.push(`<button class="badge-filter" type="button" data-dim="${d}" data-val="${esc(v)}">${esc(FILTER_LABELS[d](v)).toUpperCase()} <span class="x">&#215;</span></button>`);
   }
+  if (state.userFocus)
+    chips.push(`<button class="badge-filter" type="button" data-ufocusclear="1">USER ${esc(state.userFocus.slice(0, 8))} <span class="x">&#215;</span></button>`);
+  if (state.exclSessions.size)
+    chips.push(`<button class="badge-filter" type="button" data-uexclclear="1" title="Click to re-include all excluded users">${state.exclSessions.size} USER${state.exclSessions.size > 1 ? "S" : ""} HIDDEN <span class="x">&#215;</span></button>`);
   $("filter-chips").innerHTML = chips.join("") +
     (anyChip ? `<button class="badge-filter reset" type="button" id="reset-filters">RESET FILTERS</button>` : "");
   renderGroupSlicer(a);
@@ -2096,7 +2118,7 @@ function renderAll() {
   if (a.total && Number.isFinite(a.first) && Number.isFinite(a.anchor)) {
     const span = Math.max(a.anchor - a.first, DAY);
     const isoD = (t) => new Date(t).toLocaleDateString("sv-SE");
-    prevA = aggregate(state.events, { type: "CUSTOM", from: isoD(a.first - span - DAY), to: isoD(a.first - DAY) }, f);
+    prevA = aggregate(searchEvents(), { type: "CUSTOM", from: isoD(a.first - span - DAY), to: isoD(a.first - DAY) }, f);
     if (!prevA.total) prevA = null;
   }
   const mdy = (s) => s ? new Date(s + "T00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "—";
@@ -2129,7 +2151,43 @@ function renderAll() {
     DIMS.filter((d) => (f[d] || []).length).map((d) =>
       ` · ${d.toUpperCase()}S: ${f[d].map((v) => FILTER_LABELS[d](v).toUpperCase()).join(", ")}`).join("") +
     (state.mode === "sample" ? " · SAMPLE DATA" : "");
+  renderUsers();
   renderCustomCharts(); // saved prompt-charts track the period selector
+}
+
+// Heavy-user roster for the current period (computed BEFORE exclusions so an
+// excluded session stays visible and can be re-included). ⚠ = one session
+// searching from more than one state.
+function renderUsers() {
+  const el = document.getElementById("top-users");
+  if (!el) return;
+  const [fromTs, toTs] = periodBounds(state.period);
+  const by = new Map();
+  for (const e of state.events) {
+    if (e.t < fromTs || e.t >= toTs || !e.session) continue;
+    const u = by.get(e.session) || { n: 0, states: new Set(), drugs: new Set(), prints: 0, saves: 0, last: 0, device: "" };
+    if (e.drug) { u.n++; u.drugs.add(e.drug); }
+    if (e.state) u.states.add(e.state);
+    if (e.printed) u.prints++;
+    if (e.walletSaved) u.saves++;
+    if (e.t >= u.last) { u.last = e.t; u.device = e.device; }
+    by.set(e.session, u);
+  }
+  const rows = [...by.entries()].sort((x, y) => y[1].n - x[1].n).slice(0, 12);
+  const fd = (t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  el.innerHTML = rows.map(([sid, u]) => {
+    const excl = state.exclSessions.has(sid), foc = state.userFocus === sid;
+    const multi = u.states.size > 1;
+    return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(127,168,189,.18);font-size:12.5px;${excl ? "opacity:.45;" : ""}">
+      <span class="num" title="${esc(sid)}" style="flex:0 0 74px;font-weight:600">${esc(sid.slice(0, 8))}</span>
+      <span style="flex:0 0 68px"><b class="num">${fmt(u.n)}</b> srch</span>
+      <span style="flex:0 0 84px;${multi ? "color:#C98A00;font-weight:700;" : ""}" title="${esc([...u.states].join(", "))}">${u.states.size} state${u.states.size === 1 ? "" : "s"}${multi ? " &#9888;" : ""}</span>
+      <span style="flex:0 0 92px;color:var(--ink-soft)">${u.prints} prt &middot; ${u.saves} sav</span>
+      <span style="flex:1;color:var(--ink-mute)">${fd(u.last)} &middot; ${esc(u.device)}</span>
+      <button type="button" class="iconbtn" data-ufocus="${esc(sid)}" style="padding:2px 8px;font-size:10px${foc ? ";font-weight:800" : ""}">${foc ? "UNFOCUS" : "FOCUS"}</button>
+      <button type="button" class="iconbtn" data-uexcl="${esc(sid)}" style="padding:2px 8px;font-size:10px">${excl ? "INCLUDE" : "EXCLUDE"}</button>
+    </div>`;
+  }).join("") || `<div style="color:var(--ink-mute);font-size:13px">No sessions in this window.</div>`;
 }
 
 function toggleDim(dim, val) {
@@ -5623,6 +5681,16 @@ async function boot() {
       if (sclear.dataset.sclear === "state") history.replaceState(null, "", location.pathname);
       renderAll(); return;
     }
+    const uf = e.target.closest("[data-ufocus]");
+    if (uf) { state.userFocus = state.userFocus === uf.dataset.ufocus ? null : uf.dataset.ufocus; renderAll(); return; }
+    const uxl = e.target.closest("[data-uexcl]");
+    if (uxl) {
+      const s = uxl.dataset.uexcl;
+      state.exclSessions.has(s) ? state.exclSessions.delete(s) : state.exclSessions.add(s);
+      persistExcl(); renderAll(); return;
+    }
+    if (e.target.closest("[data-ufocusclear]")) { state.userFocus = null; renderAll(); return; }
+    if (e.target.closest("[data-uexclclear]")) { state.exclSessions.clear(); persistExcl(); renderAll(); return; }
     const sexpand = e.target.closest("[data-sexpand]");
     if (sexpand) { state.chipsOpen.add(sexpand.dataset.sexpand); renderAll(); return; }
     const scollapse = e.target.closest("[data-scollapse]");
