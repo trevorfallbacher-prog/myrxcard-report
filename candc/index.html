@@ -2761,7 +2761,7 @@ function pharmDrillHTML(p, pi) {
   const sub = [m.addr, m.city ? `${m.city}, ${m.st}` : "", m.zip].filter(Boolean).join(" · ");
   return `
     <div class="pdrill-head">
-      <button class="iconbtn" id="pharm-back" type="button">&#8592; ALL PHARMACIES</button>
+      <button class="iconbtn" id="pharm-back" type="button">&#8592; BACK</button>
       <div class="pdrill-name">${esc(name)}</div>
     </div>
     <div class="pdrill-sub">${esc(sub)}${m.npi4 ? ` · NPI &#8230;${esc(m.npi4)}` : ""}
@@ -2963,6 +2963,7 @@ function utilFilterReset() {
   util.range = null; // {a, b} yyyymmdd, from hand-edited date inputs
   util.rangeMonths = null;
   util.drill = null;
+  util.drillPrev = null;
   util.tf = { gran: (util.tf && util.tf.gran) || "Q", sel: null };
   util.tfMonths = util.tfRanges = util.tfDays = null;
 }
@@ -3910,7 +3911,7 @@ function renderUtil() {
   ]);
 
   // bar drill-down: a drilled pharmacy must still be part of the selection
-  if (util.drill != null && !(util.f.pharmacies && util.f.pharmacies.has(util.drill))) util.drill = null;
+  if (util.drill != null && !(util.f.pharmacies && util.f.pharmacies.has(util.drill))) { util.drill = null; util.drillPrev = null; }
   $("pharm-chart").innerHTML = util.drill != null && hasCube
     ? pharmDrillHTML(p, util.drill)
     : pharmChartSVG(a.pharmacies, util.f ? util.f.pharmacies : null);
@@ -5715,13 +5716,20 @@ async function boot() {
       return;
     }
     if (e.target.closest("#pharm-back")) {
+      // zoom back out to the PRE-DRILL selection; only if the user reshaped
+      // the slicer while drilled do we leave their new selection untouched
+      if (util.f.pharmacies && util.f.pharmacies.size === 1 && util.f.pharmacies.has(util.drill))
+        util.f.pharmacies = (util.drillPrev && util.drillPrev.size) ? new Set(util.drillPrev) : null;
       util.drill = null;
-      util.f.pharmacies = null;
+      util.drillPrev = null;
       renderUtil();
       return;
     }
     const cbar = e.target.closest("#pharm-chart .bar");
     if (cbar) { // drill into that pharmacy and focus the tab on it
+      // remember the slicer as it stood, so BACK zooms out to it instead of
+      // wiping the whole pharmacy filter
+      util.drillPrev = util.f.pharmacies ? new Set(util.f.pharmacies) : null;
       util.drill = Number(cbar.dataset.pi);
       util.f.pharmacies = new Set([util.drill]);
       renderUtil();
