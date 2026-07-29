@@ -2165,13 +2165,14 @@ function renderAll() {
   const fd = (t) => new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   $("foot-window").textContent = a.total ? `Window: ${fd(a.first)} – ${fd(a.anchor)}` : "";
   const gen = new Date().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
-  $("print-meta").textContent =
+  state._searchMeta =
     `CONSUMER WEB SEARCH REPORT · GENERATED ${gen.toUpperCase()}` +
     (a.total ? ` · WINDOW ${fd(a.first).toUpperCase()} – ${fd(a.anchor).toUpperCase()}` : "") +
     ` · PERIOD: ${(state.tfLabel || PERIOD_LABELS[state.period.type]).toUpperCase()}` +
     DIMS.filter((d) => (f[d] || []).length).map((d) =>
       ` · ${d.toUpperCase()}S: ${f[d].map((v) => FILTER_LABELS[d](v).toUpperCase()).join(", ")}`).join("") +
     (state.mode === "sample" ? " · SAMPLE DATA" : "");
+  updatePrintMeta();
   renderUsers();
   renderFeaturedByPartner();
   renderCustomCharts(); // saved prompt-charts track the period selector
@@ -2256,6 +2257,21 @@ function renderFeaturedByPartner() {
 // Heavy-user roster for the current period (computed BEFORE exclusions so an
 // excluded session stays visible and can be re-included). ⚠ = one session
 // searching from more than one state.
+// The printed page header must describe the tab being exported — the search
+// meta on a utilization PDF said "CONSUMER WEB SEARCH REPORT" over claims.
+function updatePrintMeta() {
+  const el = $("print-meta");
+  if (!el) return;
+  const gen = new Date().toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).toUpperCase();
+  if (state.tab === "util" || state.tab === "fees") {
+    const label = state.tab === "fees" ? "ADMIN FEES REPORT · INTERNAL" : "UTILIZATION REPORT";
+    const win = ($("util-window") && $("util-window").textContent || "").toUpperCase();
+    el.textContent = `${label} · GENERATED ${gen}` + (win ? ` · ${win}` : "");
+  } else {
+    el.textContent = state._searchMeta || `CONSUMER WEB SEARCH REPORT · GENERATED ${gen}`;
+  }
+}
+
 function renderUsers() {
   const el = document.getElementById("top-users");
   if (!el) return;
@@ -3952,6 +3968,7 @@ function renderUtil() {
     if (el.closest(".vis")) countUp(el); // below-fold numbers roll up at reveal instead
   $("view-desc").textContent = utilViewDesc(p);
   renderCustomCharts(); // prompt-charts obey the same slicers — keep them in step
+  updatePrintMeta();
 }
 
 /* ---------------- admin fees tab (internal) ----------------
@@ -4135,6 +4152,7 @@ async function setTab(name) {
   } else if (state.mode === "sample") {
     stamp(true, "STATIC SAMPLE");
   }
+  updatePrintMeta();
 }
 
 /* ---------------- document studio ---------------- */
