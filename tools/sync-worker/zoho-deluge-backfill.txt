@@ -83,6 +83,26 @@ void automation.backfill_avalon_cases(int page)
 	{
 		row.put("member_ref",ifnull(mem.get("id"),"").toString());
 	}
+		// age in whole years from Member_DOB — DOB never leaves Zoho; capped at 90 (safe harbor)
+		dobStr = ifnull(rec.get("Member_DOB"),"").toString();
+		if(dobStr.length() >= 10)
+		{
+			dob = dobStr.subString(0,10).toDate("yyyy-MM-dd");
+			todayD = zoho.currentdate;
+			memberAge = todayD.getYear() - dob.getYear();
+			if(todayD.getMonth() < dob.getMonth() || (todayD.getMonth() == dob.getMonth() && todayD.getDay() < dob.getDay()))
+			{
+				memberAge = memberAge - 1;
+			}
+			if(memberAge > 90)
+			{
+				memberAge = 90;
+			}
+			if(memberAge >= 0 && memberAge <= 90)
+			{
+				row.put("member_age",memberAge);
+			}
+		}
 		if(rec.get("AWP") != null)
 		{
 			row.put("awp",rec.get("AWP").toDecimal());

@@ -6,6 +6,8 @@
 // never forwarded. Clean rows are upserted into Xano.
 //
 //   POST / { secret, rows: [ {bucket_key, client_name, month, ...metrics} ] }
+//   POST / { report_pw }   → read route for reports.avalonsaves.com: returns
+//                            every case row (already identifier-free)
 //
 // The upsert happens here, directly against Xano's Metadata API content
 // endpoints (search by bucket_key → update or insert) — no Xano-side
@@ -13,6 +15,7 @@
 //
 // Vars:    XANO_CONTENT_URL  the table's meta content base (wrangler.toml)
 // Secrets: SYNC_SECRET       shared with the Zoho Deluge function
+//          REPORT_PW         unlocks the read route (shared with the report UI)
 //          XANO_META_TOKEN   Xano Metadata API token (expires — see README)
 // (After any `wrangler deploy`, re-run a `wrangler secret put` to re-bind.)
 
@@ -38,6 +41,7 @@ const FIELDS = {
   ndc: { t: "string", max: 11, re: /^\d{0,11}$/ },
   medication_type: { t: "string", max: 20 },            // Brand / Generic
   member_ref: { t: "string", max: 30, re: /^\d*$/ },    // Zoho member record id — tokenized (HMAC) before storage, never persisted raw
+  member_age: { t: "number", min: 0, max: 90 },         // whole years, capped at 90 (HIPAA safe harbor) — computed in Deluge from DOB; the DOB itself never leaves Zoho
   month: { t: "string", max: 7, re: /^\d{4}-\d{2}$/ },  // created month (bucketing)
   created_date: { t: "string", max: 10, re: /^\d{4}-\d{2}-\d{2}$/ },
   closed_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
@@ -73,6 +77,7 @@ function validateRow(row) {
     const spec = FIELDS[k];
     if (spec.t === "number") {
       if (typeof v !== "number" || !isFinite(v)) return `${k} must be a finite number`;
+      if (spec.min !== undefined && (v < spec.min || v > spec.max)) return `${k} out of range`;
     } else {
       if (typeof v !== "string") return `${k} must be a string`;
       if (v.length > spec.max) return `${k} too long (${v.length} > ${spec.max})`;
@@ -89,8 +94,25 @@ export default {
     if (req.method !== "POST") return json({ error: "POST only" }, 405);
     let body;
     try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
-    if (!env.SYNC_SECRET || body.secret !== env.SYNC_SECRET) return json({ error: "bad secret" }, 403);
     if (!env.XANO_META_TOKEN || !env.XANO_CONTENT_URL) return json({ error: "Xano connection not configured" }, 500);
+    // read route for the gated report — password-checked, identifier-free rows
+    if (body.report_pw !== undefined) {
+      if (!env.REPORT_PW || body.report_pw !== env.REPORT_PW) return json({ error: "bad password" }, 403);
+      const H2 = { "content-type": "application/json", authorization: `Bearer ${env.XANO_META_TOKEN}` };
+      let cases = [], page = 1;
+      for (;;) {
+        const r = await fetch(`${env.XANO_CONTENT_URL}/search`, { method: "POST", headers: H2,
+          body: JSON.stringify({ page, per_page: 250, search: [] }) });
+        if (!r.ok) return json({ error: `Xano read ${r.status}` }, 502);
+        const it = (await r.json()).items || [];
+        cases = cases.concat(it);
+        if (it.length < 250) break;
+        page++;
+      }
+      const clean = cases.map(({ id, created_at, ...rest }) => rest);
+      return json({ ok: true, generatedAt: new Date().toISOString(), cases: clean });
+    }
+    if (!env.SYNC_SECRET || body.secret !== env.SYNC_SECRET) return json({ error: "bad secret" }, 403);
     const rows = body.rows;
     if (!Array.isArray(rows) || !rows.length) return json({ error: "rows[] required" }, 400);
     // each row costs up to 4 Xano calls (search + write + up to 2 events);
