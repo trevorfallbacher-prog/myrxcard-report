@@ -74,9 +74,14 @@ void automation.push_avalon_case(int recordId)
 	{
 		row.put("member_ref",ifnull(mem.get("id"),"").toString());
 	}
-	// age in whole years from Member_DOB — the DOB itself never leaves Zoho;
-	// capped at 90 so the row stays HIPAA safe-harbor de-identified
+	// age in whole years — case field first, else the linked contact's DOB.
+	// only the age (capped 90, safe harbor) is sent; the DOB never leaves Zoho
 	dobStr = ifnull(rec.get("Member_DOB"),"").toString();
+	if(dobStr.length() < 10 && mem != null)
+	{
+		contact = zoho.crm.getRecordById("Contacts", mem.get("id"));
+		dobStr = ifnull(contact.get("Date_of_Birth"),"").toString();
+	}
 	if(dobStr.length() >= 10)
 	{
 		dob = dobStr.subString(0,10).toDate("yyyy-MM-dd");

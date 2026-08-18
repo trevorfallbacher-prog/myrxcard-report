@@ -1,18 +1,15 @@
-// backfill_avalon_cases — one-time history load. NOT attached to any rule.
+// backfill_avalon_cases — reloads history 100 cases per run. NOT attached to any rule.
 // -------------------------------------------------------------------------
 // Where it lives: Zoho CRM → Setup → Developer Hub → Functions
-//   (create: + New Function → name backfill_avalon_cases → category Automation
-//    → add Int argument "page" via the (x) panel)
-// How to run it: open the function in the editor and press the ▶ play button
-//   (top-left of the editor toolbar). It asks for the page value: run with
-//   page = 1, then 2, then 3 … until the log prints
-//   "no records — backfill complete". ~400 cases = 3 runs.
+// How to run: ▶ with page = 1, then 2, 3, 4 … until "no records — backfill complete".
 //
-// Paste the body below between the editor's braces. Batches of 12 match the
-// sync worker's per-push cap.
+// v2 (2026-08-18): member_age included. Cases.Member_DOB is empty in practice,
+// so each run first builds a Contacts id→Date_of_Birth map (up to 2000
+// contacts), then falls back to it per case. Only the computed age (capped 90)
+// is transmitted — never the DOB. Pages of 100 keep total integration calls
+// (≤10 contacts + 1 cases + ≤9 pushes) inside Deluge per-execution limits.
 
-void automation.backfill_avalon_cases(int page)
-{
+void automation.backfill_avalon_cases(int page){
 	syncUrl = "https://myrxcard-sync.trevorfallbacher.workers.dev";
 	syncSecret = "PASTE-YOUR-SYNC-SECRET-HERE";
 
@@ -26,15 +23,40 @@ void automation.backfill_avalon_cases(int page)
 	normSource.put("global rx","GlobalRx");
 	normSource.put("globalrx","GlobalRx");
 
-	recs = zoho.crm.getRecords("Cases", page, 200);
+	dobMap = Map();
+	contactsDone = false;
+	for each cp in {1,2,3,4,5,6,7,8,9,10}
+	{
+		if(contactsDone == false)
+		{
+			cons = zoho.crm.getRecords("Contacts", cp, 200);
+			for each con in cons
+			{
+				cdob = ifnull(con.get("Date_of_Birth"),"").toString();
+				if(cdob.length() >= 10)
+				{
+					dobMap.put(ifnull(con.get("id"),"").toString(), cdob);
+				}
+			}
+			if(cons.size() < 200)
+			{
+				contactsDone = true;
+			}
+		}
+	}
+	info "contacts with DOB: " + dobMap.size();
+
+	recs = zoho.crm.getRecords("Cases", page, 100);
 	if(recs.size() == 0)
 	{
-		info "page " + page + ": no records — backfill complete";
+		info "page " + page + ": no records - backfill complete";
 		return;
 	}
 	rows = List();
 	pushed = 0;
 	skipped = 0;
+	aged = 0;
+	nodob = 0;
 	for each rec in recs
 	{
 		cl = rec.get("Client_Name");
@@ -78,13 +100,18 @@ void automation.backfill_avalon_cases(int page)
 		row.put("month",created.subString(0,7));
 		row.put("created_date",created.subString(0,10));
 		row.put("closed_date",closedDate);
-	mem = rec.get("Member");
-	if(mem != null)
-	{
-		row.put("member_ref",ifnull(mem.get("id"),"").toString());
-	}
-		// age in whole years from Member_DOB — DOB never leaves Zoho; capped at 90 (safe harbor)
+		mem = rec.get("Member");
+		if(mem != null)
+		{
+			row.put("member_ref",ifnull(mem.get("id"),"").toString());
+		}
+		// age in whole years - case field first, else the linked contact's DOB.
+		// only the age (capped 90, safe harbor) is sent; the DOB never leaves Zoho
 		dobStr = ifnull(rec.get("Member_DOB"),"").toString();
+		if(dobStr.length() < 10 && mem != null)
+		{
+			dobStr = ifnull(dobMap.get(ifnull(mem.get("id"),"").toString()),"").toString();
+		}
 		if(dobStr.length() >= 10)
 		{
 			dob = dobStr.subString(0,10).toDate("yyyy-MM-dd");
@@ -101,7 +128,12 @@ void automation.backfill_avalon_cases(int page)
 			if(memberAge >= 0 && memberAge <= 90)
 			{
 				row.put("member_age",memberAge);
+				aged = aged + 1;
 			}
+		}
+		else
+		{
+			nodob = nodob + 1;
 		}
 		if(rec.get("AWP") != null)
 		{
@@ -188,5 +220,5 @@ void automation.backfill_avalon_cases(int page)
 		info "final batch: " + resp;
 		pushed = pushed + rows.size();
 	}
-	info "page " + page + ": pushed " + pushed + ", skipped " + skipped + " (missing client/med/date)";
+	info "page " + page + ": pushed " + pushed + ", skipped " + skipped + ", with age " + aged + ", no DOB " + nodob;
 }
