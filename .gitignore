@@ -6,3 +6,6 @@ tools/watcher.log
 # per-client site passwords — never publish
 tools/clients.secrets.json
 tools/*/.testpw
+# worker credentials — never publish
+tools/sync-worker/.reportpw
+tools/sync-worker/.syncsecret
