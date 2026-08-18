@@ -9,3 +9,4 @@ tools/*/.testpw
 # worker credentials — never publish
 tools/sync-worker/.reportpw
 tools/sync-worker/.syncsecret
+tools/sync-worker/.clientpws
