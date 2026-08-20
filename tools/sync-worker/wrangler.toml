@@ -5,3 +5,9 @@ compatibility_date = "2026-07-01"
 [vars]
 XANO_CONTENT_URL = "https://xy2f-yrzu-6a37.n7d.xano.io/api:meta/workspace/1/table/12/content"
 XANO_EVENTS_URL = "https://xy2f-yrzu-6a37.n7d.xano.io/api:meta/workspace/1/table/13/content"
+
+# AAPS pricing snapshot (same KV namespace the avalon-aaps Pages project writes
+# via /api/upload) — read-only here, served to the internal /nash/ dashboard
+[[kv_namespaces]]
+binding = "AAPS_DATA"
+id = "dadeb13cc98d45a59ccc1cf032b725a6"

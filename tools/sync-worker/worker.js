@@ -23,6 +23,35 @@ const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods
 const json = (obj, status = 200) =>
   new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json", ...CORS } });
 
+// ---- client microsites (reports.avalonsaves.com/<slug>/) ----
+// Secret CLIENT_PWS = JSON {"<slug>": {"pw": "...", "label": "..."}}.
+// A client password returns ONLY that client's rows, server-side white-labeled:
+// no fee/supplier pricing, sourcing names collapsed to Domestic/International,
+// member tokens re-HMACed per client so tokens can't be linked across sites.
+const INTL_SOURCES = new Set(["Canada Outreach", "GlobalRx", "MedsDirect", "NASH"]);
+const DOMESTIC_SOURCES = new Set(["Direct", "RxFree4me"]);
+// fields a client browser is allowed to receive — everything else is dropped
+const CLIENT_FIELDS = ["case_key","assist_number","group_number","source","status","closed_reason",
+  "medication_name","ndc","medication_type","month","created_date","closed_date",
+  "awp","aa_price","aa_savings","avalon_savings","member_ref","member_age"];
+async function hmacHex16(secret, message) {
+  if (!secret || !message) return "";
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  return [...new Uint8Array(sig)].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function clientOwns(row, slug) {
+  return (((row.tpa || "") + " " + (row.client_name || "")).toLowerCase().includes(slug));
+}
+function whitelabel(row, label) {
+  const out = {};
+  for (const k of CLIENT_FIELDS) if (row[k] !== undefined) out[k] = row[k];
+  out.client_name = label;
+  const s = row.source || "";
+  out.source = INTL_SOURCES.has(s) ? "International" : DOMESTIC_SOURCES.has(s) ? "Domestic" : "Other";
+  return out;
+}
+
 // the ONLY fields allowed out — one row per Avalon Assist case, identifier-
 // free. Member fields (name, DOB, email, phone, government ID, relationship,
 // dose/quantity free text, survey comments) are not in this list and any
@@ -95,9 +124,29 @@ export default {
     let body;
     try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
     if (!env.XANO_META_TOKEN || !env.XANO_CONTENT_URL) return json({ error: "Xano connection not configured" }, 500);
-    // read route for the gated report — password-checked, identifier-free rows
+    // read route for the gated reports. The master password returns everything;
+    // a client password (CLIENT_PWS secret) returns only that client's rows,
+    // white-labeled server-side — the browser never sees other clients, fees,
+    // supplier pricing, or real sourcing names.
     if (body.report_pw !== undefined) {
-      if (!env.REPORT_PW || body.report_pw !== env.REPORT_PW) return json({ error: "bad password" }, 403);
+      let clientMeta = null;
+      if (!env.REPORT_PW || body.report_pw !== env.REPORT_PW) {
+        let map = {};
+        try { map = JSON.parse(env.CLIENT_PWS || "{}"); } catch {}
+        for (const [slug, c] of Object.entries(map)) {
+          if (c && c.pw && body.report_pw === c.pw) { clientMeta = { slug, label: c.label || slug }; break; }
+        }
+        if (!clientMeta) return json({ error: "bad password" }, 403);
+      }
+      // AAPS supplier pricing snapshot for the internal /nash/ dashboard.
+      // MASTER password only — supplier prices never ship to client views.
+      if (body.dataset === "pricing") {
+        if (clientMeta) return json({ error: "bad password" }, 403);
+        if (!env.AAPS_DATA) return json({ error: "pricing store not bound" }, 500);
+        const txt = await env.AAPS_DATA.get("pricing_data.json");
+        if (!txt) return json({ error: "no pricing snapshot loaded" }, 404);
+        return new Response(txt, { headers: { "content-type": "application/json", ...CORS } });
+      }
       const H2 = { "content-type": "application/json", authorization: `Bearer ${env.XANO_META_TOKEN}` };
       let cases = [], page = 1;
       for (;;) {
@@ -110,6 +159,16 @@ export default {
         page++;
       }
       const clean = cases.map(({ id, created_at, ...rest }) => rest);
+      if (clientMeta) {
+        const out = [];
+        for (const r of clean) {
+          if (!clientOwns(r, clientMeta.slug)) continue;
+          const w = whitelabel(r, clientMeta.label);
+          if (w.member_ref) w.member_ref = await hmacHex16(env.MEMBER_SALT, clientMeta.slug + "|" + w.member_ref);
+          out.push(w);
+        }
+        return json({ ok: true, generatedAt: new Date().toISOString(), client: clientMeta, cases: out });
+      }
       return json({ ok: true, generatedAt: new Date().toISOString(), cases: clean });
     }
     if (!env.SYNC_SECRET || body.secret !== env.SYNC_SECRET) return json({ error: "bad secret" }, 403);
