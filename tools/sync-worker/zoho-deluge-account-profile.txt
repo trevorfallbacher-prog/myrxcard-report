@@ -1,0 +1,37 @@
+void automation.push_account_profile(Int accountId)
+{
+	syncUrl = "https://myrxcard-sync.trevorfallbacher.workers.dev";
+	syncSecret = "PASTE-YOUR-SYNC-SECRET-HERE";
+	acct = zoho.crm.getRecordById("Accounts",accountId);
+	nm = ifnull(acct.get("Account_Name"),"").toString().trim();
+	if(nm == "")
+	{
+		info "skipped: missing account name";
+		return;
+	}
+	prof = Map();
+	lv = acct.get("Covered_Lives");
+	if(lv != null)
+	{
+		prof.put("covered_lives",lv.toLong());
+	}
+	aaFlag = acct.get("AA");
+	if(aaFlag != null)
+	{
+		prof.put("aa_client",if(aaFlag == true,"yes","no"));
+	}
+	prof.put("status",ifnull(acct.get("Status"),"").toString());
+	acMap = Map();
+	acMap.put(nm,prof);
+	payload = Map();
+	payload.put("secret",syncSecret);
+	payload.put("accounts",acMap);
+	resp = invokeurl
+	[
+		url :syncUrl
+		type :POST
+		parameters:payload.toString()
+		headers:{"content-type":"application/json"}
+	];
+	info resp;
+}

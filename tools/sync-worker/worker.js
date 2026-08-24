@@ -203,33 +203,51 @@ export default {
         }
         return json({ ok: true, generatedAt: new Date().toISOString(), client: clientMeta, cases: out });
       }
-      // master view also carries per-client covered lives (KV, pushed from the
-      // Accounts Deluge function) for the QBR engagement/utilization tiles
-      let coveredLives = {};
-      if (env.AAPS_DATA) { try { coveredLives = JSON.parse((await env.AAPS_DATA.get("covered_lives")) || "{}"); } catch {} }
-      return json({ ok: true, generatedAt: new Date().toISOString(), cases: clean, covered_lives: coveredLives });
+      // master view also carries per-client account profiles (KV, pushed from
+      // the Accounts Deluge function): covered lives, AA-client flag, status
+      let profiles = {};
+      if (env.AAPS_DATA) { try { profiles = JSON.parse((await env.AAPS_DATA.get("account_profiles")) || "{}"); } catch {} }
+      const coveredLives = {};
+      for (const [n, p] of Object.entries(profiles)) if (Number.isInteger(p.covered_lives)) coveredLives[n] = p.covered_lives;
+      return json({ ok: true, generatedAt: new Date().toISOString(), cases: clean, covered_lives: coveredLives, account_profiles: profiles });
     }
     if (!env.SYNC_SECRET || body.secret !== env.SYNC_SECRET) return json({ error: "bad secret" }, 403);
-    // covered-lives push (Accounts Deluge function): {secret, covered_lives:{"Client":300}}
-    if (body.covered_lives !== undefined) {
-      const cl = body.covered_lives;
-      if (typeof cl !== "object" || cl === null || Array.isArray(cl)) return json({ error: "covered_lives must be an object" }, 400);
-      const entries = Object.entries(cl);
-      if (!entries.length || entries.length > 200) return json({ error: "covered_lives needs 1-200 entries" }, 400);
-      const cleanCl = {};
-      for (const [name, v] of entries) {
-        if (typeof name !== "string" || !name.trim() || name.length > 80) return json({ error: "bad client name" }, 422);
-        for (const re of SUSPECT) if (re.test(name)) return json({ error: "client name looks like PHI — rejected" }, 422);
-        const n = Number(v);
-        if (!Number.isInteger(n) || n < 0 || n > 10000000) return json({ error: `covered_lives for "${name.slice(0, 40)}" must be a whole number` }, 422);
-        cleanCl[name.trim()] = n;
+    // account-profile push (Accounts Deluge function):
+    //   {secret, accounts:{"Client":{covered_lives:300, aa_client:"yes", status:"Active"}}}
+    // Deliberately tiny: three whitelisted keys, nothing else about the account.
+    if (body.accounts !== undefined) {
+      const ac = body.accounts;
+      if (typeof ac !== "object" || ac === null || Array.isArray(ac)) return json({ error: "accounts must be an object" }, 400);
+      const entries = Object.entries(ac);
+      if (!entries.length || entries.length > 200) return json({ error: "accounts needs 1-200 entries" }, 400);
+      const cleanAc = {};
+      for (const [name, p] of entries) {
+        if (typeof name !== "string" || !name.trim() || name.length > 80) return json({ error: "bad account name" }, 422);
+        for (const re of SUSPECT) if (re.test(name)) return json({ error: "account name looks like PHI — rejected" }, 422);
+        if (typeof p !== "object" || p === null || Array.isArray(p)) return json({ error: "account profile must be an object" }, 400);
+        const prof = {};
+        for (const [k, v] of Object.entries(p)) {
+          if (k === "covered_lives") {
+            const n = Number(v);
+            if (!Number.isInteger(n) || n < 0 || n > 10000000) return json({ error: `covered_lives for "${name.slice(0, 40)}" must be a whole number` }, 422);
+            prof.covered_lives = n;
+          } else if (k === "aa_client") {
+            if (v !== "yes" && v !== "no" && v !== "") return json({ error: "aa_client must be yes/no" }, 422);
+            prof.aa_client = v;
+          } else if (k === "status") {
+            if (typeof v !== "string" || v.length > 60) return json({ error: "bad status" }, 422);
+            for (const re of SUSPECT) if (re.test(v)) return json({ error: "status looks like PHI — rejected" }, 422);
+            prof.status = v;
+          } else return json({ error: `unexpected account field "${k}" — whitelist only` }, 422);
+        }
+        cleanAc[name.trim()] = prof;
       }
       if (!env.AAPS_DATA) return json({ error: "KV not bound" }, 500);
       let cur = {};
-      try { cur = JSON.parse((await env.AAPS_DATA.get("covered_lives")) || "{}"); } catch {}
-      Object.assign(cur, cleanCl);
-      await env.AAPS_DATA.put("covered_lives", JSON.stringify(cur));
-      return json({ ok: true, covered_lives: cur });
+      try { cur = JSON.parse((await env.AAPS_DATA.get("account_profiles")) || "{}"); } catch {}
+      for (const [name, prof] of Object.entries(cleanAc)) cur[name] = { ...(cur[name] || {}), ...prof };
+      await env.AAPS_DATA.put("account_profiles", JSON.stringify(cur));
+      return json({ ok: true, account_profiles: cur });
     }
     const rows = body.rows;
     if (!Array.isArray(rows) || !rows.length) return json({ error: "rows[] required" }, 400);
