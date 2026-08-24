@@ -1,0 +1,44 @@
+void automation.backfill_account_profiles(Int page)
+{
+	syncUrl = "https://myrxcard-sync.trevorfallbacher.workers.dev";
+	syncSecret = "PASTE-YOUR-SYNC-SECRET-HERE";
+	accts = zoho.crm.getRecords("Accounts", page, 200);
+	if(accts.size() == 0)
+	{
+		info "page " + page + ": no records - account backfill complete";
+		return;
+	}
+	acMap = Map();
+	for each acct in accts
+	{
+		nm = ifnull(acct.get("Account_Name"),"").toString().trim();
+		if(nm == "")
+		{
+			continue;
+		}
+		prof = Map();
+		lv = acct.get("Covered_Lives");
+		if(lv != null)
+		{
+			prof.put("covered_lives",lv.toLong());
+		}
+		aaFlag = acct.get("AA");
+		if(aaFlag != null)
+		{
+			prof.put("aa_client",if(aaFlag == true,"yes","no"));
+		}
+		prof.put("status",ifnull(acct.get("Status"),"").toString());
+		acMap.put(nm,prof);
+	}
+	payload = Map();
+	payload.put("secret",syncSecret);
+	payload.put("accounts",acMap);
+	resp = invokeurl
+	[
+		url :syncUrl
+		type :POST
+		parameters:payload.toString()
+		headers:{"content-type":"application/json"}
+	];
+	info "page " + page + ": sent " + acMap.size() + " accounts - " + resp;
+}
