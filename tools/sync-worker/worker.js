@@ -92,6 +92,16 @@ const FIELDS = {
   nps_recommend: { t: "number", min: 0, max: 10 },
   experience_score: { t: "number", min: 1, max: 5 },
   survey_completed: { t: "string", max: 3, re: /^(yes|no)?$/ },
+  // response-time milestones (QBR Response tile). Five map to existing Zoho
+  // date fields; first_contact_date / order_date light up once those fields
+  // are added to the Assist layout. Date-only, same format as closed_date.
+  request_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
+  rx_script_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
+  awp_pricing_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
+  initial_fill_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
+  refill_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
+  first_contact_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
+  order_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
 };
 const REQUIRED = ["case_key", "client_name", "medication_name", "month"];
 

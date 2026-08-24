@@ -200,6 +200,43 @@ void automation.backfill_avalon_cases(int page){
 		{
 			row.put("survey_completed","yes");
 		}
+		// --- QBR response-time milestone dates (date-only). First_Contact_Date /
+		// Order_Date may not exist in the layout yet; rec.get returns null until they do.
+		reqD = ifnull(rec.get("Request_Date"),"").toString();
+		if(reqD.length() >= 10)
+		{
+			row.put("request_date",reqD.subString(0,10));
+		}
+		rxScD = ifnull(rec.get("Rx_Script_Date"),"").toString();
+		if(rxScD.length() >= 10)
+		{
+			row.put("rx_script_date",rxScD.subString(0,10));
+		}
+		awpD2 = ifnull(rec.get("AWP_Pricing_Date"),"").toString();
+		if(awpD2.length() >= 10)
+		{
+			row.put("awp_pricing_date",awpD2.subString(0,10));
+		}
+		fillD = ifnull(rec.get("Initial_Fill_Date"),"").toString();
+		if(fillD.length() >= 10)
+		{
+			row.put("initial_fill_date",fillD.subString(0,10));
+		}
+		refD = ifnull(rec.get("Refill_Date"),"").toString();
+		if(refD.length() >= 10)
+		{
+			row.put("refill_date",refD.subString(0,10));
+		}
+		fcD = ifnull(rec.get("First_Contact_Date"),"").toString();
+		if(fcD.length() >= 10)
+		{
+			row.put("first_contact_date",fcD.subString(0,10));
+		}
+		ordD = ifnull(rec.get("Order_Date"),"").toString();
+		if(ordD.length() >= 10)
+		{
+			row.put("order_date",ordD.subString(0,10));
+		}
 		rows.add(row);
 		if(rows.size() == 12)
 		{

@@ -3,7 +3,7 @@ QBR NPS — Deluge additions to push_avalon_case (revised 2026-08-24)
 Paste this block into the Zoho CRM function push_avalon_case, AFTER the last
 `row.put("other_fees", ...)` line and BEFORE `payload = Map();`.
 
-Pushes ONLY the three fields provisioned in Xano + whitelisted in the worker:
+Pushes the three survey fields AND (rev 2, 2026-08-24) the seven response-date fields provisioned in Xano + whitelisted in the worker:
 nps_recommend, experience_score, survey_completed. Do NOT add other survey
 fields here until their columns + worker whitelist entries exist — the worker
 rejects the whole batch on any unexpected field.
