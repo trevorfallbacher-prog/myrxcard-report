@@ -249,6 +249,110 @@ export default {
       await env.AAPS_DATA.put("account_profiles", JSON.stringify(cur));
       return json({ ok: true, account_profiles: cur });
     }
+    // ---- confirmed-price log (parallel Xano table, entry form on AAPS) ----
+    // NOT part of the pricing snapshot path — Kirk's source file stays
+    // canonical for displayed prices. This is the shared-DB log his rebuild
+    // job can consume if/when the business adopts it.
+    const metaBase = () => env.XANO_CONTENT_URL.replace(/\/table\/\d+\/content$/, "/table");
+    const metaH = () => ({ "content-type": "application/json", authorization: `Bearer ${env.XANO_META_TOKEN}` });
+    const logTableId = async () => {
+      let id = await env.AAPS_DATA.get("confirmed_log_table_id");
+      return id ? Number(id) : null;
+    };
+    if (body.provision_confirmed_log !== undefined) {
+      // one-time, idempotent: create confirmed_prices + schema via metadata API
+      const lr = await fetch(metaBase() + "?per_page=100", { headers: metaH() });
+      const lj = await lr.json().catch(() => ({}));
+      if (!lr.ok) return json({ error: `table list ${lr.status}: ${JSON.stringify(lj).slice(0, 200)}` }, 502);
+      const items = lj.items || (Array.isArray(lj) ? lj : []);
+      let tbl = items.find((t) => t.name === "confirmed_prices");
+      if (!tbl) {
+        const cr = await fetch(metaBase(), { method: "POST", headers: metaH(),
+          body: JSON.stringify({ name: "confirmed_prices", description: "Phone-confirmed price log (AAPS entry form)" }) });
+        const cj = await cr.json().catch(() => ({}));
+        if (!cr.ok) return json({ error: `table create ${cr.status}: ${JSON.stringify(cj).slice(0, 300)}` }, 502);
+        tbl = cj;
+      }
+      const gs = await fetch(`${metaBase()}/${tbl.id}/schema`, { headers: metaH() });
+      let schema = await gs.json().catch(() => []);
+      if (!Array.isArray(schema)) schema = schema.schema || [];
+      const have = new Set(schema.map((f) => f.name));
+      const mk = (name, type = "text") => ({ name, type, description: "", nullable: false, default: type === "decimal" ? "0" : "", required: false, access: "public", style: "single" });
+      const want = [mk("drug_name"), mk("ndc"), mk("strength"), mk("pharmacy"), mk("price", "decimal"), mk("qty"),
+        mk("pack_type"), mk("date_confirmed"), mk("delisted"), mk("notes"), mk("entered_by"), mk("entered_at")];
+      const missing = want.filter((f) => !have.has(f.name));
+      if (missing.length) {
+        const ps = await fetch(`${metaBase()}/${tbl.id}/schema`, { method: "PUT", headers: metaH(),
+          body: JSON.stringify({ schema: schema.concat(missing) }) });
+        if (!ps.ok) {
+          // some deployments take the bare array
+          const ps2 = await fetch(`${metaBase()}/${tbl.id}/schema`, { method: "PUT", headers: metaH(),
+            body: JSON.stringify(schema.concat(missing)) });
+          if (!ps2.ok) return json({ error: `schema put ${ps.status}/${ps2.status}: ${(await ps2.text()).slice(0, 300)}` }, 502);
+        }
+      }
+      await env.AAPS_DATA.put("confirmed_log_table_id", String(tbl.id));
+      return json({ ok: true, table_id: tbl.id, added_fields: missing.map((f) => f.name) });
+    }
+    if (body.confirmed_log_add !== undefined) {
+      const e = body.confirmed_log_add;
+      if (typeof e !== "object" || e === null) return json({ error: "confirmed_log_add must be an object" }, 400);
+      const S = (k, max) => { const v = e[k]; if (v === undefined || v === null) return ""; if (typeof v !== "string" || v.length > max) throw k; return v.trim(); };
+      let row;
+      try {
+        row = {
+          drug_name: S("drug_name", 120), ndc: S("ndc", 11), strength: S("strength", 40),
+          pharmacy: S("pharmacy", 80), qty: S("qty", 20), pack_type: S("pack_type", 30),
+          date_confirmed: S("date_confirmed", 10), delisted: S("delisted", 3),
+          notes: S("notes", 500), entered_by: S("entered_by", 60),
+          entered_at: new Date().toISOString(),
+        };
+      } catch (k) { return json({ error: `bad field ${k}` }, 422); }
+      if (!row.drug_name || !row.pharmacy) return json({ error: "drug_name and pharmacy are required" }, 422);
+      if (row.ndc && !/^\d{6,11}$/.test(row.ndc)) return json({ error: "ndc must be 6-11 digits" }, 422);
+      if (row.date_confirmed && !/^\d{4}-\d{2}-\d{2}$/.test(row.date_confirmed)) return json({ error: "bad date" }, 422);
+      if (row.delisted && row.delisted !== "yes") return json({ error: "delisted must be yes or empty" }, 422);
+      const price = Number(e.price);
+      if (row.delisted !== "yes" && (!isFinite(price) || price <= 0)) return json({ error: "price required (unless delisted)" }, 422);
+      row.price = isFinite(price) && price > 0 ? price : 0;
+      for (const k of ["notes", "pharmacy", "drug_name"]) {
+        let s = row[k];
+        for (const re of SUSPECT) s = s.replace(new RegExp(re.source, "gi"), "[redacted]");
+        row[k] = s;
+      }
+      const tid = await logTableId();
+      if (!tid) return json({ error: "confirmed log not provisioned" }, 500);
+      const base = env.XANO_CONTENT_URL.replace(/\/table\/\d+\/content$/, `/table/${tid}/content`);
+      const wr = await fetch(base, { method: "POST", headers: metaH(), body: JSON.stringify(row) });
+      if (!wr.ok) return json({ error: `Xano write ${wr.status}: ${(await wr.text()).slice(0, 200)}` }, 502);
+      return json({ ok: true, entry: row });
+    }
+    if (body.confirmed_log_list !== undefined) {
+      const tid = await logTableId();
+      if (!tid) return json({ ok: true, entries: [] });
+      const base = env.XANO_CONTENT_URL.replace(/\/table\/\d+\/content$/, `/table/${tid}/content`);
+      const sr = await fetch(`${base}/search`, { method: "POST", headers: metaH(),
+        body: JSON.stringify({ page: 1, per_page: 1, search: [] }) });
+      const sj = await sr.json().catch(() => ({}));
+      if (!sr.ok) return json({ error: `Xano read ${sr.status}` }, 502);
+      const total = sj.itemsTotal || 0;
+      const per = 50, lastPage = Math.max(1, Math.ceil(total / per));
+      const pr = await fetch(`${base}/search`, { method: "POST", headers: metaH(),
+        body: JSON.stringify({ page: lastPage, per_page: per, search: [] }) });
+      const pj = await pr.json().catch(() => ({}));
+      const entries = (pj.items || []).reverse();
+      return json({ ok: true, total, entries });
+    }
+    if (body.confirmed_log_delete !== undefined) {
+      const id = Number(body.confirmed_log_delete);
+      if (!Number.isInteger(id) || id <= 0) return json({ error: "bad id" }, 400);
+      const tid = await logTableId();
+      if (!tid) return json({ error: "not provisioned" }, 500);
+      const base = env.XANO_CONTENT_URL.replace(/\/table\/\d+\/content$/, `/table/${tid}/content`);
+      const dr = await fetch(`${base}/${id}`, { method: "DELETE", headers: metaH() });
+      if (!dr.ok) return json({ error: `Xano delete ${dr.status}` }, 502);
+      return json({ ok: true, deleted: id });
+    }
     const rows = body.rows;
     if (!Array.isArray(rows) || !rows.length) return json({ error: "rows[] required" }, 400);
     // each row costs up to 4 Xano calls (search + write + up to 2 events);
