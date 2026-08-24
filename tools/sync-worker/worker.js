@@ -102,6 +102,18 @@ const FIELDS = {
   refill_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
   first_contact_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
   order_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
+  // final pass 2026-08-24: survey detail picklists (short answers), claim date,
+  // fill-conversion flags, and the ONE free-text exception — survey comments,
+  // which are scrubbed (PHI patterns redacted) rather than batch-rejected.
+  would_use_again: { t: "string", max: 40 },
+  rx_accurate: { t: "string", max: 40 },
+  advocate_clear: { t: "string", max: 40 },
+  member_shipping_issue: { t: "string", max: 40 },
+  used_home_delivery: { t: "string", max: 40 },
+  claim_date: { t: "string", max: 10, re: /^(\d{4}-\d{2}-\d{2})?$/ },
+  day_supply_eligible: { t: "string", max: 3, re: /^(yes|no)?$/ },
+  converted_90d: { t: "string", max: 3, re: /^(yes|no)?$/ },
+  survey_comments: { t: "string", max: 2000, scrub: true },
 };
 const REQUIRED = ["case_key", "client_name", "medication_name", "month"];
 
@@ -126,7 +138,14 @@ function validateRow(row) {
       if (typeof v !== "string") return `${k} must be a string`;
       if (v.length > spec.max) return `${k} too long (${v.length} > ${spec.max})`;
       if (spec.re && !spec.re.test(v)) return `${k} has an invalid format`;
-      for (const re of SUSPECT) if (re.test(v)) return `${k} looks like it contains PHI — rejected`;
+      if (spec.scrub) {
+        // free-text exception: redact PHI-shaped content instead of rejecting the batch
+        let s = v;
+        for (const re of SUSPECT) s = s.replace(new RegExp(re.source, "gi"), "[redacted]");
+        row[k] = s;
+      } else {
+        for (const re of SUSPECT) if (re.test(v)) return `${k} looks like it contains PHI — rejected`;
+      }
     }
   }
   return null;
@@ -184,9 +203,34 @@ export default {
         }
         return json({ ok: true, generatedAt: new Date().toISOString(), client: clientMeta, cases: out });
       }
-      return json({ ok: true, generatedAt: new Date().toISOString(), cases: clean });
+      // master view also carries per-client covered lives (KV, pushed from the
+      // Accounts Deluge function) for the QBR engagement/utilization tiles
+      let coveredLives = {};
+      if (env.AAPS_DATA) { try { coveredLives = JSON.parse((await env.AAPS_DATA.get("covered_lives")) || "{}"); } catch {} }
+      return json({ ok: true, generatedAt: new Date().toISOString(), cases: clean, covered_lives: coveredLives });
     }
     if (!env.SYNC_SECRET || body.secret !== env.SYNC_SECRET) return json({ error: "bad secret" }, 403);
+    // covered-lives push (Accounts Deluge function): {secret, covered_lives:{"Client":300}}
+    if (body.covered_lives !== undefined) {
+      const cl = body.covered_lives;
+      if (typeof cl !== "object" || cl === null || Array.isArray(cl)) return json({ error: "covered_lives must be an object" }, 400);
+      const entries = Object.entries(cl);
+      if (!entries.length || entries.length > 200) return json({ error: "covered_lives needs 1-200 entries" }, 400);
+      const cleanCl = {};
+      for (const [name, v] of entries) {
+        if (typeof name !== "string" || !name.trim() || name.length > 80) return json({ error: "bad client name" }, 422);
+        for (const re of SUSPECT) if (re.test(name)) return json({ error: "client name looks like PHI — rejected" }, 422);
+        const n = Number(v);
+        if (!Number.isInteger(n) || n < 0 || n > 10000000) return json({ error: `covered_lives for "${name.slice(0, 40)}" must be a whole number` }, 422);
+        cleanCl[name.trim()] = n;
+      }
+      if (!env.AAPS_DATA) return json({ error: "KV not bound" }, 500);
+      let cur = {};
+      try { cur = JSON.parse((await env.AAPS_DATA.get("covered_lives")) || "{}"); } catch {}
+      Object.assign(cur, cleanCl);
+      await env.AAPS_DATA.put("covered_lives", JSON.stringify(cur));
+      return json({ ok: true, covered_lives: cur });
+    }
     const rows = body.rows;
     if (!Array.isArray(rows) || !rows.length) return json({ error: "rows[] required" }, 400);
     // each row costs up to 4 Xano calls (search + write + up to 2 events);

@@ -237,6 +237,83 @@ void automation.backfill_avalon_cases(int page){
 		{
 			row.put("order_date",ordD.subString(0,10));
 		}
+		// --- QBR final pass: survey detail, comments, claim date, fill conversion ---
+		would_use_againV = ifnull(rec.get("Would_you_consider_using_Assist_again_in_future"),"").toString();
+		if(would_use_againV != "" && would_use_againV != "-None-")
+		{
+			row.put("would_use_again",would_use_againV);
+		}
+		rx_accurateV = ifnull(rec.get("Was_prescription_accurate"),"").toString();
+		if(rx_accurateV != "" && rx_accurateV != "-None-")
+		{
+			row.put("rx_accurate",rx_accurateV);
+		}
+		advocate_clearV = ifnull(rec.get("Did_your_advocate_provide_clear_answers"),"").toString();
+		if(advocate_clearV != "" && advocate_clearV != "-None-")
+		{
+			row.put("advocate_clear",advocate_clearV);
+		}
+		member_shipping_issueV = ifnull(rec.get("Any_Issues_with_medication_or_shipping"),"").toString();
+		if(member_shipping_issueV != "" && member_shipping_issueV != "-None-")
+		{
+			row.put("member_shipping_issue",member_shipping_issueV);
+		}
+		used_home_deliveryV = ifnull(rec.get("Have_you_ever_used_home_delivery_before"),"").toString();
+		if(used_home_deliveryV != "" && used_home_deliveryV != "-None-")
+		{
+			row.put("used_home_delivery",used_home_deliveryV);
+		}
+		clmD = ifnull(rec.get("Claim_Date"),"").toString();
+		if(clmD.length() >= 10)
+		{
+			row.put("claim_date",clmD.subString(0,10));
+		}
+		// survey comments, combined + labeled (worker scrubs PHI patterns server-side)
+		cmtAll = "";
+		otherC = ifnull(rec.get("Other_Survey_Comments"),"").toString().trim();
+		if(otherC != "")
+		{
+			cmtAll = cmtAll + if(cmtAll == "",""," | ") + "" + otherC;
+		}
+		medicationC = ifnull(rec.get("Medication_or_Shipping_Issues_Comments"),"").toString().trim();
+		if(medicationC != "")
+		{
+			cmtAll = cmtAll + if(cmtAll == "",""," | ") + "shipping: " + medicationC;
+		}
+		prescriptionC = ifnull(rec.get("Prescription_Not_Accurate_Comments"),"").toString().trim();
+		if(prescriptionC != "")
+		{
+			cmtAll = cmtAll + if(cmtAll == "",""," | ") + "rx: " + prescriptionC;
+		}
+		if(cmtAll != "")
+		{
+			if(cmtAll.length() > 1900)
+			{
+				cmtAll = cmtAll.subString(0,1900);
+			}
+			row.put("survey_comments",cmtAll);
+		}
+		// 30d->90d conversion from the Fill/Refills subform (Days Supply field, added 2026-08-24)
+		fills = ifnull(rec.get("Fill_Refills"),List());
+		anyDS = false;
+		on90 = false;
+		for each fl in fills
+		{
+			dsv = fl.get("Days_Supply");
+			if(dsv != null)
+			{
+				anyDS = true;
+				if(dsv.toLong() >= 84)
+				{
+					on90 = true;
+				}
+			}
+		}
+		if(anyDS)
+		{
+			row.put("day_supply_eligible","yes");
+			row.put("converted_90d",if(on90,"yes","no"));
+		}
 		rows.add(row);
 		if(rows.size() == 12)
 		{
