@@ -1,16 +1,16 @@
-// QBR survey + response-time additions to push_avalon_case (2026-08-24)
-// -------------------------------------------------------------------------
-// Paste this block into the existing Deluge function push_avalon_case,
-// AFTER the last `row.put("other_fees", ...)` line and BEFORE the
-// `payload = Map();` line. It adds satisfaction-survey scores, the yes/no
-// survey picklists, and the response-time milestone dates.
-//
-// NOT included (by design): the free-text survey comment fields
-// (Other_Survey_Comments, Medication_or_Shipping_Issues_Comments,
-// Prescription_Not_Accurate_Comments). Those can contain PHI and the worker
-// firewall rejects free text — comments are curated separately, never synced.
+QBR NPS — Deluge additions to push_avalon_case (revised 2026-08-24)
+====================================================================
+Paste this block into the Zoho CRM function push_avalon_case, AFTER the last
+`row.put("other_fees", ...)` line and BEFORE `payload = Map();`.
 
-// --- satisfaction scores ---
+Pushes ONLY the three fields provisioned in Xano + whitelisted in the worker:
+nps_recommend, experience_score, survey_completed. Do NOT add other survey
+fields here until their columns + worker whitelist entries exist — the worker
+rejects the whole batch on any unexpected field.
+
+Free-text survey comments are intentionally NOT sent (PHI stays behind the firewall).
+
+// --- QBR satisfaction survey ---
 if(rec.get("How_Likely_Are_You_To_Recommend_1_10") != null)
 {
 	row.put("nps_recommend",rec.get("How_Likely_Are_You_To_Recommend_1_10").toDecimal());
@@ -19,41 +19,15 @@ if(rec.get("How_was_your_overall_experience_1_5") != null)
 {
 	row.put("experience_score",rec.get("How_was_your_overall_experience_1_5").toDecimal());
 }
-// survey counts as completed once either core score is answered
 if(rec.get("How_was_your_overall_experience_1_5") != null || rec.get("How_Likely_Are_You_To_Recommend_1_10") != null)
 {
 	row.put("survey_completed","yes");
 }
 
-// --- survey picklists (short Yes/No-style answers) ---
-row.put("would_use_again",ifnull(rec.get("Would_you_consider_using_Assist_again_in_future"),"").toString());
-row.put("rx_accurate",ifnull(rec.get("Was_prescription_accurate"),"").toString());
-row.put("advocate_clear",ifnull(rec.get("Did_your_advocate_provide_clear_answers"),"").toString());
-row.put("member_shipping_issue",ifnull(rec.get("Any_Issues_with_medication_or_shipping"),"").toString());
-
-// --- response-time milestone dates (date-only, first 10 chars) ---
-reqD = ifnull(rec.get("Request_Date"),"").toString();
-if(reqD.length() >= 10)
-{
-	row.put("request_date",reqD.subString(0,10));
-}
-rxD = ifnull(rec.get("Rx_Script_Date"),"").toString();
-if(rxD.length() >= 10)
-{
-	row.put("rx_script_date",rxD.subString(0,10));
-}
-awpD = ifnull(rec.get("AWP_Pricing_Date"),"").toString();
-if(awpD.length() >= 10)
-{
-	row.put("awp_pricing_date",awpD.subString(0,10));
-}
-fillD = ifnull(rec.get("Initial_Fill_Date"),"").toString();
-if(fillD.length() >= 10)
-{
-	row.put("initial_fill_date",fillD.subString(0,10));
-}
-refD = ifnull(rec.get("Refill_Date"),"").toString();
-if(refD.length() >= 10)
-{
-	row.put("refill_date",refD.subString(0,10));
-}
+DEPLOY ORDER (important):
+1. Xano columns — DONE (nps_recommend, experience_score, survey_completed on table 12).
+2. Deploy the worker with the widened whitelist (wrangler deploy in tools/sync-worker)
+   — MUST happen before step 3, or pushes carrying the new fields get rejected.
+3. Paste this block into Zoho push_avalon_case.
+Then edit/save a case with a survey filled in (or run the backfill) → NPS flows
+to Xano → the QBR "NPS Score" card populates automatically.

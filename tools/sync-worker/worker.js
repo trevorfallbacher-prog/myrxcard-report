@@ -87,6 +87,11 @@ const FIELDS = {
   shipping_fees: { t: "number" },
   physician_fees: { t: "number" },
   other_fees: { t: "number" },
+  // satisfaction survey (QBR NPS) — matches the 3 columns added to Xano table 12
+  // on 2026-08-24. Scores are range-checked; nps 0-10, experience 1-5.
+  nps_recommend: { t: "number", min: 0, max: 10 },
+  experience_score: { t: "number", min: 1, max: 5 },
+  survey_completed: { t: "string", max: 3, re: /^(yes|no)?$/ },
 };
 const REQUIRED = ["case_key", "client_name", "medication_name", "month"];
 
