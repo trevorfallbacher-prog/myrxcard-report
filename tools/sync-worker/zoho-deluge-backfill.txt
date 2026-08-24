@@ -187,6 +187,19 @@ void automation.backfill_avalon_cases(int page){
 		{
 			row.put("other_fees",rec.get("Other_Fees").toDecimal());
 		}
+		// --- QBR satisfaction survey ---
+		if(rec.get("How_Likely_Are_You_To_Recommend_1_10") != null)
+		{
+			row.put("nps_recommend",rec.get("How_Likely_Are_You_To_Recommend_1_10").toDecimal());
+		}
+		if(rec.get("How_was_your_overall_experience_1_5") != null)
+		{
+			row.put("experience_score",rec.get("How_was_your_overall_experience_1_5").toDecimal());
+		}
+		if(rec.get("How_was_your_overall_experience_1_5") != null || rec.get("How_Likely_Are_You_To_Recommend_1_10") != null)
+		{
+			row.put("survey_completed","yes");
+		}
 		rows.add(row);
 		if(rows.size() == 12)
 		{
