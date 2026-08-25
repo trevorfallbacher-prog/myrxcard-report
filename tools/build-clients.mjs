@@ -92,8 +92,9 @@ for (const file of files) {
     if (!subset.length) continue;
     const period = aggregateRows(subset, label);
     // clients see utilization only: strip Avalon's fee measures entirely
+    // (zero placeholders hold slots 13-14 so member/savings/qty stay at 15-18)
     delete period.money.adminFees;
-    period.facts = period.facts.map((f) => f.slice(0, 13));
+    period.facts = period.facts.map((f) => [...f.slice(0, 13), 0, 0, ...f.slice(15, 19)]);
     period.client = client.name;
     const key = `${period.periodKey || "import"}~${slugOf}`;
     period.periodKey = key;

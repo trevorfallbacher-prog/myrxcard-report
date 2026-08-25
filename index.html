@@ -1209,6 +1209,20 @@
       </div>
 
       <div class="panel span12">
+        <div class="kicker" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">Top drugs <span class="hint">· dispensed in the selected window</span>
+          <span style="margin-left:auto;display:flex;gap:6px;align-items:center">
+            <select id="td-sort" class="periodsel"><option value="claims">By claims</option><option value="ucsav">By savings vs U&amp;C</option><option value="member">By member paid</option></select>
+            <select id="td-limit" class="periodsel"><option value="20">Top 20</option><option value="50">Top 50</option><option value="0">All</option></select>
+          </span>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>#</th><th>Drug</th><th class="r">Net claims</th><th class="r">Qty</th><th class="r">Member paid</th><th class="r">Saved vs U&amp;C</th><th class="r">Collected</th></tr></thead>
+          <tbody id="td-body"></tbody>
+        </table></div>
+        <div class="pnote" id="td-note"></div>
+      </div>
+
+      <div class="panel span12">
         <div class="kicker">Paid at usual &amp; customary</div>
         <div class="uc-wrap">
           <div class="uc-tile">
@@ -3084,7 +3098,8 @@ function mergedPeriod(d) {
     for (const f of p.facts) {
       if (comboOwner.get(comboKey(p, f)) !== k) continue;
       facts.push([maps.months[f[0]], maps.groups[f[1]], maps.states[f[2]], pmap[f[3]],
-        maps.brands[f[4]], maps.classes[f[5]], maps.drugs[f[6]], f[7], f[8], f[9], f[10], f[11], f[12] || 0, f[13] || 0, f[14] || 0]);
+        maps.brands[f[4]], maps.classes[f[5]], maps.drugs[f[6]], f[7], f[8], f[9], f[10], f[11], f[12] || 0, f[13] || 0, f[14] || 0,
+        f[15] || 0, f[16] || 0, f[17] || 0, f[18] || 0]);
     }
   }
   const span = dims.months.filter((m) => /^\d{4}-\d{2}$/.test(m)).sort();
@@ -3248,7 +3263,7 @@ function togglePharm(pi) {
 
 function utilAgg(p) {
   let paid = 0, rev = 0, pn = 0, rn = 0, ucN = 0, feeP = 0, feeR = 0, ucColl = 0;
-  const byPharm = new Map(), byPharmRev = new Map(), byClass = new Map(), byDrugRev = new Map(), byDrugUC = new Map(), byMonthFee = new Map();
+  const byPharm = new Map(), byPharmRev = new Map(), byClass = new Map(), byDrugRev = new Map(), byDrugUC = new Map(), byMonthFee = new Map(), byDrugAll = new Map();
   const byMonth = new Map(); // mi -> [collected$, ucCollected$, netClaims, ucNetClaims]
   for (const f of p.facts) {
     if (!factPass(f)) continue;
@@ -3261,6 +3276,11 @@ function utilAgg(p) {
     if (f[9]) byPharmRev.set(f[3], (byPharmRev.get(f[3]) || 0) - f[9]);
     byClass.set(f[5], (byClass.get(f[5]) || 0) + f[8] + f[9]);
     if (f[11]) byDrugRev.set(f[6], (byDrugRev.get(f[6]) || 0) + f[11]);
+    // top-drugs rollup (facts 15-18 absent on stores built before savings support)
+    let td = byDrugAll.get(f[6]);
+    if (!td) { td = { n: 0, qty: 0, member: 0, ucSav: 0, awpSav: 0, coll: 0 }; byDrugAll.set(f[6], td); }
+    td.n += f[10] - f[11]; td.coll += f[8] + f[9];
+    td.qty += f[18] || 0; td.member += f[15] || 0; td.ucSav += f[16] || 0; td.awpSav += f[17] || 0;
     // U&C = net claim count (paid − reversed), matching Power BI's Sum of ClaimCount
     if (f[7]) { ucN += f[10] - f[11]; ucColl += f[8] + f[9]; byDrugUC.set(f[6], (byDrugUC.get(f[6]) || 0) + f[10] - f[11]); }
     // admin fees (facts 13/14; absent on stores built before fee support)
@@ -3281,6 +3301,8 @@ function utilAgg(p) {
     revDrugs: top(byDrugRev, p.dims.drugs, 13),
     ucCount: ucN,
     ucDrugs: top(byDrugUC, p.dims.drugs, 20),
+    topDrugs: [...byDrugAll.entries()].map(([i, v]) => ({ name: p.dims.drugs[i], ...v })).filter((x) => x.n > 0),
+    hasSavings: [...byDrugAll.values()].some((v) => v.member || v.ucSav || v.qty),
     fees: { paid: feeP, reversed: Math.abs(feeR), net: feeP + feeR },
     ucCollected: ucColl,
     byMonthFee,
@@ -3719,6 +3741,29 @@ function renderUtilTrend(p, hasCube) {
 // Fact-level export of the current view — every cube row (date × client ×
 // pharmacy × brand × class × drug × U&C) that passes the active filters, so
 // the file matches exactly what the charts are showing.
+// Top drugs table: any window/filters, sortable, savings-aware. Ranks by net
+// claims by default; savings/member columns show em-dashes on stores built
+// before the savings fields existed.
+let lastUtilAgg = null;
+function renderTopDrugs(a) {
+  lastUtilAgg = a;
+  const body = $("td-body");
+  if (!body) return;
+  const sort = ($("td-sort") || {}).value || "claims";
+  const lim = parseInt(($("td-limit") || {}).value || "20", 10);
+  const keyFn = sort === "ucsav" ? (x) => x.ucSav : sort === "member" ? (x) => x.member : (x) => x.n;
+  const list = [...(a.topDrugs || [])].sort((x, y) => keyFn(y) - keyFn(x) || y.n - x.n);
+  const shown = lim > 0 ? list.slice(0, lim) : list;
+  const sv = (v) => a.hasSavings ? shortMoney(v) : "—";
+  body.innerHTML = shown.length
+    ? shown.map((x, i) => `<tr><td class="num">${i + 1}</td><td class="drug">${esc(x.name)}</td><td class="r num">${fmt(x.n)}</td><td class="r num">${a.hasSavings ? fmt(Math.round(x.qty)) : "—"}</td><td class="r num">${sv(x.member)}</td><td class="r num">${sv(x.ucSav)}</td><td class="r num">${shortMoney(x.coll)}</td></tr>`).join("")
+    : `<tr><td colspan="7" style="color:var(--ink-mute)">Nothing under the current filters.</td></tr>`;
+  const note = $("td-note");
+  if (note) note.textContent = a.hasSavings
+    ? `${fmt(list.length)} drugs in window · savings = pharmacy usual-&-customary price minus what the member paid, per claim`
+    : `${fmt(list.length)} drugs in window · member-paid/savings/qty appear after the data store is rebuilt with savings support`;
+}
+
 function downloadUtilCsv() {
   const p = util.merged;
   if (!p) return;
@@ -3728,7 +3773,7 @@ function downloadUtilCsv() {
   const r2 = (v) => Math.round(v * 100) / 100;
   const rows = [["Month", "ProcessDate", "Client", "Pharmacy", "PharmacyAddress", "PharmacyCity", "PharmacyState", "PharmacyZip", "NPILast4", "PharmacyGroup",
     "Brand", "TherapeuticClass", "Drug", "PaidAtUC", "PaidDollars", "ReversedDollars", "CollectedDollars",
-    "PaidClaims", "ReversedClaims", "CollectedClaims"]];
+    "PaidClaims", "ReversedClaims", "CollectedClaims", "MemberPaid", "SavedVsUC", "SavedVsAWP", "Quantity"]];
   for (const f of p.facts) {
     if (!factPass(f)) continue;
     const meta = (p.pharmMeta && p.pharmMeta[f[3]]) || {};
@@ -3737,6 +3782,7 @@ function downloadUtilCsv() {
       meta.zip || "", meta.npi4 || "", pharmChain(p, f[3]) || "", BRAND_NAMES[p.dims.brands[f[4]]] || p.dims.brands[f[4]],
       p.dims.classes[f[5]], p.dims.drugs[f[6]], f[7] ? "Y" : "",
       r2(f[8]), r2(-f[9]), r2(f[8] + f[9]), f[10], f[11], f[10] - f[11],
+      r2(f[15] || 0), r2(f[16] || 0), r2(f[17] || 0), r2(f[18] || 0),
     ]);
   }
   // the string below starts with an invisible U+FEFF — Excel needs the BOM to read UTF-8
@@ -3958,6 +4004,7 @@ function renderUtil() {
   $("uc-drugs").innerHTML = a.ucDrugs.length
     ? a.ucDrugs.map((x) => `<tr><td class="drug">${esc(x.name)}</td><td class="r num">${fmt(x.v)}</td></tr>`).join("")
     : `<tr><td colspan="2" style="color:var(--ink-mute)">No U&amp;C claims under the current filters.</td></tr>`;
+  renderTopDrugs(a);
 
   // entrance choreography: index the fresh content for staggered delays, then
   // roll the headline numbers up to their values
@@ -3976,7 +4023,9 @@ function renderUtil() {
    and the U&C slice that earns nothing. Shares the utilization store, slicers,
    and timeframe with the Utilization tab, but lives in its own view so it is
    never part of a printed client report. */
-const periodHasFees = (p) => Array.isArray(p.facts) && p.facts.length > 0 && p.facts.every((f) => f.length >= 15);
+// fee slots are zero-padded in client stores, so check for actual fee values,
+// not row length (length-based check would false-positive on padded rows)
+const periodHasFees = (p) => Array.isArray(p.facts) && p.facts.length > 0 && p.facts.every((f) => f.length >= 15) && p.facts.some((f) => f[13] || f[14]);
 
 // stacked monthly columns: fee-eligible base (teal) + U&C cap (gold)
 function feesStackSVG(rows, fmtV) {
@@ -5134,6 +5183,8 @@ async function boot() {
     if (!e.target.closest("#sidebar")) $("sidebar").classList.remove("open");
   });
   $("util-csv-btn").addEventListener("click", downloadUtilCsv);
+  $("td-sort").addEventListener("change", () => lastUtilAgg && renderTopDrugs(lastUtilAgg));
+  $("td-limit").addEventListener("change", () => lastUtilAgg && renderTopDrugs(lastUtilAgg));
   $("search-csv-btn").addEventListener("click", downloadSearchCsv);
   // document builder
   $("doc-file").addEventListener("change", () => {

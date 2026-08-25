@@ -151,7 +151,19 @@ export function aggregateRows(rows, sourceLabel = "") {
     const day = pd ? pd.y * 10000 + pd.m * 100 + pd.d : 0; // yyyymmdd, 0 = unknown
     const fk = `${mi}|${gi}|${si}|${pi}|${bi}|${ci}|${di}|${uc}|${day}`;
     let f = factMap.get(fk);
-    if (!f) { f = [mi, gi, si, pi, bi, ci, di, uc, 0, 0, 0, 0, day, 0, 0]; factMap.set(fk, f); }
+    // 15-18 (added 2026-08): member paid $, saved-vs-U&C $, saved-vs-AWP $,
+    // quantity — NET (paid adds, reversal subtracts). Savings = benchmark −
+    // member paid, floored at 0 per claim, only when the benchmark is present.
+    if (!f) { f = [mi, gi, si, pi, bi, ci, di, uc, 0, 0, 0, 0, day, 0, 0, 0, 0, 0, 0]; factMap.set(fk, f); }
+    const member = Math.abs(num(r.PatientResponsibility));
+    const ucPrice = Math.abs(num(r.UsualAndCustomary));
+    const awp = Math.abs(num(r.AWP));
+    const qty = Math.abs(num(r.QuantityDispensed));
+    const sgn = type === "P" ? 1 : -1;
+    f[15] += sgn * member;
+    if (ucPrice > 0) f[16] += sgn * Math.max(0, ucPrice - member);
+    if (awp > 0) f[17] += sgn * Math.max(0, awp - member);
+    f[18] += sgn * qty;
     if (type === "P") { f[8] += gross; f[10] += 1; f[13] += fee; }
     else { f[9] += gross; f[11] += 1; f[14] += fee; } // reversal gross/fee are negative; keep sign
   }
@@ -209,7 +221,8 @@ export function aggregateRows(rows, sourceLabel = "") {
     // [monthIdx, groupIdx, stateIdx, pharmacyIdx, brandIdx, classIdx, drugIdx,
     //  paidAtUC flag, paid$, reversed$ (negative), paidClaims, reversedClaims,
     //  processDate yyyymmdd (0 when the row had no parseable date),
-    //  adminFee$ paid, adminFee$ reversed (negative)]
-    facts: [...factMap.values()].map((f) => [f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], r2(f[8]), r2(f[9]), f[10], f[11], f[12], r2(f[13]), r2(f[14])]),
+    //  adminFee$ paid, adminFee$ reversed (negative),
+    //  memberPaid$ net, savedVsUC$ net, savedVsAWP$ net, qty net (2026-08)]
+    facts: [...factMap.values()].map((f) => [f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], r2(f[8]), r2(f[9]), f[10], f[11], f[12], r2(f[13]), r2(f[14]), r2(f[15]), r2(f[16]), r2(f[17]), r2(f[18])]),
   };
 }
