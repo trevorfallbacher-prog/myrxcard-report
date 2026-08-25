@@ -525,7 +525,7 @@
   }
   .popsearch:focus { border-color: var(--secondary); }
   /* pharmacy chains: one header row toggles every location beneath it */
-  .pop label.ghead { font-weight: 700; color: var(--ink); background: var(--card-solid); margin-top: 6px; }
+  .pop label.ghead { font-weight: 700; color: var(--ink); background: var(--card-solid); margin-top: 6px; cursor: pointer; }
   .pop label.ghead .gn { color: var(--ink-mute); font-weight: 400; font-size: 11.5px; }
   .pop label.gmember { padding-left: 26px; }
   .gcaret { display: inline-block; width: 15px; cursor: pointer; color: var(--ink-mute); user-select: none; }
@@ -2894,10 +2894,31 @@ const PHARM_GROUPS = [
   ["Marshfield Clinic", (n) => /^Marshfield/i.test(n)],
   ["Sun Life", (n) => /^Sun Life/i.test(n)],
 ];
+// retail chains roll up under one label; any remaining name that repeats
+// (store-number suffix stripped) auto-groups so every multi-location chain
+// collapses without needing an explicit rule
+const RETAIL_CHAINS = [
+  ["Walmart", /^Wal[- ]?mart/i], ["CVS", /^CVS/i], ["Walgreens", /^Walgreens?/i],
+  ["Rite Aid", /^Rite[- ]?Aid/i], ["Wegmans", /^Wegmans?/i], ["Tops", /^Tops\b/i],
+  ["Kinney Drugs", /^Kinney/i], ["Price Chopper", /^Price Chopper/i], ["Costco", /^Costco/i],
+  ["Sam's Club", /^Sam'?s Club/i], ["Kroger", /^Kroger/i], ["Publix", /^Publix/i],
+  ["Hannaford", /^Hannaford/i], ["Meijer", /^Meijer/i], ["Safeway", /^Safeway/i],
+  ["Albertsons", /^Albertsons?/i], ["H-E-B", /^H[- ]?E[- ]?B\b/i], ["Winn-Dixie", /^Winn[- ]?Dixie/i],
+  ["Hy-Vee", /^Hy[- ]?Vee/i], ["Duane Reade", /^Duane Reade/i], ["Medicine Shoppe", /^(The )?Medicine Shoppe/i],
+];
 function pharmChain(p, i) {
   const m = (p.pharmMeta && p.pharmMeta[i]) || {};
   const n = p.dims.pharmacies[i];
   for (const [label, test] of PHARM_GROUPS) if (test(n, m)) return label;
+  for (const [label, re] of RETAIL_CHAINS) if (re.test(n)) return label;
+  if (!p._autoChain) {
+    const base = (name) => String(name).replace(/\s*#\s*\w+.*$/, "").replace(/\s+\d+$/, "").replace(/\s*-\s*[A-Za-z ]{2,20}$/, "").trim();
+    const counts = new Map();
+    for (const nm of p.dims.pharmacies) { const b = base(nm); counts.set(b, (counts.get(b) || 0) + 1); }
+    p._autoChain = { base, counts };
+  }
+  const b = p._autoChain.base(n);
+  if (b && p._autoChain.counts.get(b) >= 2) return b;
   return null;
 }
 
@@ -3374,7 +3395,7 @@ function renderUtilSlicers(p) {
       body = [...chains.entries()].sort((a, b) => chainTotal(b[1]) - chainTotal(a[1])).map(([ch, members]) => {
         const selN = active ? members.filter((i) => active.has(i)).length : 0;
         const open = (util.chainOpen && util.chainOpen.has(ch)) || !!search; // searching auto-expands
-        return `<label class="ghead"><span class="gcaret" data-uctoggle="${esc(ch)}" title="${open ? "Collapse" : "Expand"} locations">${open ? "▾" : "▸"}</span><input type="checkbox" data-uchain data-members="${members.join(",")}"${selN === members.length ? " checked" : ""}> ${esc(ch)} <span class="gn">· ${members.length} locations</span><span class="cnt num">${fmt(chainTotal(members))}</span></label>` +
+        return `<label class="ghead" data-chname="${esc(ch)}" title="Click to ${open ? "collapse" : "expand"} · checkbox selects all"><span class="gcaret">${open ? "▾" : "▸"}</span><input type="checkbox" data-uchain data-members="${members.join(",")}"${selN === members.length ? " checked" : ""}> ${esc(ch)} <span class="gn">· ${members.length} locations</span><span class="cnt num">${fmt(chainTotal(members))}</span></label>` +
           members.map((i) => {
             let r = row(i, "gmember").replace("<label", `<label data-chain="${esc(ch)}"`);
             if (!open && !r.includes("display:none")) r = r.replace(`class="gmember"`, `class="gmember" style="display:none"`);
@@ -5859,16 +5880,18 @@ async function boot() {
     }
   });
   $("util-slicers").addEventListener("click", (e) => {
-    const t = e.target.closest("[data-uctoggle]");
-    if (!t) return;
+    const gh = e.target.closest("label.ghead[data-chname]");
+    if (!gh) return;
+    if (e.target.closest("input")) return; // checkbox click = select-all, untouched
     e.preventDefault(); e.stopPropagation();
     util.chainOpen = util.chainOpen || new Set();
-    const ch = t.dataset.uctoggle;
+    const ch = gh.dataset.chname;
     util.chainOpen.has(ch) ? util.chainOpen.delete(ch) : util.chainOpen.add(ch);
     const openNow = util.chainOpen.has(ch);
-    t.textContent = openNow ? "▾" : "▸";
-    t.title = (openNow ? "Collapse" : "Expand") + " locations";
-    const pop = t.closest(".pop");
+    const caret = gh.querySelector(".gcaret");
+    if (caret) caret.textContent = openNow ? "▾" : "▸";
+    gh.title = `Click to ${openNow ? "collapse" : "expand"} · checkbox selects all`;
+    const pop = gh.closest(".pop");
     if (pop) for (const lbl of pop.querySelectorAll(`label[data-chain="${CSS.escape(ch)}"]`)) lbl.style.display = openNow ? "" : "none";
   });
   $("util-slicers").addEventListener("change", (e) => {
