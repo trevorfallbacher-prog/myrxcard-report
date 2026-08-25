@@ -528,6 +528,7 @@
   .pop label.ghead { font-weight: 700; color: var(--ink); background: var(--card-solid); margin-top: 6px; }
   .pop label.ghead .gn { color: var(--ink-mute); font-weight: 400; font-size: 11.5px; }
   .pop label.gmember { padding-left: 26px; }
+  .gcaret { display: inline-block; width: 15px; cursor: pointer; color: var(--ink-mute); user-select: none; }
   /* monthly stacked columns */
   .stack-controls { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
   /* TailAdmin v2 segmented pills: gray rail, active pill goes white + shadow */
@@ -2882,9 +2883,13 @@ const USLICER_LABELS = { groups: "Clients", pharmacies: "Pharmacies", months: "M
 // and the monthly stack. Rules run top-to-bottom against (name, meta) and the
 // first match wins — edit here to split a collective apart later (e.g. carve a
 // new client out of Rochester, or move Swedish American into UWHC).
+// RRH is a health system, not a geography: the roster is its 7 pharmacies by
+// NPI last-4 (incl. Clifton Springs + Batavia sites outside Rochester city).
+// A Rochester-NY CVS previously swept into the old city-based rule is out.
+const RRH_NPI4 = new Set(["1358", "5525", "9415", "0409", "5376", "4451", "7489"]);
 const PHARM_GROUPS = [
   ["Brookshire Brothers", (n) => /^Brookshire Brothers/i.test(n)],
-  ["Rochester Collective", (n, m) => m.city === "Rochester" && m.st === "NY"],
+  ["Rochester Regional Health", (n, m) => RRH_NPI4.has(m.npi4)],
   ["UW Health (UWHC)", (n) => /^UW Health|^Swedish American/i.test(n)], // Swedish American rolls up per the claim file's Pharmacy Group
   ["Marshfield Clinic", (n) => /^Marshfield/i.test(n)],
   ["Sun Life", (n) => /^Sun Life/i.test(n)],
@@ -3368,8 +3373,13 @@ function renderUtilSlicers(p) {
       const chainTotal = (members) => members.reduce((s, i) => s + (counts.get(i) || 0), 0);
       body = [...chains.entries()].sort((a, b) => chainTotal(b[1]) - chainTotal(a[1])).map(([ch, members]) => {
         const selN = active ? members.filter((i) => active.has(i)).length : 0;
-        return `<label class="ghead"><input type="checkbox" data-uchain data-members="${members.join(",")}"${selN === members.length ? " checked" : ""}> ${esc(ch)} <span class="gn">· ${members.length} locations</span><span class="cnt num">${fmt(chainTotal(members))}</span></label>` +
-          members.map((i) => row(i, "gmember")).join("");
+        const open = (util.chainOpen && util.chainOpen.has(ch)) || !!search; // searching auto-expands
+        return `<label class="ghead"><span class="gcaret" data-uctoggle="${esc(ch)}" title="${open ? "Collapse" : "Expand"} locations">${open ? "▾" : "▸"}</span><input type="checkbox" data-uchain data-members="${members.join(",")}"${selN === members.length ? " checked" : ""}> ${esc(ch)} <span class="gn">· ${members.length} locations</span><span class="cnt num">${fmt(chainTotal(members))}</span></label>` +
+          members.map((i) => {
+            let r = row(i, "gmember").replace("<label", `<label data-chain="${esc(ch)}"`);
+            if (!open && !r.includes("display:none")) r = r.replace(`class="gmember"`, `class="gmember" style="display:none"`);
+            return r;
+          }).join("");
       }).join("") + loose.map((i) => row(i)).join("");
     } else {
       body = order.map((i) => row(i)).join("");
@@ -5841,8 +5851,25 @@ async function boot() {
     if (!inp) return;
     if (inp.dataset.usearch) util.psearch[inp.dataset.usearch] = inp.value;
     const q = inp.value.toLowerCase();
-    for (const lbl of inp.parentElement.querySelectorAll("label:not(.allrow)"))
-      lbl.style.display = !q || lbl.textContent.toLowerCase().includes(q) ? "" : "none";
+    for (const lbl of inp.parentElement.querySelectorAll("label:not(.allrow)")) {
+      if (q) { lbl.style.display = lbl.textContent.toLowerCase().includes(q) ? "" : "none"; continue; }
+      // cleared: collapsed group members stay hidden
+      const ch = lbl.dataset.chain;
+      lbl.style.display = ch && !(util.chainOpen && util.chainOpen.has(ch)) ? "none" : "";
+    }
+  });
+  $("util-slicers").addEventListener("click", (e) => {
+    const t = e.target.closest("[data-uctoggle]");
+    if (!t) return;
+    e.preventDefault(); e.stopPropagation();
+    util.chainOpen = util.chainOpen || new Set();
+    const ch = t.dataset.uctoggle;
+    util.chainOpen.has(ch) ? util.chainOpen.delete(ch) : util.chainOpen.add(ch);
+    const openNow = util.chainOpen.has(ch);
+    t.textContent = openNow ? "▾" : "▸";
+    t.title = (openNow ? "Collapse" : "Expand") + " locations";
+    const pop = t.closest(".pop");
+    if (pop) for (const lbl of pop.querySelectorAll(`label[data-chain="${CSS.escape(ch)}"]`)) lbl.style.display = openNow ? "" : "none";
   });
   $("util-slicers").addEventListener("change", (e) => {
     const tcb = e.target.closest("input[data-tf]");
