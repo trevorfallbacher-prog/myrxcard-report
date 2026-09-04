@@ -40,6 +40,58 @@ const CLIENT_FIELDS = ["case_key","assist_number","group_number","source","statu
 // config.enc.json for the root dashboard, /<slug>/utilization.enc.json for a
 // partner page. Verified passwords are cached per isolate so the PBKDF2 cost
 // is paid once per session, not per 5-minute refresh.
+// ---- PBKDF2-HMAC-SHA256 in plain JS ----
+// Workers' WebCrypto refuses PBKDF2 above 100,000 iterations
+// ("Pbkdf2 failed: iteration counts above 100000 are not supported") and the
+// report files use 310,000, so the key must be derived here. ~190 ms per
+// check; verified passwords are cached per isolate (see verifyReportPassword).
+// Output matches crypto.subtle.deriveBits bit-for-bit (checked in Node).
+const K = new Uint32Array([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+const W = new Uint32Array(64);
+function compress(h, blk, off) { // blk: Uint8Array, 64 bytes at off
+  for (let i=0;i<16;i++) W[i]=(blk[off+i*4]<<24)|(blk[off+i*4+1]<<16)|(blk[off+i*4+2]<<8)|blk[off+i*4+3];
+  for (let i=16;i<64;i++){const a=W[i-15],b=W[i-2];W[i]=(W[i-16]+(((a>>>7)|(a<<25))^((a>>>18)|(a<<14))^(a>>>3))+W[i-7]+(((b>>>17)|(b<<15))^((b>>>19)|(b<<13))^(b>>>10)))|0;}
+  let a=h[0],b=h[1],c=h[2],d=h[3],e=h[4],f=h[5],g=h[6],hh=h[7];
+  for (let i=0;i<64;i++){const t1=(hh+(((e>>>6)|(e<<26))^((e>>>11)|(e<<21))^((e>>>25)|(e<<7)))+((e&f)^(~e&g))+K[i]+W[i])|0;const t2=((((a>>>2)|(a<<30))^((a>>>13)|(a<<19))^((a>>>22)|(a<<10)))+((a&b)^(a&c)^(b&c)))|0;hh=g;g=f;f=e;e=(d+t1)|0;d=c;c=b;b=a;a=(t1+t2)|0;}
+  h[0]=(h[0]+a)|0;h[1]=(h[1]+b)|0;h[2]=(h[2]+c)|0;h[3]=(h[3]+d)|0;h[4]=(h[4]+e)|0;h[5]=(h[5]+f)|0;h[6]=(h[6]+g)|0;h[7]=(h[7]+hh)|0;
+}
+const H0 = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
+function sha256(msg) { // Uint8Array -> Uint8Array(32)
+  const h = new Uint32Array(H0); const len = msg.length; const padLen = ((len + 9 + 63) >> 6) << 6;
+  const buf = new Uint8Array(padLen); buf.set(msg); buf[len] = 0x80;
+  const bits = len * 8; buf[padLen-4]=(bits>>>24)&255; buf[padLen-3]=(bits>>>16)&255; buf[padLen-2]=(bits>>>8)&255; buf[padLen-1]=bits&255;
+  for (let off=0; off<padLen; off+=64) compress(h, buf, off);
+  const out = new Uint8Array(32); for (let i=0;i<8;i++){out[i*4]=h[i]>>>24;out[i*4+1]=(h[i]>>>16)&255;out[i*4+2]=(h[i]>>>8)&255;out[i*4+3]=h[i]&255;} return out;
+}
+// HMAC with precomputed inner/outer states (the PBKDF2 hot loop only hashes one 32-byte block each)
+function hmacState(key) {
+  if (key.length > 64) key = sha256(key);
+  const ipad = new Uint8Array(64), opad = new Uint8Array(64);
+  for (let i=0;i<64;i++){ const k = i<key.length ? key[i] : 0; ipad[i]=k^0x36; opad[i]=k^0x5c; }
+  const hi = new Uint32Array(H0), ho = new Uint32Array(H0); compress(hi, ipad, 0); compress(ho, opad, 0);
+  return { hi, ho };
+}
+const blk32 = new Uint8Array(64); blk32[32]=0x80; blk32[62]=0x03; // (64+32)*8 = 768 = 0x0300
+function hmac32(st, data32) { // data exactly 32 bytes -> 32 bytes
+  const h = new Uint32Array(st.hi); blk32.set(data32, 0); compress(h, blk32, 0);
+  const inner = new Uint8Array(32); for (let i=0;i<8;i++){inner[i*4]=h[i]>>>24;inner[i*4+1]=(h[i]>>>16)&255;inner[i*4+2]=(h[i]>>>8)&255;inner[i*4+3]=h[i]&255;}
+  const h2 = new Uint32Array(st.ho); blk32.set(inner, 0); compress(h2, blk32, 0);
+  const out = new Uint8Array(32); for (let i=0;i<8;i++){out[i*4]=h2[i]>>>24;out[i*4+1]=(h2[i]>>>16)&255;out[i*4+2]=(h2[i]>>>8)&255;out[i*4+3]=h2[i]&255;} return out;
+}
+function hmacAny(st, data) { // general-length data (first PBKDF2 block: salt||INT(1))
+  const inner = new Uint32Array(st.hi); const len=data.length, total=64+len, padLen=((total+9+63)>>6)<<6;
+  const buf=new Uint8Array(padLen-64); buf.set(data); buf[len]=0x80; const bits=total*8; buf[buf.length-4]=(bits>>>24)&255; buf[buf.length-3]=(bits>>>16)&255; buf[buf.length-2]=(bits>>>8)&255; buf[buf.length-1]=bits&255;
+  for (let off=0; off<buf.length; off+=64) compress(inner, buf, off);
+  const ib = new Uint8Array(32); for (let i=0;i<8;i++){ib[i*4]=inner[i]>>>24;ib[i*4+1]=(inner[i]>>>16)&255;ib[i*4+2]=(inner[i]>>>8)&255;ib[i*4+3]=inner[i]&255;}
+  const h2 = new Uint32Array(st.ho); blk32.set(ib,0); compress(h2, blk32, 0);
+  const out = new Uint8Array(32); for (let i=0;i<8;i++){out[i*4]=h2[i]>>>24;out[i*4+1]=(h2[i]>>>16)&255;out[i*4+2]=(h2[i]>>>8)&255;out[i*4+3]=h2[i]&255;} return out;
+}
+function pbkdf2Sha256_32(password, salt, iterations) { // -> Uint8Array(32) (one block)
+  const st = hmacState(password); const s1 = new Uint8Array(salt.length+4); s1.set(salt); s1[salt.length+3]=1;
+  let u = hmacAny(st, s1); const t = new Uint8Array(u);
+  for (let i=1;i<iterations;i++){ u = hmac32(st, u); for (let j=0;j<32;j++) t[j]^=u[j]; }
+  return t;
+}
 const FEED_SITE = "https://reports.myrxcard.com";
 const verifiedFeedPw = new Map(); // `${slug}|${pw}` -> expiry ms
 async function verifyReportPassword(slug, pw) {
@@ -50,17 +102,16 @@ async function verifyReportPassword(slug, pw) {
   let blob;
   try {
     const r = await fetch(url, { cf: { cacheTtl: 300, cacheEverything: true } });
-    if (!r.ok) return false;
+    if (!r.ok) { console.log(`feed: ${url} -> HTTP ${r.status}`); return false; }
     blob = await r.json();
-  } catch { return false; }
-  if (!blob || !blob.salt || !blob.iv || !blob.data) return false;
+  } catch (e) { console.log(`feed: ${url} fetch failed: ${e && e.message}`); return false; }
+  if (!blob || !blob.salt || !blob.iv || !blob.data) { console.log(`feed: ${url} -> not an encrypted blob`); return false; }
   try {
     const b64 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
-    const baseKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
-    const aesKey = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b64(blob.salt), iterations: 310000, hash: "SHA-256" },
-      baseKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    const raw = pbkdf2Sha256_32(new TextEncoder().encode(pw), b64(blob.salt), 310000);
+    const aesKey = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["decrypt"]);
     await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(blob.iv) }, aesKey, b64(blob.data));
-  } catch { return false; }
+  } catch (e) { console.log(`feed: verify failed: ${e && e.name}: ${e && e.message}`); return false; }
   verifiedFeedPw.set(key, now + 15 * 60 * 1000);
   return true;
 }
