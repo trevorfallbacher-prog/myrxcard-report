@@ -6232,9 +6232,10 @@ async function boot() {
     const loadClientSearch = async () => {
       try {
         stamp(true, "SYNCING…");
-        const raw = await fetchSearchFeed(gatePw, window.CLIENT_SITE.slug,
+        let raw = await fetchSearchFeed(gatePw, window.CLIENT_SITE.slug,
           { apiUrl: "https://xy2f-yrzu-6a37.n7d.xano.io/api:3NPcU-a5/search_events" });
-        const mine = new Set(CLIENT_MICROSITES[window.CLIENT_SITE.slug] || []);
+        const mine = new Set(CLIENT_MICROSITES[DEMO ? DEMO.from : window.CLIENT_SITE.slug] || []);
+        if (DEMO) raw = raw.filter((r) => mine.has(micrositeSlugOf(r))).map(demoRelabel), mine.clear(), mine.add(window.CLIENT_SITE.slug);
         state.events = raw
           .filter((r) => mine.has(micrositeSlugOf(r)))
           .map(normalize).filter((e) => Number.isFinite(e.t));
@@ -6302,11 +6303,26 @@ async function boot() {
         stamp(false, "SEARCH DATA UNAVAILABLE");
       }
     };
+    const DEMO = window.CLIENT_SITE.demo || null;
+    // demo sites: the source partner's search activity, relabeled with the same
+    // pharmacy map the claims got, and presented as this site's own microsite
+    const demoRelabel = (r) => {
+      const nm = (DEMO && DEMO.nameMap) || {};
+      const fix = (name) => { const k = String(name || "").toUpperCase().trim(); return nm[k] || name; };
+      const o = { ...r };
+      let rp = o.result_pharmacies; if (typeof rp === "string") { try { rp = JSON.parse(rp); } catch { rp = null; } }
+      if (Array.isArray(rp)) o.result_pharmacies = rp.map((p) => (p && typeof p === "object") ? { ...p, name: fix(p.name) } : p);
+      if (o.printed_pharmacy_name) o.printed_pharmacy_name = fix(o.printed_pharmacy_name);
+      if (o.selected_pharmacy_name) o.selected_pharmacy_name = fix(o.selected_pharmacy_name);
+      o.source_path = "/s/" + window.CLIENT_SITE.slug; o.partner_slug = window.CLIENT_SITE.slug;
+      return o;
+    };
     const enterClient = async (data, pw) => {
       gatePw = pw;
       util.data = data;
       util.loaded = true;
       enterApp("live");
+      if (DEMO) { const b = $("sample-badge"); b.textContent = "DEMO DATA · anonymized sample"; b.title = DEMO.note || ""; b.hidden = false; }
       await setTab("util");
       loadClientSearch(); // background; the search tab fills in when it lands
     };
