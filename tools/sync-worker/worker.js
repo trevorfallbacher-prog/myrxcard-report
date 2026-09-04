@@ -94,6 +94,7 @@ function pbkdf2Sha256_32(password, salt, iterations) { // -> Uint8Array(32) (one
 }
 const FEED_SITE = "https://reports.myrxcard.com";
 const verifiedFeedPw = new Map(); // `${slug}|${pw}` -> expiry ms
+let feedTableId = null; // search_events table id, resolved by name once per isolate
 async function verifyReportPassword(slug, pw) {
   if (!pw || pw.length > 200) return false;
   const key = slug + "|" + pw, now = Date.now();
@@ -251,17 +252,37 @@ export default {
       const slug = String(body.site || "").toLowerCase();
       if (!/^[a-z0-9-]{0,40}$/.test(slug)) return json({ error: "bad site" }, 400);
       if (!(await verifyReportPassword(slug, String(body.feed_pw || "")))) return json({ error: "bad password" }, 403);
-      if (!env.XANO_EVENTS_URL) return json({ error: "events feed not configured" }, 500);
+      // Find the search_events table by NAME through the Metadata API. Never
+      // by id: XANO_EVENTS_URL pointed at the Avalon process-events table, and
+      // rows from the wrong table rendered on the dashboard as blank searches.
+      const metaBase = String(env.XANO_CONTENT_URL || "").replace(/\/table\/\d+\/content\/?$/, "");
+      if (!/\/api:meta\/workspace\/\d+$/.test(metaBase)) return json({ error: "events feed not configured" }, 500);
       const H3 = { "content-type": "application/json", authorization: `Bearer ${env.XANO_META_TOKEN}` };
+      if (!feedTableId) {
+        const tr = await fetch(`${metaBase}/table?page=1&per_page=100`, { headers: H3 });
+        if (!tr.ok) return json({ error: `Xano tables ${tr.status}` }, 502);
+        const tb = await tr.json();
+        const list = Array.isArray(tb) ? tb : (tb.items || []);
+        const hit = list.find((t) => t && t.name === "search_events");
+        if (!hit) { console.log("feed: tables seen: " + list.map((t) => t && `${t.id}:${t.name}`).join(", ")); return json({ error: "search_events table not found" }, 502); }
+        feedTableId = hit.id;
+      }
       let events = [], page = 1;
       for (;;) {
-        const r = await fetch(`${env.XANO_EVENTS_URL}/search`, { method: "POST", headers: H3,
+        const r = await fetch(`${metaBase}/table/${feedTableId}/content/search`, { method: "POST", headers: H3,
           body: JSON.stringify({ page, per_page: 500, search: [] }) });
         if (!r.ok) return json({ error: `Xano read ${r.status}` }, 502);
         const it = (await r.json()).items || [];
         events = events.concat(it);
         if (it.length < 500 || page > 400) break;
         page++;
+      }
+      // belt and braces: search_events rows carry these columns; anything else
+      // is the wrong table and must not reach the dashboard
+      if (events.length && !("drug_name" in events[0] && "session_id" in events[0])) {
+        console.log("feed: unexpected row shape: " + Object.keys(events[0]).slice(0, 12).join(","));
+        feedTableId = null;
+        return json({ error: "unexpected events shape" }, 502);
       }
       return json({ ok: true, generatedAt: new Date().toISOString(), events });
     }
