@@ -32,10 +32,26 @@ const SECRETS_PATH = join(__dirname, "clients.secrets.json");
 
 // slug -> which "Pharmacy Group" values (uppercased) belong to the client
 const CLIENTS = [
-  { slug: "uwhc", name: "UW Health (UWHC)", type: "pharmacy", match: (g) => g === "UWHC PHARMACIES" },
+  { slug: "uwhc", name: "UW Health (UWHC)", type: "pharmacy", match: (g) => g === "UWHC PHARMACIES",
+    brand: {
+      logo: "brands/uwhc.svg", logoHeight: 26, tagline: "Pharmacy services report",
+      colors: { primary: "#c5050c", secondary: "#9b0407", tertiary: "#d9484d", accent: "#065dba", accentBright: "#2b7ddb",
+        dark: { primary: "#ff7075", secondary: "#ff9094", tertiary: "#d9484d", accent: "#6ea9ff", accentBright: "#8fbcff" } },
+      fonts: { google: "family=Public+Sans:wght@400;500;600;700", body: "'Public Sans', 'Helvetica Neue', Arial, sans-serif", heading: "'Public Sans', 'Helvetica Neue', Arial, sans-serif" },
+      headings: { transform: "uppercase", weight: 700, letterSpacing: "0.04em", gate: "UW Health", menuLabel: "REPORTS",
+        tabs: { search: "Website searches", util: "Claims utilization" }, titles: { search: "Website searches", util: "Claims utilization" } },
+      layout: { header: "view-first", radius: "6px", density: "compact" }, poweredBy: true } },
   { slug: "marshfield", name: "Marshfield Clinic", type: "pharmacy", match: (g) => g === "MARSHFIELD PHARMACIES" },
   { slug: "brookshire", name: "Brookshire Brothers", type: "pharmacy", match: (g) => g === "BROOKSHIRE BROTHERS PHARMACY" },
-  { slug: "rrh", name: "Rochester Regional Health", type: "pharmacy", match: (g) => g.startsWith("RRH") },
+  { slug: "rrh", name: "Rochester Regional Health", type: "pharmacy", match: (g) => g.startsWith("RRH"),
+    brand: {
+      logo: "brands/rrh.svg", logoDark: "brands/rrh-dark.svg", logoHeight: 30, tagline: "Pharmacy savings report",
+      colors: { primary: "#0077c8", secondary: "#005b99", tertiary: "#3a97d8", accent: "#e8a317", accentBright: "#f7b733",
+        dark: { primary: "#5fb2f5", secondary: "#8ac8ff", tertiary: "#3a97d8", accent: "#f0b43c", accentBright: "#ffc95e" } },
+      fonts: { google: "family=Source+Sans+3:wght@400;500;600;700", body: "'Source Sans 3', 'Helvetica Neue', Arial, sans-serif", heading: "'Source Sans 3', 'Helvetica Neue', Arial, sans-serif" },
+      headings: { weight: 700, letterSpacing: "-0.01em", gate: "Rochester Regional Health", menuLabel: "REPORTS",
+        tabs: { search: "Website searches", util: "Claims utilization" }, titles: { search: "Website searches", util: "Claims utilization" } },
+      layout: { header: "title-first", radius: "8px", density: "comfortable" }, poweredBy: true } },
   { slug: "sunlife", name: "Sun Life Pharmacies", type: "pharmacy", match: (g) => g === "SUN LIFE PHARMACIES" },
   { slug: "altscripts", name: "AltScripts Specialty Pharmacy", type: "pharmacy", match: (g) => g === "ALTSCRIPTS SPECIALTY PHARMACY" },
   { slug: "ryan", name: "Ryan Pharmacy", type: "pharmacy", match: (g) => g === "RYAN PHARMACY" },
@@ -120,7 +136,15 @@ for (const client of CLIENTS) {
   mkdirSync(dir, { recursive: true });
   const enc = await encryptJSON(store, secrets[client.slug]);
   writeFileSync(join(dir, "utilization.enc.json"), JSON.stringify(enc) + "\n");
-  const marker = `<script>window.CLIENT_SITE = ${JSON.stringify({ slug: client.slug, name: client.name, type: client.type || "pharmacy" })};</script>`;
+  // brand block: logos are inlined as data URIs so the page needs no extra assets
+  const inlineImg = (rel) => {
+    if (!rel) return undefined;
+    const buf = readFileSync(join(__dirname, rel));
+    const mime = rel.endsWith(".svg") ? "image/svg+xml" : rel.endsWith(".png") ? "image/png" : "image/jpeg";
+    return `data:${mime};base64,${buf.toString("base64")}`;
+  };
+  const brand = client.brand ? { ...client.brand, name: client.name, logo: inlineImg(client.brand.logo), logoDark: inlineImg(client.brand.logoDark) } : undefined;
+  const marker = `<script>window.CLIENT_SITE = ${JSON.stringify({ slug: client.slug, name: client.name, type: client.type || "pharmacy", ...(brand ? { brand } : {}) })};</script>`;
   writeFileSync(join(dir, "index.html"), rootIndex.replace("<body>", "<body>\n" + marker));
 
   const p = store.periods[store.latest];
