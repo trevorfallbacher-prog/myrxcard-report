@@ -1416,6 +1416,26 @@ async function decryptConfig(encBlob, password) {
 }
 
 /* ---------------- data fetch ---------------- */
+// Live search feed comes from the sync worker, gated by the same report
+// password that unlocked this page (the worker verifies it against this
+// site's own encrypted file). The public Xano GET it replaces is being
+// removed; `legacy` is only a bridge until that endpoint is deleted.
+const SYNC_API = "https://myrxcard-sync.trevorfallbacher.workers.dev";
+let feedSource = ""; // "worker" | "legacy" — shown in the sync stamp
+async function fetchSearchFeed(pw, site, legacy) {
+  let status = 0;
+  feedSource = "worker";
+  try {
+    const res = await fetch(SYNC_API, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feed_pw: pw || "", site: site || "" }) });
+    status = res.status;
+    if (res.ok) { const b = await res.json(); if (Array.isArray(b.events)) return b.events; }
+  } catch { /* fall through */ }
+  console.warn("search feed via worker failed (" + status + ")" + (legacy ? "; using legacy endpoint" : ""));
+  if (!legacy) throw new Error("search feed unavailable (" + status + ")");
+  feedSource = "legacy";
+  return fetchXano(legacy);
+}
 async function fetchXano(cfg) {
   const headers = { Accept: "application/json" };
   if (cfg.apiKey) headers.Authorization = "Bearer " + cfg.apiKey;
@@ -2676,11 +2696,11 @@ async function sync() {
   if (state.mode === "sample") return;
   stamp(true, "SYNCING…");
   try {
-    const raw = await fetchXano(cfg);
+    const raw = await fetchSearchFeed(gatePw, "", cfg);
     state.events = raw.map(normalize).filter((e) => Number.isFinite(e.t));
     state.lastSync = new Date();
     $("notice").style.display = "none";
-    stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
+    stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US") + (feedSource === "legacy" ? " · legacy feed" : ""));
     renderAll();
   } catch (err) {
     stamp(false, "SYNC FAILED");
@@ -4517,7 +4537,8 @@ function draftExportHTML() {
     .docpage { margin: 0 !important; box-shadow: none !important; zoom: 1 !important; }
     .docpage .dp-block.join-src, .docpage .dp-block.join-target { outline: none !important; }
     .docpage [data-ph]:empty::before { content: "" !important; }
-  </style></head><body>${page.outerHTML}</body></html>`;
+  </style></head><body>
+<script>window.CLIENT_SITE = {"slug":"uwhc","name":"UW Health (UWHC)","type":"pharmacy"};</script>${page.outerHTML}</body></html>`;
 }
 /* ---- export to Word: MIME-HTML (.doc) with images embedded as parts ---- */
 // rasterize an svg data URI to PNG base64 (Word's HTML import can't do SVG)
@@ -4617,7 +4638,8 @@ async function draftToWordHtml() {
   const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><title>${esc(title)}</title>` +
     `<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->` +
     `<style>@page WordSection1 { size: 8.5in 11.0in; margin: 0.5in 0.5in 0.6in 0.5in; } div.WordSection1 { page: WordSection1; } body { font-family: "Century Gothic", Arial, sans-serif; }</style>` +
-    `</head><body><div class="WordSection1">${body}</div></body></html>`;
+    `</head><body>
+<script>window.CLIENT_SITE = {"slug":"uwhc","name":"UW Health (UWHC)","type":"pharmacy"};</script><div class="WordSection1">${body}</div></body></html>`;
   return { html, parts, title };
 }
 function mhtAssemble(html, parts) {
@@ -6124,7 +6146,8 @@ async function boot() {
     const loadClientSearch = async () => {
       try {
         stamp(true, "SYNCING…");
-        const raw = await fetchXano({ apiUrl: "https://xy2f-yrzu-6a37.n7d.xano.io/api:3NPcU-a5/search_events" });
+        const raw = await fetchSearchFeed(gatePw, window.CLIENT_SITE.slug,
+          { apiUrl: "https://xy2f-yrzu-6a37.n7d.xano.io/api:3NPcU-a5/search_events" });
         const mine = new Set(CLIENT_MICROSITES[window.CLIENT_SITE.slug] || []);
         state.events = raw
           .filter((r) => mine.has(micrositeSlugOf(r)))
@@ -6143,7 +6166,7 @@ async function boot() {
             if (host2) host2.parentNode.insertBefore(sect, host2);
           }
           state.lastSync = new Date();
-          stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
+          stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US") + (feedSource === "legacy" ? " · legacy feed" : ""));
           renderAll();
           return;
         }
@@ -6183,7 +6206,7 @@ async function boot() {
           host2.parentNode.insertBefore(sect, host2);
         }
         state.lastSync = new Date();
-        stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
+        stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US") + (feedSource === "legacy" ? " · legacy feed" : ""));
         renderAll();
         renderClientExposure();
         // keep the exposure panel in step with the period selector

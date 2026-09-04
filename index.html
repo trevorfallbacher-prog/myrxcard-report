@@ -1415,6 +1415,26 @@ async function decryptConfig(encBlob, password) {
 }
 
 /* ---------------- data fetch ---------------- */
+// Live search feed comes from the sync worker, gated by the same report
+// password that unlocked this page (the worker verifies it against this
+// site's own encrypted file). The public Xano GET it replaces is being
+// removed; `legacy` is only a bridge until that endpoint is deleted.
+const SYNC_API = "https://myrxcard-sync.trevorfallbacher.workers.dev";
+let feedSource = ""; // "worker" | "legacy" — shown in the sync stamp
+async function fetchSearchFeed(pw, site, legacy) {
+  let status = 0;
+  feedSource = "worker";
+  try {
+    const res = await fetch(SYNC_API, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feed_pw: pw || "", site: site || "" }) });
+    status = res.status;
+    if (res.ok) { const b = await res.json(); if (Array.isArray(b.events)) return b.events; }
+  } catch { /* fall through */ }
+  console.warn("search feed via worker failed (" + status + ")" + (legacy ? "; using legacy endpoint" : ""));
+  if (!legacy) throw new Error("search feed unavailable (" + status + ")");
+  feedSource = "legacy";
+  return fetchXano(legacy);
+}
 async function fetchXano(cfg) {
   const headers = { Accept: "application/json" };
   if (cfg.apiKey) headers.Authorization = "Bearer " + cfg.apiKey;
@@ -2675,11 +2695,11 @@ async function sync() {
   if (state.mode === "sample") return;
   stamp(true, "SYNCING…");
   try {
-    const raw = await fetchXano(cfg);
+    const raw = await fetchSearchFeed(gatePw, "", cfg);
     state.events = raw.map(normalize).filter((e) => Number.isFinite(e.t));
     state.lastSync = new Date();
     $("notice").style.display = "none";
-    stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
+    stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US") + (feedSource === "legacy" ? " · legacy feed" : ""));
     renderAll();
   } catch (err) {
     stamp(false, "SYNC FAILED");
@@ -6123,7 +6143,8 @@ async function boot() {
     const loadClientSearch = async () => {
       try {
         stamp(true, "SYNCING…");
-        const raw = await fetchXano({ apiUrl: "https://xy2f-yrzu-6a37.n7d.xano.io/api:3NPcU-a5/search_events" });
+        const raw = await fetchSearchFeed(gatePw, window.CLIENT_SITE.slug,
+          { apiUrl: "https://xy2f-yrzu-6a37.n7d.xano.io/api:3NPcU-a5/search_events" });
         const mine = new Set(CLIENT_MICROSITES[window.CLIENT_SITE.slug] || []);
         state.events = raw
           .filter((r) => mine.has(micrositeSlugOf(r)))
@@ -6142,7 +6163,7 @@ async function boot() {
             if (host2) host2.parentNode.insertBefore(sect, host2);
           }
           state.lastSync = new Date();
-          stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
+          stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US") + (feedSource === "legacy" ? " · legacy feed" : ""));
           renderAll();
           return;
         }
@@ -6182,7 +6203,7 @@ async function boot() {
           host2.parentNode.insertBefore(sect, host2);
         }
         state.lastSync = new Date();
-        stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US"));
+        stamp(true, "SYNCED " + state.lastSync.toLocaleTimeString("en-US") + (feedSource === "legacy" ? " · legacy feed" : ""));
         renderAll();
         renderClientExposure();
         // keep the exposure panel in step with the period selector

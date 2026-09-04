@@ -34,6 +34,36 @@ const DOMESTIC_SOURCES = new Set(["Direct", "RxFree4me"]);
 const CLIENT_FIELDS = ["case_key","assist_number","group_number","source","status","closed_reason",
   "medication_name","ndc","medication_type","month","created_date","closed_date",
   "awp","aa_price","aa_savings","avalon_savings","member_ref","member_age"];
+// ---- report-password verification for the search feed ----
+// The report pages are gated by AES-GCM files (PBKDF2-SHA256, 310k iterations)
+// published on the site itself. A password is valid iff it decrypts that file:
+// config.enc.json for the root dashboard, /<slug>/utilization.enc.json for a
+// partner page. Verified passwords are cached per isolate so the PBKDF2 cost
+// is paid once per session, not per 5-minute refresh.
+const FEED_SITE = "https://reports.myrxcard.com";
+const verifiedFeedPw = new Map(); // `${slug}|${pw}` -> expiry ms
+async function verifyReportPassword(slug, pw) {
+  if (!pw || pw.length > 200) return false;
+  const key = slug + "|" + pw, now = Date.now();
+  if ((verifiedFeedPw.get(key) || 0) > now) return true;
+  const url = slug ? `${FEED_SITE}/${slug}/utilization.enc.json` : `${FEED_SITE}/config.enc.json`;
+  let blob;
+  try {
+    const r = await fetch(url, { cf: { cacheTtl: 300, cacheEverything: true } });
+    if (!r.ok) return false;
+    blob = await r.json();
+  } catch { return false; }
+  if (!blob || !blob.salt || !blob.iv || !blob.data) return false;
+  try {
+    const b64 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
+    const baseKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+    const aesKey = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b64(blob.salt), iterations: 310000, hash: "SHA-256" },
+      baseKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(blob.iv) }, aesKey, b64(blob.data));
+  } catch { return false; }
+  verifiedFeedPw.set(key, now + 15 * 60 * 1000);
+  return true;
+}
 async function hmacHex16(secret, message) {
   if (!secret || !message) return "";
   const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -158,6 +188,32 @@ export default {
     let body;
     try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
     if (!env.XANO_META_TOKEN || !env.XANO_CONTENT_URL) return json({ error: "Xano connection not configured" }, 500);
+    // Live website-search feed for reports.myrxcard.com (root dashboard and the
+    // /<slug>/ partner pages). Replaces the public Xano GET on search_events,
+    // which handed the entire search log to anyone who requested the URL.
+    // No new secrets: the caller proves it holds a report password by that
+    // password decrypting the site's own published encrypted file — exactly
+    // the check the page itself passes at its gate. Any valid password gets
+    // the full feed (the browser scopes it to the client's microsites, as it
+    // did with the public endpoint).
+    if (body.feed_pw !== undefined) {
+      const slug = String(body.site || "").toLowerCase();
+      if (!/^[a-z0-9-]{0,40}$/.test(slug)) return json({ error: "bad site" }, 400);
+      if (!(await verifyReportPassword(slug, String(body.feed_pw || "")))) return json({ error: "bad password" }, 403);
+      if (!env.XANO_EVENTS_URL) return json({ error: "events feed not configured" }, 500);
+      const H3 = { "content-type": "application/json", authorization: `Bearer ${env.XANO_META_TOKEN}` };
+      let events = [], page = 1;
+      for (;;) {
+        const r = await fetch(`${env.XANO_EVENTS_URL}/search`, { method: "POST", headers: H3,
+          body: JSON.stringify({ page, per_page: 500, search: [] }) });
+        if (!r.ok) return json({ error: `Xano read ${r.status}` }, 502);
+        const it = (await r.json()).items || [];
+        events = events.concat(it);
+        if (it.length < 500 || page > 400) break;
+        page++;
+      }
+      return json({ ok: true, generatedAt: new Date().toISOString(), events });
+    }
     // read route for the gated reports. The master password returns everything;
     // a client password (CLIENT_PWS secret) returns only that client's rows,
     // white-labeled server-side — the browser never sees other clients, fees,
