@@ -65,7 +65,7 @@ const CLIENTS = [
   { slug: "aurora", name: "Aurora Health Care", type: "pharmacy", match: (g) => g === "UWHC PHARMACIES",
     demo: { from: "uwhc", scale: 0.82, groupName: "AURORA PHARMACY", note: "Demo data: anonymized, scaled sample. Not Aurora Health Care's claims.",
       locations: [
-        ["Aurora Pharmacy - St. Luke's Medical Center", "2900 W Oklahoma Ave", "Milwaukee", "WI", "53215"],
+        ["Aurora Pharmacy - Saint Luke Medical Center", "2900 W Oklahoma Ave", "Milwaukee", "WI", "53215"],
         ["Aurora Pharmacy - Sinai Medical Center", "945 N 12th St", "Milwaukee", "WI", "53233"],
         ["Aurora Pharmacy - West Allis Medical Center", "8901 W Lincoln Ave", "West Allis", "WI", "53227"],
         ["Aurora Pharmacy - Grafton Medical Center", "975 Port Washington Rd", "Grafton", "WI", "53024"],
