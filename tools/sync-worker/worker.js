@@ -8,6 +8,22 @@
 //   POST / { secret, rows: [ {bucket_key, client_name, month, ...metrics} ] }
 //   POST / { report_pw }   → read route for reports.avalonsaves.com: returns
 //                            every case row (already identifier-free)
+//   POST / { feed_pw, site } → live website-search feed for reports.myrxcard.com
+//
+// reports.myrxcard.com admin (live partner brands + sealed password vault):
+//   POST / { brand_get: "<slug>" }                  PUBLIC — {ok, found, doc}
+//   POST / { admin_pw, action: "ping" }             MASTER — {ok, kv}
+//   POST / { admin_pw, action: "brands.list" }      MASTER — {ok, clients:[BrandDoc]}
+//   POST / { admin_pw, action: "brand.put", slug, name, brand: Brand|null }
+//   POST / { admin_pw, action: "pws.get" }          MASTER — {ok, enc, updatedAt}
+//   POST / { admin_pw, action: "pws.put", enc: {salt, iv, data} }
+//   admin_pw is the root dashboard's master password, proven by decrypting
+//   /config.enc.json (verifyMaster). KV keys (namespace shared with the
+//   avalon-aaps project, so every key is prefixed "myrx:"):
+//     myrx:brand:<slug> → BrandDoc {v, slug, name, type, demo, brand|null, updatedAt, updatedFrom}
+//     myrx:pws          → {v, updatedAt, enc} — the partner-password vault, encrypted
+//                          client-side with the master password; the worker
+//                          only ever stores and returns ciphertext.
 //
 // The upsert happens here, directly against Xano's Metadata API content
 // endpoints (search by bucket_key → update or insert) — no Xano-side
@@ -18,6 +34,18 @@
 //          REPORT_PW         unlocks the read route (shared with the report UI)
 //          XANO_META_TOKEN   Xano Metadata API token (expires — see README)
 // (After any `wrangler deploy`, re-run a `wrangler secret put` to re-bind.)
+//
+// AUTH SURFACE: REPORT_PW is the same value as the reports.myrxcard.com master
+// password, so report_pw, feed_pw with site "" and admin_pw all prove the
+// master. Every one of them goes through checkPassword(): one per-network
+// failure counter (in-memory, plus the ADMIN_RL rate-limit binding when bound)
+// checked before any PBKDF2, constant-time compares for the secret-backed
+// routes, and never a password value in a log line.
+//
+// Brand schema validation lives in ../brand-validate.mjs (shared with
+// build-clients.mjs and the tests); wrangler bundles the import on deploy.
+
+import { validateBrand, validateName, isPlainObject, BRAND_DOC_MAX } from "../brand-validate.mjs";
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "content-type" };
 const json = (obj, status = 200) =>
@@ -99,22 +127,123 @@ async function verifyReportPassword(slug, pw) {
   if (!pw || pw.length > 200) return false;
   const key = slug + "|" + pw, now = Date.now();
   if ((verifiedFeedPw.get(key) || 0) > now) return true;
-  const url = slug ? `${FEED_SITE}/${slug}/utilization.enc.json` : `${FEED_SITE}/config.enc.json`;
-  let blob;
-  try {
-    const r = await fetch(url, { cf: { cacheTtl: 300, cacheEverything: true } });
-    if (!r.ok) { console.log(`feed: ${url} -> HTTP ${r.status}`); return false; }
-    blob = await r.json();
-  } catch (e) { console.log(`feed: ${url} fetch failed: ${e && e.message}`); return false; }
+  // Partner sites: verify against the tiny /<slug>/gate.enc.json (a few bytes
+  // sealed with the same password by build-clients.mjs) — decrypting the
+  // multi-MB utilization.enc.json just to check a password cost ~1.1 s CPU on
+  // the biggest site and tripped the Worker limit on cold starts. Falls back to
+  // the utilization file for sites built before gate files existed.
+  const urls = slug ? [`${FEED_SITE}/${slug}/gate.enc.json`, `${FEED_SITE}/${slug}/utilization.enc.json`] : [`${FEED_SITE}/config.enc.json`];
+  let blob = null, url = urls[0];
+  for (url of urls) {
+    try {
+      const r = await fetch(url, { cf: { cacheTtl: 300, cacheEverything: true } });
+      if (r.status === 404 && urls.length > 1 && url !== urls[urls.length - 1]) continue;
+      if (!r.ok) { console.log(`feed: ${url} -> HTTP ${r.status}`); return false; }
+      blob = await r.json(); break;
+    } catch (e) { console.log(`feed: ${url} fetch failed: ${e && e.message}`); return false; }
+  }
   if (!blob || !blob.salt || !blob.iv || !blob.data) { console.log(`feed: ${url} -> not an encrypted blob`); return false; }
   try {
-    const b64 = (str) => Uint8Array.from(atob(str), (c) => c.charCodeAt(0));
+    // decode into a preallocated buffer: Uint8Array.from(str, fn) materialises a
+    // multi-million-element iterator for the big files and spikes memory
+    const b64 = (str) => { const bin = atob(str), out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; };
     const raw = pbkdf2Sha256_32(new TextEncoder().encode(pw), b64(blob.salt), 310000);
     const aesKey = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["decrypt"]);
     await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(blob.iv) }, aesKey, b64(blob.data));
   } catch (e) { console.log(`feed: verify failed: ${e && e.name}: ${e && e.message}`); return false; }
   verifiedFeedPw.set(key, now + 15 * 60 * 1000);
   return true;
+}
+// ---- reports.myrxcard.com admin auth ----
+// The master password is the one that decrypts the ROOT config.enc.json; the
+// slug is hard-coded to "" so a partner password (which decrypts its own
+// /<slug>/utilization.enc.json) can never pass as master. The 15-minute
+// success cache in verifyReportPassword applies here too.
+async function verifyMaster(pw) { return verifyReportPassword("", pw); }
+// ---- brute-force lockout, shared by every password-proving route ----
+// Checked BEFORE the ~190 ms PBKDF2 (or the secret compare): 5 failures within
+// 10 minutes lock the caller out for 10 minutes; a success clears the counter.
+// Keyed by NETWORK + scope, not bare IP: an IPv6 caller is collapsed to its
+// /64 (a single subscriber's allocation), so address rotation inside it buys
+// nothing. Scope "master" is shared by admin_pw, feed_pw with site "" and
+// report_pw — the three routes that prove the master; partner-page feed
+// guesses count under "site:<slug>". Per isolate; the ADMIN_RL binding (see
+// wrangler.toml) adds a limit that survives isolate churn.
+const authFails = new Map(); // netKey -> { n, first, until } (ms)
+const LOCK_MAX = 5, LOCK_WINDOW_MS = 10 * 60 * 1000, LOCK_FOR_MS = 10 * 60 * 1000, LOCK_MAP_MAX = 2000;
+function ipv6Prefix64(ip) { // "2001:db8::1" -> "2001:0db8:0000:0000::/64"
+  const [head, tail = ""] = ip.split("::");
+  const h = head ? head.split(":") : [], t = tail ? tail.split(":") : [];
+  const groups = ip.includes("::") ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t] : h;
+  return groups.slice(0, 4).map((g) => g.toLowerCase().padStart(4, "0")).join(":") + "::/64";
+}
+function netKey(req, scope) {
+  const ip = (req.headers.get("cf-connecting-ip") || "unknown").trim();
+  return (ip.includes(":") ? ipv6Prefix64(ip) : ip) + "|" + scope;
+}
+function lockoutSeconds(key) { // > 0 = locked, seconds remaining
+  const e = authFails.get(key);
+  if (!e) return 0;
+  const now = Date.now();
+  if (e.until > now) return Math.ceil((e.until - now) / 1000);
+  if (e.until || now - e.first > LOCK_WINDOW_MS) authFails.delete(key); // lock expired / window rolled over
+  return 0;
+}
+function lockoutFail(key) {
+  const now = Date.now();
+  let e = authFails.get(key);
+  if (!e || now - e.first > LOCK_WINDOW_MS) e = { n: 0, first: now, until: 0 };
+  e.n++;
+  if (e.n >= LOCK_MAX) e.until = now + LOCK_FOR_MS;
+  authFails.set(key, e);
+  if (authFails.size > LOCK_MAP_MAX) lockoutEvict(now);
+}
+function lockoutReset(key) { authFails.delete(key); }
+// Memory bound WITHOUT clear(): expired entries go first, then the oldest
+// unlocked ones (Map keeps insertion order). An active lock is only dropped
+// under a pathological pile-up of live locks, never by a flood of new keys.
+function lockoutEvict(now) {
+  for (const [k, e] of authFails) if (e.until ? e.until < now : now - e.first > LOCK_WINDOW_MS) authFails.delete(k);
+  if (authFails.size <= LOCK_MAP_MAX) return;
+  let drop = 500;
+  for (const [k, e] of authFails) { if (drop <= 0) break; if (e.until <= now) { authFails.delete(k); drop--; } }
+  if (authFails.size <= LOCK_MAP_MAX * 2) return;
+  drop = 500;
+  for (const k of authFails.keys()) { if (drop-- <= 0) break; authFails.delete(k); }
+}
+// One gate for every route that proves a password: lockout first, then the
+// optional Rate Limiting binding (per network, counts attempts across
+// isolates), then `verify`. Returns a Response to send on refusal, or null
+// when the caller is authenticated. Logs never carry the password.
+async function checkPassword(req, env, scope, verify) {
+  const key = netKey(req, scope);
+  const wait = lockoutSeconds(key);
+  if (wait) return json({ error: "locked", retryAfter: wait }, 429);
+  if (env && env.ADMIN_RL && typeof env.ADMIN_RL.limit === "function") {
+    try {
+      const { success } = await env.ADMIN_RL.limit({ key });
+      if (!success) { console.log(`auth: rate limited (${key})`); return json({ error: "locked", retryAfter: 60 }, 429); }
+    } catch (e) { console.log(`auth: rate limiter unavailable: ${e && e.message}`); } // in-memory lockout still applies
+  }
+  if (!(await verify())) {
+    lockoutFail(key);
+    console.log(`auth: bad password (${key})`); // never the value
+    return json({ error: "bad password" }, 403);
+  }
+  lockoutReset(key);
+  return null;
+}
+// Constant-time string equality for the secret-backed routes (REPORT_PW,
+// CLIENT_PWS, SYNC_SECRET): both sides are hashed so the comparison never
+// depends on where the first differing byte is, or on the lengths.
+async function safeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string" || !a || !b) return false;
+  const enc = new TextEncoder();
+  const [ha, hb] = await Promise.all([crypto.subtle.digest("SHA-256", enc.encode(a)), crypto.subtle.digest("SHA-256", enc.encode(b))]);
+  const x = new Uint8Array(ha), y = new Uint8Array(hb);
+  let d = 0;
+  for (let i = 0; i < 32; i++) d |= x[i] ^ y[i];
+  return d === 0;
 }
 async function hmacHex16(secret, message) {
   if (!secret || !message) return "";
@@ -233,12 +362,146 @@ function validateRow(row) {
   return null;
 }
 
+// validateBrand / validateName: see ../brand-validate.mjs (imported above).
+
+// ---- admin KV keys (namespace is shared — never list() without the prefix) ----
+const BRAND_KEY_PREFIX = "myrx:brand:";
+const PWS_KEY = "myrx:pws";
+const ADMIN_SLUG_RE = /^[a-z0-9-]{1,40}$/;
+const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+const MAX_ADMIN_BODY_BYTES = 1000000;
+
+// Read and parse the JSON body under a hard byte cap that does not trust the
+// Content-Length header (absent on chunked uploads, unparseable if forged):
+// the header is a fast path to a 413, the stream count is the real limit.
+// Returns { body } or { error: Response }.
+async function readJsonBody(req, max) {
+  const bad = (msg, status) => ({ error: json({ error: msg }, status) });
+  const cl = req.headers.get("content-length");
+  if (cl !== null) {
+    const n = Number(cl);
+    if (!Number.isFinite(n) || n < 0) return bad("bad json", 400);
+    if (n > max) return bad("too large", 413);
+  }
+  if (!req.body) return bad("bad json", 400);
+  const chunks = [];
+  let n = 0;
+  try {
+    const reader = req.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      n += value.byteLength;
+      if (n > max) { await reader.cancel().catch(() => {}); return bad("too large", 413); }
+      chunks.push(value);
+    }
+  } catch { return bad("bad json", 400); }
+  const buf = new Uint8Array(n);
+  let off = 0;
+  for (const c of chunks) { buf.set(c, off); off += c.byteLength; }
+  let body;
+  try { body = JSON.parse(new TextDecoder().decode(buf)); } catch { return bad("bad json", 400); }
+  if (!body || typeof body !== "object" || Array.isArray(body)) return bad("bad json", 400);
+  return { body };
+}
+
 export default {
   async fetch(req, env) {
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
     if (req.method !== "POST") return json({ error: "POST only" }, 405);
-    let body;
-    try { body = await req.json(); } catch { return json({ error: "bad json" }, 400); }
+    // size cap enforced while reading: nothing legitimate here is near 1 MB
+    // (the largest is a brand.put with two 200 KB logos)
+    const parsed = await readJsonBody(req, MAX_ADMIN_BODY_BYTES);
+    if (parsed.error) return parsed.error;
+    const body = parsed.body;
+    // ---- reports.myrxcard.com admin routes ----
+    // Kept ABOVE the Xano guard: partner pages read their live brand from here
+    // on every load and must keep working when the Xano token is missing.
+    // PUBLIC: a partner page fetching its live brand. Only that slug's doc —
+    // never passwords, never other slugs.
+    if (body.brand_get !== undefined) {
+      const slug = String(body.brand_get || "").toLowerCase();
+      if (!ADMIN_SLUG_RE.test(slug)) return json({ error: "bad site" }, 400);
+      if (!env.AAPS_DATA) return json({ error: "KV not bound" }, 500);
+      const doc = await env.AAPS_DATA.get(BRAND_KEY_PREFIX + slug, { type: "json", cacheTtl: 60 });
+      if (!doc) return json({ ok: true, found: false, doc: null });
+      return json({ ok: true, found: true, doc });
+    }
+    if (body.admin_pw !== undefined) {
+      const denied = await checkPassword(req, env, "master", () => verifyMaster(String(body.admin_pw || "")));
+      if (denied) return denied;
+      const action = String(body.action || "");
+      if (action === "ping") return json({ ok: true, kv: !!env.AAPS_DATA });
+      if (!env.AAPS_DATA) return json({ error: "KV not bound" }, 500);
+      if (action === "brands.list") {
+        const lst = await env.AAPS_DATA.list({ prefix: BRAND_KEY_PREFIX, limit: 50 });
+        const docs = await Promise.all(lst.keys.map((k) => env.AAPS_DATA.get(k.name, { type: "json" })));
+        const clients = docs.filter((d) => isPlainObject(d) && typeof d.slug === "string");
+        clients.sort((a, b) => String(a.name || a.slug).localeCompare(String(b.name || b.slug)));
+        return json({ ok: true, clients });
+      }
+      if (action === "brand.put") {
+        const slug = String(body.slug || "").toLowerCase();
+        if (!ADMIN_SLUG_RE.test(slug)) return json({ error: "bad slug" }, 400);
+        // name follows the same text rules as brand strings, and must be present
+        const nm = validateName(body.name);
+        if (nm.error) return json({ error: `name: ${nm.error}`, path: "name" }, 422);
+        const name = nm.name;
+        const brand = body.brand;
+        if (brand === undefined) return json({ error: "brand: must be an object or null", path: "brand" }, 422);
+        if (brand !== null) {
+          if (!isPlainObject(brand)) return json({ error: "brand: must be an object or null", path: "brand" }, 422);
+          if (JSON.stringify(brand).length > BRAND_DOC_MAX) return json({ error: "too large", path: "brand" }, 413);
+          const err = validateBrand(brand);
+          if (err) {
+            if (err.status === 413) return json({ error: "too large", path: err.path }, 413);
+            return json({ error: `${err.path}: ${err.reason}`, path: err.path }, err.status);
+          }
+          brand.name = name;
+        }
+        let existing = null;
+        try { existing = await env.AAPS_DATA.get(BRAND_KEY_PREFIX + slug, { type: "json" }); } catch {}
+        if (!isPlainObject(existing)) existing = null;
+        // type / demo / updatedFrom: the seed script (master-gated like every
+        // caller here) sends them so a seeded doc reads as a seed and a demo
+        // client keeps its DEMO badge; the admin page never sends them, so an
+        // admin save preserves the existing flags and stamps "admin".
+        const doc = {
+          v: 1, slug, name,
+          type: (typeof body.type === "string" && /^[a-z]{1,20}$/.test(body.type) && body.type)
+            || (existing && typeof existing.type === "string" && existing.type) || "pharmacy",
+          demo: typeof body.demo === "boolean" ? body.demo : (existing ? !!existing.demo : false),
+          brand,
+          updatedAt: new Date().toISOString(),
+          updatedFrom: body.updatedFrom === "seed" ? "seed" : "admin",
+        };
+        await env.AAPS_DATA.put(BRAND_KEY_PREFIX + slug, JSON.stringify(doc));
+        return json({ ok: true, doc });
+      }
+      // The vault is ciphertext sealed by the admin page / seed script with the
+      // master password (encryptJSON: PBKDF2 310k + AES-GCM). Stored and
+      // returned as-is; the worker never sees a partner password.
+      if (action === "pws.get") {
+        const vault = await env.AAPS_DATA.get(PWS_KEY, { type: "json" });
+        if (!isPlainObject(vault) || !isPlainObject(vault.enc)) return json({ error: "not seeded" }, 404);
+        return json({ ok: true, enc: vault.enc, updatedAt: vault.updatedAt || null });
+      }
+      if (action === "pws.put") {
+        const enc = body.enc;
+        if (!isPlainObject(enc)) return json({ error: "enc: must be {salt, iv, data}", path: "enc" }, 422);
+        for (const k of Object.keys(enc)) if (!["salt", "iv", "data"].includes(k)) return json({ error: `enc.${k}: unknown key`, path: `enc.${k}` }, 422);
+        let total = 0;
+        for (const k of ["salt", "iv", "data"]) {
+          if (typeof enc[k] !== "string" || !B64_RE.test(enc[k])) return json({ error: `enc.${k}: must be a base64 string`, path: `enc.${k}` }, 422);
+          total += enc[k].length;
+        }
+        if (total > 100000) return json({ error: "too large", path: "enc" }, 413);
+        const updatedAt = new Date().toISOString();
+        await env.AAPS_DATA.put(PWS_KEY, JSON.stringify({ v: 1, updatedAt, enc: { salt: enc.salt, iv: enc.iv, data: enc.data } }));
+        return json({ ok: true, updatedAt });
+      }
+      return json({ error: "bad action" }, 400);
+    }
     if (!env.XANO_META_TOKEN || !env.XANO_CONTENT_URL) return json({ error: "Xano connection not configured" }, 500);
     // Live website-search feed for reports.myrxcard.com (root dashboard and the
     // /<slug>/ partner pages). Replaces the public Xano GET on search_events,
@@ -251,7 +514,9 @@ export default {
     if (body.feed_pw !== undefined) {
       const slug = String(body.site || "").toLowerCase();
       if (!/^[a-z0-9-]{0,40}$/.test(slug)) return json({ error: "bad site" }, 400);
-      if (!(await verifyReportPassword(slug, String(body.feed_pw || "")))) return json({ error: "bad password" }, 403);
+      // site "" proves the MASTER (same check as admin_pw) — same lockout counter
+      const denied = await checkPassword(req, env, slug ? "site:" + slug : "master", () => verifyReportPassword(slug, String(body.feed_pw || "")));
+      if (denied) return denied;
       // Find the search_events table by NAME through the Metadata API. Never
       // by id: XANO_EVENTS_URL pointed at the Avalon process-events table, and
       // rows from the wrong table rendered on the dashboard as blank searches.
@@ -291,15 +556,20 @@ export default {
     // white-labeled server-side — the browser never sees other clients, fees,
     // supplier pricing, or real sourcing names.
     if (body.report_pw !== undefined) {
+      // REPORT_PW is the reports.myrxcard.com master password, so this route
+      // is a master oracle too: same lockout scope, constant-time compares.
       let clientMeta = null;
-      if (!env.REPORT_PW || body.report_pw !== env.REPORT_PW) {
+      const denied = await checkPassword(req, env, "master", async () => {
+        const given = typeof body.report_pw === "string" ? body.report_pw : "";
+        if (await safeEqual(given, env.REPORT_PW)) return true;
         let map = {};
         try { map = JSON.parse(env.CLIENT_PWS || "{}"); } catch {}
         for (const [slug, c] of Object.entries(map)) {
-          if (c && c.pw && body.report_pw === c.pw) { clientMeta = { slug, label: c.label || slug }; break; }
+          if (c && typeof c.pw === "string" && (await safeEqual(given, c.pw))) { clientMeta = { slug, label: c.label || slug }; return true; }
         }
-        if (!clientMeta) return json({ error: "bad password" }, 403);
-      }
+        return false;
+      });
+      if (denied) return denied;
       // AAPS supplier pricing snapshot for the internal /nash/ dashboard.
       // MASTER password only — supplier prices never ship to client views.
       if (body.dataset === "pricing") {
@@ -339,7 +609,7 @@ export default {
       for (const [n, p] of Object.entries(profiles)) if (Number.isInteger(p.covered_lives)) coveredLives[n] = p.covered_lives;
       return json({ ok: true, generatedAt: new Date().toISOString(), cases: clean, covered_lives: coveredLives, account_profiles: profiles });
     }
-    if (!env.SYNC_SECRET || body.secret !== env.SYNC_SECRET) return json({ error: "bad secret" }, 403);
+    if (!(await safeEqual(typeof body.secret === "string" ? body.secret : "", env.SYNC_SECRET))) return json({ error: "bad secret" }, 403);
     // account-profile push (Accounts Deluge function):
     //   {secret, accounts:{"Client":{covered_lives:300, aa_client:"yes", status:"Active"}}}
     // Deliberately tiny: three whitelisted keys, nothing else about the account.

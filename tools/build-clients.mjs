@@ -13,7 +13,27 @@
 // NEVER published). Missing ones are generated (3 words + 2 digits, like the
 // main gate password). Re-running keeps existing passwords stable.
 //
-//   node build-clients.mjs "<All ... claims.xlsx>" [more.xlsx ...] [--push]
+//   node build-clients.mjs "<All ... claims.xlsx>" [more.xlsx ...] [--push] [--no-kv]
+//   node build-clients.mjs --html-only [--push] [--no-kv]
+//
+// --html-only  rebuild every <slug>/index.html from the root index.html + marker
+//              without touching claims, utilization.enc.json or passwords (no
+//              workbook needed). The demo block (nameMap) is carried over from
+//              the existing copy since it can only be computed from claims.
+// --no-kv      skip the KV brand lookup and bake the code-default brands.
+//
+// Brands: before markers are built, the current "myrx:brand:<slug>" doc is
+// fetched from the sync worker (public brand_get route) for every client. A
+// found doc's name/brand override the code defaults in clients.config.mjs, so a
+// rebuild never reverts an edit made from the root dashboard's Clients tab.
+// Every KV doc is re-validated here (brand-validate.mjs, the worker's own
+// rules) before it is baked into a committed, published index.html — the KV
+// namespace is shared and writable outside the worker, so nothing from it is
+// trusted on the way into git. If any lookup fails OR fails validation the
+// build still runs on code defaults, but --push is refused (stale or bad
+// brands must not be published) unless --no-kv was passed.
+//
+// The roster (CLIENTS) lives in clients.config.mjs, shared with sync-admin-kv.mjs.
 //
 // Input files need the "Pharmacy Group" column (the annual "All MyRxCard …"
 // export has it; per-quarter exports without it are skipped with a warning).
@@ -26,73 +46,27 @@ import { randomInt } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { aggregateRows } from "./aggregate.mjs";
 import { encryptJSON, REPO_ROOT } from "./store.mjs";
+import { CLIENTS, codeBrand } from "./clients.config.mjs";
+import { validateBrand, validateName, isPlainObject } from "./brand-validate.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SECRETS_PATH = join(__dirname, "clients.secrets.json");
-
-// slug -> which "Pharmacy Group" values (uppercased) belong to the client
-const CLIENTS = [
-  { slug: "uwhc", name: "UW Health (UWHC)", type: "pharmacy", match: (g) => g === "UWHC PHARMACIES",
-    brand: {
-      logo: "brands/uwhc.svg", logoHeight: 26, tagline: "Pharmacy services report",
-      colors: { primary: "#c5050c", secondary: "#9b0407", tertiary: "#d9484d", accent: "#065dba", accentBright: "#2b7ddb",
-        dark: { primary: "#ff7075", secondary: "#ff9094", tertiary: "#d9484d", accent: "#6ea9ff", accentBright: "#8fbcff" } },
-      fonts: { google: "family=Public+Sans:wght@400;500;600;700", body: "'Public Sans', 'Helvetica Neue', Arial, sans-serif", heading: "'Public Sans', 'Helvetica Neue', Arial, sans-serif" },
-      headings: { transform: "uppercase", weight: 700, letterSpacing: "0.04em", gate: "UW Health", menuLabel: "REPORTS",
-        tabs: { search: "Website searches", util: "Claims utilization" }, titles: { search: "Website searches", util: "Claims utilization" } },
-      layout: { header: "view-first", radius: "6px", density: "compact" }, poweredBy: true } },
-  { slug: "marshfield", name: "Marshfield Clinic", type: "pharmacy", match: (g) => g === "MARSHFIELD PHARMACIES" },
-  { slug: "brookshire", name: "Brookshire Brothers", type: "pharmacy", match: (g) => g === "BROOKSHIRE BROTHERS PHARMACY" },
-  { slug: "rrh", name: "Rochester Regional Health", type: "pharmacy", match: (g) => g.startsWith("RRH"),
-    brand: {
-      logo: "brands/rrh.svg", logoDark: "brands/rrh-dark.svg", logoHeight: 30, tagline: "Pharmacy savings report",
-      colors: { primary: "#0077c8", secondary: "#005b99", tertiary: "#3a97d8", accent: "#e8a317", accentBright: "#f7b733",
-        dark: { primary: "#5fb2f5", secondary: "#8ac8ff", tertiary: "#3a97d8", accent: "#f0b43c", accentBright: "#ffc95e" } },
-      fonts: { google: "family=Source+Sans+3:wght@400;500;600;700", body: "'Source Sans 3', 'Helvetica Neue', Arial, sans-serif", heading: "'Source Sans 3', 'Helvetica Neue', Arial, sans-serif" },
-      headings: { weight: 700, letterSpacing: "-0.01em", gate: "Rochester Regional Health", menuLabel: "REPORTS",
-        tabs: { search: "Website searches", util: "Claims utilization" }, titles: { search: "Website searches", util: "Claims utilization" } },
-      layout: { header: "title-first", radius: "8px", density: "comfortable" }, poweredBy: true } },
-  { slug: "sunlife", name: "Sun Life Pharmacies", type: "pharmacy", match: (g) => g === "SUN LIFE PHARMACIES" },
-  { slug: "altscripts", name: "AltScripts Specialty Pharmacy", type: "pharmacy", match: (g) => g === "ALTSCRIPTS SPECIALTY PHARMACY" },
-  { slug: "ryan", name: "Ryan Pharmacy", type: "pharmacy", match: (g) => g === "RYAN PHARMACY" },
-  { slug: "candc", name: "C & C Pharmacy", type: "pharmacy", match: (g) => g === "C & C PHARMACY" },
-  { slug: "communitymarkets", name: "Community Markets", type: "pharmacy", match: (g) => g === "COMMUNITY MARKETS" },
-  { slug: "greatscot", name: "Great Scot Pharmacies", type: "pharmacy", match: (g) => g === "GREAT SCOT PHARMACIES" },
-  // ---- DEMO sites: a prospect sees the full report on anonymized, scaled claims
-  // cloned from an existing partner's slice (pharmacies renamed and relocated,
-  // NPIs replaced, dollars scaled). `from` names the source Pharmacy Group; the
-  // page relabels the source microsite's search activity the same way.
-  { slug: "aurora", name: "Aurora Health Care", type: "pharmacy", match: (g) => g === "UWHC PHARMACIES",
-    demo: { from: "uwhc", scale: 0.82, groupName: "AURORA PHARMACY", note: "Demo data: anonymized, scaled sample. Not Aurora Health Care's claims.",
-      locations: [
-        ["Aurora Pharmacy - Saint Luke Medical Center", "2900 W Oklahoma Ave", "Milwaukee", "WI", "53215"],
-        ["Aurora Pharmacy - Sinai Medical Center", "945 N 12th St", "Milwaukee", "WI", "53233"],
-        ["Aurora Pharmacy - West Allis Medical Center", "8901 W Lincoln Ave", "West Allis", "WI", "53227"],
-        ["Aurora Pharmacy - Grafton Medical Center", "975 Port Washington Rd", "Grafton", "WI", "53024"],
-        ["Aurora Pharmacy - Summit Medical Center", "36500 Aurora Dr", "Summit", "WI", "53066"],
-        ["Aurora Pharmacy - Kenosha Medical Center", "10400 75th St", "Kenosha", "WI", "53142"],
-        ["Aurora Pharmacy - BayCare Medical Center", "2845 Greenbrier Rd", "Green Bay", "WI", "54311"],
-        ["Aurora Pharmacy - Sheboygan Memorial", "2629 N 7th St", "Sheboygan", "WI", "53083"],
-        ["Aurora Pharmacy - Oshkosh Medical Center", "855 N Westhaven Dr", "Oshkosh", "WI", "54904"],
-        ["Aurora Pharmacy - Burlington Memorial", "252 McHenry St", "Burlington", "WI", "53105"],
-        ["Aurora Pharmacy - Two Rivers Medical Center", "5000 Memorial Dr", "Two Rivers", "WI", "54241"],
-        ["Aurora Pharmacy - Hartford Medical Center", "1032 E Sumner St", "Hartford", "WI", "53027"],
-        ["Aurora Pharmacy - Mount Pleasant", "10200 Washington Ave", "Mount Pleasant", "WI", "53406"],
-        ["Aurora Pharmacy - Waukesha Health Center", "1101 Delafield St", "Waukesha", "WI", "53188"],
-        ["Aurora Pharmacy - Lakeland Medical Center", "W3985 County Rd NN", "Elkhorn", "WI", "53121"],
-        ["Aurora Pharmacy - Marinette", "1505 Main St", "Marinette", "WI", "54143"],
-        ["Aurora Pharmacy - Kaukauna", "2600 Lawe St", "Kaukauna", "WI", "54130"],
-        ["Aurora Pharmacy - Fond du Lac", "210 Wisconsin American Dr", "Fond du Lac", "WI", "54937"],
-      ] },
-    brand: {
-      logo: "brands/aurora.png", logoDark: "brands/aurora-footer.webp", logoHeight: 22, tagline: "Pharmacy performance demo",
-      colors: { primary: "#00805f", secondary: "#005f47", tertiary: "#2ea083", accent: "#814fa0", accentBright: "#9d6bc0",
-        dark: { primary: "#3fbf95", secondary: "#6fd6b3", tertiary: "#2ea083", accent: "#b48ad4", accentBright: "#c9a6e3" } },
-      fonts: { google: "family=Montserrat:wght@400;500;600;700", body: "'Montserrat', 'Helvetica Neue', Arial, sans-serif", heading: "'Montserrat', 'Helvetica Neue', Arial, sans-serif" },
-      headings: { weight: 700, letterSpacing: "-0.01em", gate: "Aurora Health Care", menuLabel: "REPORTS",
-        tabs: { search: "Website searches", util: "Claims utilization" }, titles: { search: "Website searches", util: "Claims utilization" } },
-      layout: { header: "title-first", radius: "10px", density: "comfortable" }, poweredBy: true } },
-];
+const SYNC_API = process.env.SYNC_API || "https://myrxcard-sync.trevorfallbacher.workers.dev";
+const KV_TIMEOUT_MS = 5000;
+// Only public brand_get bodies go here, but the endpoint is held to the same
+// rule as sync-admin-kv.mjs: https, or a local dev worker, and an override
+// is announced so it is never silently in effect.
+{
+  let u = null;
+  try { u = new URL(SYNC_API); } catch {}
+  if (!u || (u.protocol !== "https:" && !/^(localhost|127\.0\.0\.1|\[::1\])$/.test(u.hostname))) {
+    console.error(`SYNC_API must be an https URL (or localhost for a dev worker): ${SYNC_API}`);
+    process.exit(1);
+  }
+  if (process.env.SYNC_API) console.log(`Using worker ${u.origin} (SYNC_API override)`);
+}
+// terminal-safe rendering of any name that came from KV
+const printable = (s) => String(s ?? "").replace(/[\x00-\x1f\x7f]/g, "");
 
 // Rewrite a source partner's claim rows into a demo partner's: every distinct
 // pharmacy becomes one of the demo locations (stable order), NPIs are replaced
@@ -143,88 +117,205 @@ function readWorkbook(path) {
   return bestRows.map((r) => { const o = {}; for (const k in r) o[norm(k)] = r[k]; return o; });
 }
 
+// ---- KV brand lookup (public brand_get route on the sync worker) ----
+// Returns Map slug -> { found:true, doc } | { found:false } | { failed:true }.
+// A doc that fails validation counts as failed: it is neither baked nor
+// pushed over (see kvDocProblem).
+async function fetchKvBrand(slug) {
+  const res = await fetch(SYNC_API, {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ brand_get: slug }),
+    signal: AbortSignal.timeout(KV_TIMEOUT_MS),
+  });
+  const out = await res.json().catch(() => null);
+  if (!res.ok || !out || out.ok !== true) throw new Error((out && out.error) || `HTTP ${res.status}`);
+  if (!(out.found && isPlainObject(out.doc))) return { found: false };
+  const problem = kvDocProblem(out.doc);
+  if (problem) return { failed: true, invalid: problem };
+  return { found: true, doc: out.doc };
+}
+
+// The same checks the worker applies on brand.put, applied again on the way
+// out of KV: name text rules, brand schema (validateBrand also normalizes in
+// place — lowercased colors, stripped control characters — so what is baked
+// is the normalized form). Returns a "path: reason" string or null.
+function kvDocProblem(doc) {
+  const nm = validateName(doc.name);
+  if (nm.error) return `name: ${nm.error}`;
+  doc.name = nm.name;
+  if (doc.brand === null || doc.brand === undefined) return null;
+  if (!isPlainObject(doc.brand)) return "brand: must be an object or null";
+  const e = validateBrand(doc.brand);
+  return e ? `${e.path}: ${e.reason}` : null;
+}
+
+async function fetchKvBrands(clients) {
+  const results = new Map();
+  await Promise.all(clients.map(async (client) => {
+    try {
+      const r = await fetchKvBrand(client.slug);
+      if (r.invalid) console.warn(`! KV brand for ${client.slug} failed validation (${printable(r.invalid)}) — using code default`);
+      results.set(client.slug, r);
+    } catch (e) {
+      console.warn(`! KV brand for ${client.slug} unavailable — using code default (${printable(e && e.message ? e.message : e)})`);
+      results.set(client.slug, { failed: true });
+    }
+  }));
+  return results;
+}
+
+// Name + brand block for a client's marker: the KV doc when one exists
+// (brand null => stock look => no brand block), else the code default.
+function resolveBrand(client, kv) {
+  if (kv && kv.found) {
+    const name = typeof kv.doc.name === "string" && kv.doc.name ? kv.doc.name : client.name;
+    const brand = kv.doc.brand && typeof kv.doc.brand === "object" ? { ...kv.doc.brand, name } : undefined;
+    return { name, brand, source: kv.doc.brand ? "KV brand" : "KV stock" };
+  }
+  return { name: client.name, brand: codeBrand(client), source: kv && kv.failed ? "code default (KV unavailable)" : "code default" };
+}
+
+// "<" is escaped so admin-edited text (tagline, headings…) can never close
+// the injected <script>, whatever validation upstream did.
+function markerFor({ slug, name, type, brand, demo }) {
+  const json = JSON.stringify({ slug, name, type: type || "pharmacy", ...(brand ? { brand } : {}), ...(demo ? { demo } : {}) })
+    .replace(/</g, "\\u003c");
+  return `<script>window.CLIENT_SITE = ${json};</script>`;
+}
+
+// The demo block from an already-built copy (nameMap is derived from claims
+// rows, so --html-only has to carry it over rather than recompute it).
+function existingMarker(slug) {
+  const path = join(REPO_ROOT, slug, "index.html");
+  if (!existsSync(path)) return null;
+  const m = readFileSync(path, "utf8").match(/<script>window\.CLIENT_SITE = (\{.*?\});<\/script>/);
+  if (!m) return null;
+  try { return JSON.parse(m[1]); } catch { return null; }
+}
+
 const args = process.argv.slice(2);
 const doPush = args.includes("--push");
+const noKv = args.includes("--no-kv");
+const htmlOnly = args.includes("--html-only");
 const files = args.filter((a) => !a.startsWith("--"));
-if (!files.length) {
-  console.error('Usage: node build-clients.mjs "<All … claims.xlsx>" [more.xlsx ...] [--push]');
+if (!files.length && !htmlOnly) {
+  console.error('Usage: node build-clients.mjs "<All … claims.xlsx>" [more.xlsx ...] [--push] [--no-kv]\n       node build-clients.mjs --html-only [--push] [--no-kv]');
   process.exit(1);
 }
+if (htmlOnly && files.length) console.warn("! --html-only ignores workbook arguments");
 
-const secrets = loadSecrets();
-const stores = new Map(); // slug -> {generatedAt, latest, periods}
-
-for (const file of files) {
-  const rows = readWorkbook(file);
-  if (!rows.length || !("Pharmacy Group" in rows[0])) {
-    console.warn(`! ${file.split(/[\\/]/).pop()} has no "Pharmacy Group" column — skipped`);
-    continue;
-  }
-  const label = file.split(/[\\/]/).pop();
-  const slugOf = label.toLowerCase().replace(/\.xlsx$/, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
-  for (const client of CLIENTS) {
-    let subset = rows.filter((r) => client.match(norm(r["Pharmacy Group"]).toUpperCase()));
-    if (!subset.length) continue;
-    if (client.demo) { const d = demoRows(subset, client.demo); subset = d.rows; client.demo.nameMap = { ...(client.demo.nameMap || {}), ...d.nameMap }; }
-    const period = aggregateRows(subset, label);
-    // clients see utilization only: strip Avalon's fee measures entirely
-    // (zero placeholders hold slots 13-14 so member/savings/qty stay at 15-18)
-    delete period.money.adminFees;
-    period.facts = period.facts.map((f) => [...f.slice(0, 13), 0, 0, ...f.slice(15, 19)]);
-    period.client = client.name;
-    const key = `${period.periodKey || "import"}~${slugOf}`;
-    period.periodKey = key;
-    period.processedAt = new Date().toISOString();
-    const store = stores.get(client.slug) || { generatedAt: null, latest: null, periods: {} };
-    store.periods[key] = period;
-    stores.set(client.slug, store);
+// KV brands first: cheap, and a --push with stale brands aborts before any work.
+let kvBrands = new Map();
+if (noKv) {
+  console.log("KV brand lookup skipped (--no-kv) — baking code-default brands.");
+} else {
+  kvBrands = await fetchKvBrands(CLIENTS);
+  const failed = [...kvBrands.entries()].filter(([, v]) => v.failed).map(([s]) => s);
+  const found = [...kvBrands.values()].filter((v) => v.found).length;
+  console.log(`KV brands: ${found} found, ${CLIENTS.length - found - failed.length} unset, ${failed.length} unavailable.`);
+  if (doPush && failed.length) {
+    console.error(`Refusing to push: KV brand lookup failed or returned an invalid doc for ${failed.join(", ")} — a push now could revert admin edits or publish bad data.\n` +
+      "Retry once the worker is reachable (or fix the doc from the Clients tab), run without --push, or pass --no-kv to knowingly bake code defaults.");
+    process.exit(1);
   }
 }
-
-if (!stores.size) { console.error("No client rows found in the given files."); process.exit(1); }
 
 const rootIndex = readFileSync(join(REPO_ROOT, "index.html"), "utf8");
 const built = [];
-for (const client of CLIENTS) {
-  const store = stores.get(client.slug);
-  if (!store) continue;
-  store.latest = Object.keys(store.periods).sort().pop();
-  store.generatedAt = new Date().toISOString();
-  if (!secrets[client.slug]) secrets[client.slug] = genPassword();
 
-  const dir = join(REPO_ROOT, client.slug);
-  mkdirSync(dir, { recursive: true });
-  const enc = await encryptJSON(store, secrets[client.slug]);
-  writeFileSync(join(dir, "utilization.enc.json"), JSON.stringify(enc) + "\n");
-  // brand block: logos are inlined as data URIs so the page needs no extra assets
-  const inlineImg = (rel) => {
-    if (!rel) return undefined;
-    const buf = readFileSync(join(__dirname, rel));
-    const mime = rel.endsWith(".svg") ? "image/svg+xml" : rel.endsWith(".png") ? "image/png" : rel.endsWith(".webp") ? "image/webp" : "image/jpeg";
-    return `data:${mime};base64,${buf.toString("base64")}`;
-  };
-  const brand = client.brand ? { ...client.brand, name: client.name, logo: inlineImg(client.brand.logo), logoDark: inlineImg(client.brand.logoDark) } : undefined;
-  const demo = client.demo ? { from: client.demo.from, note: client.demo.note, nameMap: client.demo.nameMap || {} } : undefined;
-  const marker = `<script>window.CLIENT_SITE = ${JSON.stringify({ slug: client.slug, name: client.name, type: client.type || "pharmacy", ...(brand ? { brand } : {}), ...(demo ? { demo } : {}) })};</script>`;
-  writeFileSync(join(dir, "index.html"), rootIndex.replace("<body>", "<body>\n" + marker));
+if (htmlOnly) {
+  const secrets = loadSecrets(); // needed for the gate files; passwords are never regenerated here
+  for (const client of CLIENTS) {
+    const dir = join(REPO_ROOT, client.slug);
+    if (!existsSync(join(dir, "utilization.enc.json"))) { console.warn(`! /${client.slug}/ has no utilization.enc.json yet — skipped (build it from claims first)`); continue; }
+    // (re)write the tiny gate file whenever the password is known, so sites built
+    // before gate files existed pick one up on an html-only rebuild
+    if (secrets[client.slug]) writeFileSync(join(dir, "gate.enc.json"), JSON.stringify(await encryptJSON({ v: 1, slug: client.slug, purpose: "gate" }, secrets[client.slug])) + "\n");
+    const prev = existingMarker(client.slug);
+    let demo;
+    if (client.demo) {
+      if (prev && prev.demo) demo = prev.demo;
+      else { demo = { from: client.demo.from, note: client.demo.note, nameMap: {} }; console.warn(`! /${client.slug}/ demo nameMap not found in the existing copy — searches will not be relabeled until a claims rebuild`); }
+    }
+    const { name, brand, source } = resolveBrand(client, kvBrands.get(client.slug));
+    const marker = markerFor({ slug: client.slug, name, type: client.type, brand, demo });
+    writeFileSync(join(dir, "index.html"), rootIndex.replace("<body>", "<body>\n" + marker));
+    built.push(client.slug);
+    console.log(`✓ /${client.slug}/  ${printable(name)} — index.html rebuilt (${brand ? "branded" : "stock look"}, ${source})`);
+  }
+  if (!built.length) { console.error("No client folders to rebuild."); process.exit(1); }
+} else {
+  const secrets = loadSecrets();
+  const stores = new Map(); // slug -> {generatedAt, latest, periods}
 
-  const p = store.periods[store.latest];
-  built.push(client.slug);
-  console.log(`✓ /${client.slug}/  ${client.name} — ${Object.keys(store.periods).length} period(s), latest ${p.periodLabel}, ` +
-    `${p.claims.paid.toLocaleString()} paid claims, ${p.pharmacies.length} pharmacies`);
+  for (const file of files) {
+    const rows = readWorkbook(file);
+    if (!rows.length || !("Pharmacy Group" in rows[0])) {
+      console.warn(`! ${file.split(/[\\/]/).pop()} has no "Pharmacy Group" column — skipped`);
+      continue;
+    }
+    const label = file.split(/[\\/]/).pop();
+    const slugOf = label.toLowerCase().replace(/\.xlsx$/, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+    for (const client of CLIENTS) {
+      let subset = rows.filter((r) => client.match(norm(r["Pharmacy Group"]).toUpperCase()));
+      if (!subset.length) continue;
+      if (client.demo) { const d = demoRows(subset, client.demo); subset = d.rows; client.demo.nameMap = { ...(client.demo.nameMap || {}), ...d.nameMap }; }
+      const period = aggregateRows(subset, label);
+      // clients see utilization only: strip Avalon's fee measures entirely
+      // (zero placeholders hold slots 13-14 so member/savings/qty stay at 15-18)
+      delete period.money.adminFees;
+      period.facts = period.facts.map((f) => [...f.slice(0, 13), 0, 0, ...f.slice(15, 19)]);
+      period.client = client.name;
+      const key = `${period.periodKey || "import"}~${slugOf}`;
+      period.periodKey = key;
+      period.processedAt = new Date().toISOString();
+      const store = stores.get(client.slug) || { generatedAt: null, latest: null, periods: {} };
+      store.periods[key] = period;
+      stores.set(client.slug, store);
+    }
+  }
+
+  if (!stores.size) { console.error("No client rows found in the given files."); process.exit(1); }
+
+  for (const client of CLIENTS) {
+    const store = stores.get(client.slug);
+    if (!store) continue;
+    store.latest = Object.keys(store.periods).sort().pop();
+    store.generatedAt = new Date().toISOString();
+    if (!secrets[client.slug]) secrets[client.slug] = genPassword();
+
+    const dir = join(REPO_ROOT, client.slug);
+    mkdirSync(dir, { recursive: true });
+    const enc = await encryptJSON(store, secrets[client.slug]);
+    writeFileSync(join(dir, "utilization.enc.json"), JSON.stringify(enc) + "\n");
+    // tiny gate file: what the sync worker decrypts to verify this client's
+    // password (instead of the multi-MB utilization file)
+    writeFileSync(join(dir, "gate.enc.json"), JSON.stringify(await encryptJSON({ v: 1, slug: client.slug, purpose: "gate" }, secrets[client.slug])) + "\n");
+    // brand block: KV doc if the owner has one, else the code default (logos inlined as data URIs)
+    const { name, brand, source } = resolveBrand(client, kvBrands.get(client.slug));
+    const demo = client.demo ? { from: client.demo.from, note: client.demo.note, nameMap: client.demo.nameMap || {} } : undefined;
+    const marker = markerFor({ slug: client.slug, name, type: client.type, brand, demo });
+    writeFileSync(join(dir, "index.html"), rootIndex.replace("<body>", "<body>\n" + marker));
+
+    const p = store.periods[store.latest];
+    built.push(client.slug);
+    console.log(`✓ /${client.slug}/  ${printable(name)} — ${Object.keys(store.periods).length} period(s), latest ${p.periodLabel}, ` +
+      `${p.claims.paid.toLocaleString()} paid claims, ${p.pharmacies.length} pharmacies (${source})`);
+  }
+
+  writeFileSync(SECRETS_PATH, JSON.stringify(secrets, null, 2) + "\n");
+  console.log(`\nPasswords are in ${SECRETS_PATH} (gitignored — do not publish).`);
+  console.log("If any password is new, re-seal the admin vault: node sync-admin-kv.mjs seal-passwords");
 }
-
-writeFileSync(SECRETS_PATH, JSON.stringify(secrets, null, 2) + "\n");
-console.log(`\nPasswords are in ${SECRETS_PATH} (gitignored — do not publish).`);
 console.log("URLs: https://reports.myrxcard.com/<slug>/");
 
 if (doPush) {
   const git = (...a) => execFileSync("git", a, { cwd: REPO_ROOT, encoding: "utf8" }).trim();
-  git("add", ...built);
+  git("add", ...(htmlOnly ? built.flatMap((s) => [join(s, "index.html"), join(s, "gate.enc.json")].filter((f) => existsSync(join(REPO_ROOT, f)))) : built));
   const changed = git("status", "--porcelain");
   if (!changed) { console.log("Nothing to publish."); }
   else {
-    git("commit", "-m", `client sites: ${built.join(", ")}`);
+    git("commit", "-m", `client sites: ${built.join(", ")}${htmlOnly ? " (html only)" : ""}`);
     git("push");
     console.log("Pushed — Pages redeploys in ~1 minute.");
   }

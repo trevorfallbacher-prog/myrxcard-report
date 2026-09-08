@@ -10,3 +10,8 @@ tools/*/.testpw
 tools/sync-worker/.reportpw
 tools/sync-worker/.syncsecret
 tools/sync-worker/.clientpws
+# wrangler local state (miniflare KV / cache sqlite from `wrangler dev` and the
+# test harness) and dev vars — this repo is served verbatim by GitHub Pages
+.wrangler/
+tools/sync-worker/.wrangler/
+**/.dev.vars

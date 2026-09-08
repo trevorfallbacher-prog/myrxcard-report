@@ -476,6 +476,7 @@
   /* ---------- Utilization tab ---------- */
   #view-utilization[hidden] { display: none; }
   #view-fees[hidden] { display: none; }
+  #view-clients[hidden] { display: none; }
   .fees-flag {
     display: inline-flex; align-items: center; gap: 8px;
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
@@ -895,6 +896,107 @@
     /* on screen .uc-table is a 340px scroll box; in print show all 20 rows */
     .uc-table { max-height: none; overflow: visible; }
   }
+  /* ---------- Clients admin tab (root dashboard only; hidden on partner pages) ---------- */
+  .cl-toolbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  .cl-toolbar .kicker { margin-right: auto; }
+  .cl-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+  .cl-card { display: flex; flex-direction: column; gap: 12px; padding: 14px; min-width: 0; }
+  .cl-card.demo { border-style: dashed; }
+  /* mock gate: a scaled-down twin of the real gate drawn from the brand doc */
+  .cl-mockwrap { position: relative; width: 100%; aspect-ratio: 300 / 190; overflow: hidden; border-radius: 10px; border: 1px solid var(--hair); background: #F4F8FC; }
+  .cl-mock {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: #F4F8FC; color: #1A2E3B; font-family: var(--m-font, var(--sans));
+    --ms: var(--m-secondary, #16688F); --mt: var(--m-tertiary, #3884A4);
+    --mi: #EEF4FB; --mh: #DCE7F0; --mink: #4A6274; --mmute: #7A8FA0;
+  }
+  .cl-cards.dark .cl-mock {
+    background: #0B1824; color: #E9F2F9;
+    --ms: var(--md-secondary, #5CB1DE); --mt: var(--md-tertiary, #5C93B0);
+    --mi: #16303F; --mh: #1E3A4D; --mink: #B3C9DA; --mmute: #7492A8;
+  }
+  .cl-mock[hidden] { display: none; }
+  .cl-mock-panel { width: 200px; }
+  .cl-mock .logo-svg { height: 19px; margin: 0 0 8px; color: #000; }
+  .cl-cards.dark .cl-mock .logo-svg { color: #E9F2F9; }
+  .cl-mock-logo { display: block; height: var(--m-logoh, 18px); width: auto; max-width: 120px; margin: 0 auto 7px; object-fit: contain; }
+  .cl-mock-logo.dark { display: none; }
+  .cl-cards.dark .cl-mock-logo.dark { display: block; }
+  .cl-cards.dark .cl-mock-logo.light.has-dark { display: none; }
+  .cl-mock-pb { display: flex; align-items: center; justify-content: center; gap: 4px; font-family: var(--mono); font-size: 6px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mmute); margin: 0 0 9px; }
+  .cl-mock-pb .logo-svg { height: 7px; margin: 0; display: inline-block; }
+  .cl-mock-tag { font-family: var(--mono); font-size: 6.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--mt); margin-bottom: 4px; }
+  .cl-mock-h1 { font-family: var(--m-hfont, var(--m-font, var(--sans))); font-size: 12px; font-weight: var(--m-w, 600); letter-spacing: var(--m-ls, -0.01em); text-transform: var(--m-tt, none); margin-bottom: 3px; line-height: 1.2; }
+  .cl-mock-p { font-size: 7.5px; color: var(--mink); margin-bottom: 11px; }
+  .cl-mock-form { display: flex; gap: 4px; }
+  .cl-mock-input { flex: 1; background: var(--mi); border: 1px solid var(--mh); border-radius: 4px; padding: 5px 6px; font-size: 7.5px; color: var(--mmute); }
+  .cl-mock-btn { background: var(--ms); color: #F2F8FF; border-radius: 4px; padding: 5px 9px; font-size: 7.5px; font-weight: 600; }
+  /* LIVE: the real /<slug>/?preview=gate page, scaled to the card */
+  .cl-live { position: absolute; left: 0; top: 0; width: 1200px; height: 760px; border: 0; transform-origin: 0 0; transform: scale(var(--cl-scale, 0.25)); pointer-events: none; background: #fff; }
+  .cl-meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .cl-name { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .cl-url { font-family: var(--mono); font-size: 12px; color: var(--ink-mute); text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cl-url:hover { color: var(--secondary); }
+  .cl-url b { color: var(--secondary); font-weight: 600; margin-left: 4px; }
+  .cl-badge { display: inline-block; align-self: flex-start; font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; border-radius: 6px; padding: 3px 8px; background: var(--card-solid); color: var(--ink-soft); white-space: nowrap; }
+  .cl-badge.custom { background: var(--success-tint); color: var(--success); }
+  .cl-badge.demo { background: var(--accent-bright); color: var(--ink); }
+  .cl-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .cl-primary { background: var(--primary); border-color: var(--primary); color: #F2F8FF; }
+  .cl-primary:hover { background: var(--secondary); border-color: var(--secondary); color: #fff; }
+  #view-clients .iconbtn:disabled { opacity: 0.55; cursor: default; }
+  .cl-pwrow { display: flex; gap: 6px; align-items: center; }
+  .cl-input {
+    background: var(--card-solid); border: 1px solid var(--hair); border-radius: 8px; padding: 8px 10px;
+    color: var(--ink); font: inherit; font-size: 13px; outline: none; min-width: 0; width: 100%;
+    transition: border-color 150ms ease-out;
+  }
+  .cl-input:focus { border-color: var(--secondary); }
+  .cl-input.bad { border-color: var(--danger); }
+  .cl-pw { flex: 1; font-family: var(--mono); letter-spacing: 0.06em; }
+  .cl-eye { padding: 6px 8px; line-height: 1; }
+  .cl-eye svg { width: 15px; height: 15px; display: block; }
+  .cl-hint { font-size: 12px; color: var(--ink-mute); margin-top: 14px; }
+  .cl-hint[hidden] { display: none; }
+  .cl-err { color: var(--danger); font-size: 12px; margin-top: 4px; }
+  .cl-err:empty { display: none; }
+  .cl-copied { color: var(--success) !important; border-color: var(--success) !important; }
+  /* editor */
+  .cl-editor-grid { display: grid; grid-template-columns: minmax(0, 460px) minmax(0, 1fr); gap: 20px; align-items: start; }
+  .cl-form { display: flex; flex-direction: column; gap: 20px; }
+  .cl-sec { display: flex; flex-direction: column; gap: 10px; }
+  .cl-sec > .kicker { margin-bottom: 2px; }
+  .cl-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .cl-field > label { font-size: 12px; color: var(--ink-soft); }
+  .cl-field > label .hint { color: var(--ink-mute); }
+  .cl-field .periodsel { width: 100%; }
+  .cl-field[hidden] { display: none; }
+  .cl-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .cl-check { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
+  .cl-check input { accent-color: var(--secondary); width: 15px; height: 15px; }
+  .cl-colors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
+  .cl-colors .kicker { font-size: 11px; }
+  .cl-color { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .cl-color label { flex: 0 0 68px; font-size: 12px; color: var(--ink-soft); }
+  .cl-color input[type="color"] { flex: 0 0 30px; width: 30px; height: 28px; padding: 0; border: 1px solid var(--hair); border-radius: 6px; background: var(--card); cursor: pointer; }
+  .cl-color .cl-input { flex: 1; font-family: var(--mono); padding: 5px 8px; font-size: 12px; }
+  .cl-contrast.low { color: var(--danger); }
+  .cl-logo { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .cl-thumb { display: flex; align-items: center; justify-content: center; width: 120px; height: 44px; border: 1px dashed var(--hair-bright); border-radius: 8px; background: var(--card-solid); overflow: hidden; }
+  .cl-thumb.dark { background: #0B1824; }
+  .cl-thumb img { max-width: 110px; max-height: 36px; }
+  .cl-thumb span { font-family: var(--mono); font-size: 11px; color: var(--ink-mute); }
+  .cl-actions-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; position: sticky; bottom: 0; background: var(--card); padding: 12px 0 2px; border-top: 1px solid var(--hair); }
+  .cl-preview-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  .cl-preview-head .kicker { margin-right: auto; }
+  #cb-frame { width: 100%; height: 72vh; border: 1px solid var(--hair); border-radius: 12px; background: #fff; display: block; }
+  .cl-preview-sticky { position: sticky; top: 84px; }
+  .cl-json { width: 100%; box-sizing: border-box; min-height: 120px; resize: vertical; background: var(--card); color: var(--ink); border: 1px solid var(--hair); border-radius: 10px; padding: 9px 11px; font-family: var(--mono); font-size: 12px; outline: none; }
+  .cl-json:focus { border-color: var(--secondary); }
+  details.cl-adv summary { cursor: pointer; font-family: var(--mono); font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-mute); }
+  #cl-gallery[hidden], #cl-editor[hidden] { display: none; }
+  @media (max-width: 980px) { .cl-editor-grid { grid-template-columns: 1fr; } .cl-preview-sticky { position: static; } #cb-frame { height: 60vh; } }
+  @media (max-width: 560px) { .cl-row2, .cl-colors { grid-template-columns: 1fr; } }
 </style>
 </head>
 <body>
@@ -950,6 +1052,11 @@
       <button type="button" data-tab="docs">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 13h6M9 17h6"/></svg>
         Documents
+      </button>
+      <div class="side-sec" id="side-admin-sec">ADMIN</div>
+      <button type="button" data-tab="clients">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/><path d="M7 9h6M7 12.5h10"/></svg>
+        Clients
       </button>
     </nav>
     <div class="side-foot">
@@ -1384,6 +1491,119 @@
     </div>
   </div>
  </div><!-- /view-docs -->
+
+ <div id="view-clients" hidden>
+  <!-- Clients admin (root dashboard, master password only). Static markup carries no
+       client data; everything is filled from the sync worker at runtime and the whole
+       tab stays hidden on partner pages and in sample mode. -->
+  <div id="cl-gallery">
+    <div class="cl-toolbar">
+      <span class="kicker">Partner reports <span class="hint" id="cl-count"></span></span>
+      <div class="segbtns" id="cl-theme-seg" title="Show the mock gates in light or dark mode"><button type="button" data-theme="light" class="on">LIGHT</button><button type="button" data-theme="dark">DARK</button></div>
+      <button class="iconbtn" id="cl-refresh" type="button" title="Reload brands and passwords from the worker">REFRESH</button>
+    </div>
+    <div class="docstatus" id="cl-status"></div>
+    <div class="cl-cards" id="cl-cards"></div>
+    <div class="cl-hint" id="cl-pw-hint" hidden>Passwords are display-only &mdash; rotating one still requires a rebuild (tools/build-clients.mjs) and a re-seal (tools/sync-admin-kv.mjs seal-passwords). Revealed passwords re-mask after 30 seconds.</div>
+  </div>
+  <div id="cl-editor" hidden>
+    <div class="cl-editor-grid">
+      <div class="panel">
+        <div class="kicker">Brand editor <span class="hint" id="cb-client"></span></div>
+        <form class="cl-form" id="cb-form" autocomplete="off">
+          <div class="cl-sec">
+            <div class="kicker">Identity</div>
+            <div class="cl-field"><label for="cb-name">Client name</label><input class="cl-input" id="cb-name" data-path="name" maxlength="80" spellcheck="false"></div>
+            <div class="cl-field"><label for="cb-gate">Gate heading <span class="hint">&middot; defaults to the client name</span></label><input class="cl-input" id="cb-gate" data-path="brand.headings.gate" maxlength="80"></div>
+            <div class="cl-field"><label for="cb-tagline">Tagline</label><input class="cl-input" id="cb-tagline" data-path="brand.tagline" maxlength="80" placeholder="e.g. Pharmacy savings report"></div>
+            <div class="cl-field"><label for="cb-menu">Menu label</label><input class="cl-input" id="cb-menu" data-path="brand.headings.menuLabel" maxlength="80" placeholder="MENU"></div>
+            <div class="cl-row2">
+              <div class="cl-field"><label for="cb-tab-search">Search tab label</label><input class="cl-input" id="cb-tab-search" data-path="brand.headings.tabs.search" maxlength="80" placeholder="Consumer Web Searches"></div>
+              <div class="cl-field"><label for="cb-tab-util">Utilization tab label</label><input class="cl-input" id="cb-tab-util" data-path="brand.headings.tabs.util" maxlength="80" placeholder="Utilization"></div>
+            </div>
+            <div class="cl-row2">
+              <div class="cl-field"><label for="cb-title-search">Search page title</label><input class="cl-input" id="cb-title-search" data-path="brand.headings.titles.search" maxlength="80" placeholder="Consumer web searches"></div>
+              <div class="cl-field"><label for="cb-title-util">Utilization page title</label><input class="cl-input" id="cb-title-util" data-path="brand.headings.titles.util" maxlength="80" placeholder="Performance Summary - MyRxCard"></div>
+            </div>
+            <label class="cl-check"><input type="checkbox" id="cb-powered" data-path="brand.poweredBy" checked> Show &ldquo;Powered by MyRxCard&rdquo; under the logo</label>
+          </div>
+          <div class="cl-sec">
+            <div class="kicker">Logo <span class="hint">&middot; SVG, PNG, WebP or JPEG &middot; rasters are resized to 640&times;200 &middot; 200 KB max</span></div>
+            <div class="cl-logo">
+              <div class="cl-thumb" id="cb-logo-thumb"><span>none</span></div>
+              <label class="docfile"><input type="file" id="cb-logo-file" data-path="brand.logo" accept=".svg,.png,.webp,.jpg,.jpeg,image/svg+xml,image/png,image/webp,image/jpeg" hidden><span class="iconbtn">UPLOAD LOGO</span></label>
+              <button class="iconbtn" type="button" id="cb-logo-remove">REMOVE</button>
+            </div>
+            <div class="cl-logo">
+              <div class="cl-thumb dark" id="cb-logodark-thumb"><span>none</span></div>
+              <label class="docfile"><input type="file" id="cb-logodark-file" data-path="brand.logoDark" accept=".svg,.png,.webp,.jpg,.jpeg,image/svg+xml,image/png,image/webp,image/jpeg" hidden><span class="iconbtn">DARK-MODE LOGO</span></label>
+              <button class="iconbtn" type="button" id="cb-logodark-remove">REMOVE</button>
+            </div>
+            <div class="cl-field" style="max-width:180px"><label for="cb-logoh">Logo height <span class="hint">&middot; px, 12&ndash;80</span></label><input class="cl-input" id="cb-logoh" data-path="brand.logoHeight" type="number" min="12" max="80" step="1" placeholder="32"></div>
+          </div>
+          <div class="cl-sec">
+            <div class="kicker">Colors <span class="hint cl-contrast" id="cb-contrast"></span></div>
+            <div class="cl-colors" id="cb-colors"></div>
+            <div class="cl-actions">
+              <button class="iconbtn" type="button" id="cb-derive" title="Compute a dark-mode palette from the light colors (lighter tints on navy)">DERIVE DARK FROM LIGHT</button>
+              <button class="iconbtn" type="button" id="cb-colors-clear" title="Clear every color override">USE STOCK COLORS</button>
+            </div>
+          </div>
+          <div class="cl-sec">
+            <div class="kicker">Fonts</div>
+            <div class="cl-row2">
+              <div class="cl-field"><label for="cb-font-heading">Headings</label><select class="periodsel" id="cb-font-heading" data-path="brand.fonts.heading"></select></div>
+              <div class="cl-field"><label for="cb-font-body">Body</label><select class="periodsel" id="cb-font-body" data-path="brand.fonts.body"></select></div>
+            </div>
+            <div class="cl-field" id="cb-font-custom-row" hidden><label for="cb-font-custom">Custom Google font <span class="hint">&middot; exact family name from fonts.google.com, e.g. Nunito</span></label><input class="cl-input" id="cb-font-custom" data-path="brand.fonts.google" maxlength="60" placeholder="Family name"></div>
+          </div>
+          <div class="cl-sec">
+            <div class="kicker">Headings</div>
+            <div class="cl-row2">
+              <div class="cl-field"><label for="cb-h-transform">Transform</label><select class="periodsel" id="cb-h-transform" data-path="brand.headings.transform"><option value="">Default</option><option value="none">None</option><option value="uppercase">UPPERCASE</option><option value="capitalize">Capitalize Words</option></select></div>
+              <div class="cl-field"><label for="cb-h-weight">Weight</label><select class="periodsel" id="cb-h-weight" data-path="brand.headings.weight"><option value="">Default</option><option value="300">300 Light</option><option value="400">400 Regular</option><option value="500">500 Medium</option><option value="600">600 Semibold</option><option value="700">700 Bold</option><option value="800">800 Extra bold</option><option value="900">900 Black</option></select></div>
+            </div>
+            <div class="cl-field" style="max-width:220px"><label for="cb-h-ls">Letter spacing</label><select class="periodsel" id="cb-h-ls" data-path="brand.headings.letterSpacing"><option value="">Default</option><option value="-0.02em">Tight (-0.02em)</option><option value="-0.01em">Snug (-0.01em)</option><option value="0">Normal (0)</option><option value="0.02em">Open (0.02em)</option><option value="0.04em">Wide (0.04em)</option><option value="0.06em">Wider (0.06em)</option><option value="0.08em">Tracked (0.08em)</option><option value="0.1em">Spaced (0.1em)</option></select></div>
+          </div>
+          <div class="cl-sec">
+            <div class="kicker">Layout</div>
+            <div class="cl-row2">
+              <div class="cl-field"><label for="cb-l-header">Header order</label><select class="periodsel" id="cb-l-header" data-path="brand.layout.header"><option value="">Default (view first)</option><option value="view-first">View first</option><option value="title-first">Title first</option></select></div>
+              <div class="cl-field"><label for="cb-l-density">Density</label><select class="periodsel" id="cb-l-density" data-path="brand.layout.density"><option value="">Default (comfortable)</option><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></div>
+            </div>
+            <div class="cl-field" style="max-width:220px"><label for="cb-l-radius">Corner radius</label><select class="periodsel" id="cb-l-radius" data-path="brand.layout.radius"><option value="">Default (16px)</option><option value="4px">4px</option><option value="6px">6px</option><option value="8px">8px</option><option value="10px">10px</option><option value="12px">12px</option><option value="14px">14px</option><option value="16px">16px</option></select></div>
+          </div>
+          <details class="cl-adv">
+            <summary>Advanced &middot; brand JSON</summary>
+            <div class="cl-sec" style="margin-top:10px">
+              <div class="cl-actions">
+                <button class="iconbtn" type="button" id="cb-export" title="Show the current draft as JSON">EXPORT JSON</button>
+                <button class="iconbtn" type="button" id="cb-import" title="Replace the draft with the JSON below">IMPORT JSON</button>
+              </div>
+              <textarea class="cl-json" id="cb-json" spellcheck="false" placeholder="Brand JSON"></textarea>
+              <div class="cl-err" id="cb-json-err"></div>
+            </div>
+          </details>
+          <div class="cl-actions-bar">
+            <button class="iconbtn cl-primary" type="submit" id="cb-save">SAVE</button>
+            <button class="iconbtn" type="button" id="cb-revert" title="Save the stock MyRxCard look for this client">REVERT TO STOCK</button>
+            <button class="iconbtn" type="button" id="cb-back">BACK</button>
+            <span class="docstatus" id="cb-status"></span>
+          </div>
+        </form>
+      </div>
+      <div class="panel cl-preview-sticky">
+        <div class="cl-preview-head">
+          <span class="kicker">Live preview <span class="hint">&middot; the real partner page</span></span>
+          <div class="segbtns" id="cb-mode-seg"><button type="button" data-mode="gate" class="on">GATE</button><button type="button" data-mode="app">APP</button></div>
+          <div class="segbtns" id="cb-theme-seg"><button type="button" data-theme="light" class="on">LIGHT</button><button type="button" data-theme="dark">DARK</button></div>
+        </div>
+        <iframe id="cb-frame" title="Partner page preview"></iframe>
+        <div class="docstatus" id="cb-preview-status" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
+ </div><!-- /view-clients -->
 
   <footer>
     <span id="foot-src">Source: search_events via Xano</span>
@@ -2318,6 +2538,8 @@ function updatePrintMeta() {
     const label = state.tab === "fees" ? "ADMIN FEES REPORT · INTERNAL" : "UTILIZATION REPORT";
     const win = ($("util-window") && $("util-window").textContent || "").toUpperCase();
     el.textContent = `${label} · GENERATED ${gen}` + (win ? ` · ${win}` : "");
+  } else if (state.tab === "clients") {
+    el.textContent = `CLIENT ADMIN · GENERATED ${gen}`;
   } else {
     el.textContent = state._searchMeta || `CONSUMER WEB SEARCH REPORT · GENERATED ${gen}`;
   }
@@ -2496,6 +2718,7 @@ function execChartSpec(spec) {
 // at different depths — 13 distinguishable steps that still read as one
 // brand. Ordered so adjacent series alternate hue families for contrast.
 const CHART_PALETTE = ["#16688F", "#E9AE2E", "#0A4C70", "#ABC269", "#3884A4", "#C98A00", "#4A6FA5", "#6B8F3D", "#7FB3C8", "#B08D2F", "#2E7D74", "#8FA0C9", "#5E8CA7"];
+const CHART_PALETTE0 = [...CHART_PALETTE]; // pristine copy — applyBrand/resetBrand restore from it
 const chartMonthShort = (ym) => {
   const m = String(ym).match(/^(\d{4})-(\d{2})$/);
   if (!m) return String(ym);
@@ -2749,6 +2972,8 @@ const ICONS = {
   percent: ICON('<path d="M19 5L5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>'),
   sun: ICON('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>'),
   moon: ICON('<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>'),
+  eye: ICON('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'),
+  eyeOff: ICON('<path d="M3 3l18 18"/><path d="M10.6 10.6a3 3 0 0 0 4.2 4.2"/><path d="M9.9 5.1A10.4 10.4 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.2"/><path d="M6.6 6.6A17.5 17.5 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 4.4-1"/>'),
 };
 
 // series colors resolve through CSS variables so both themes chart correctly
@@ -4235,10 +4460,12 @@ function renderFees() {
   $("view-desc").textContent = "Internal revenue view · admin fees vs U&C — not for client distribution";
 }
 
-const VIEW_IDS = { search: "view-search", util: "view-utilization", fees: "view-fees", docs: "view-docs" };
+const VIEW_IDS = { search: "view-search", util: "view-utilization", fees: "view-fees", docs: "view-docs", clients: "view-clients" };
 async function setTab(name) {
   const switching = state.tab !== name;
+  const prevTab = state.tab;
   state.tab = name;
+  if (switching && prevTab === "clients") clientsRemaskAll(); // revealed passwords never outlive the tab
   for (const [t, id] of Object.entries(VIEW_IDS)) $(id).hidden = name !== t;
   if (switching) { // re-arm the reveal-on-scroll pass for the incoming view
     const view = $(VIEW_IDS[name]);
@@ -4251,13 +4478,14 @@ async function setTab(name) {
   document.querySelectorAll("#tabs button, #side-nav button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
   $("search-only").style.display = name === "search" ? "contents" : "none";
   $("util-slicers").style.display = name === "util" || name === "fees" ? "contents" : "none";
-  const brandTitle = window.CLIENT_SITE && window.CLIENT_SITE.brand && window.CLIENT_SITE.brand.headings && window.CLIENT_SITE.brand.headings.titles && window.CLIENT_SITE.brand.headings.titles[name];
-  $("app-title").textContent = brandTitle ? brandTitle : name === "search" ? "Consumer web searches"
-    : name === "util" ? "Performance Summary - MyRxCard"
-    : name === "fees" ? "Admin Fees - Internal" : "Document Studio - MyRxCard";
+  $("app-title").textContent = tabTitle(name);
   if (name === "docs") {
     $("view-desc").textContent = "AI document editing · team only";
     if (!docs.templatesLoaded) loadTemplates();
+  }
+  if (name === "clients") {
+    $("view-desc").textContent = "Brand and access for every partner report";
+    renderClients();
   }
   if (name === "util" || name === "fees") {
     if (!util.loaded) { stamp(true, "LOADING…"); await ensureUtilData(); }
@@ -4270,6 +4498,1180 @@ async function setTab(name) {
     stamp(true, "STATIC SAMPLE");
   }
   updatePrintMeta();
+}
+
+/* ---------------- partner branding ----------------
+   Brand = { name?, logo?, logoDark? (data URIs), logoHeight?, tagline?, poweredBy?,
+     colors{primary,secondary,tertiary,accent,accentBright,dark{…}}, fonts{google,body,heading,mono},
+     headings{transform,weight,letterSpacing,gate,menuLabel,tabs{search,util},titles{search,util}},
+     layout{header:'view-first'|'title-first', radius, density:'comfortable'|'compact'} }.
+   Everything is optional; null/absent = the stock MyRxCard look. Sources, in precedence
+   order on a partner page: the live KV doc (sync worker, brand_get) → the brand baked
+   into window.CLIENT_SITE by build-clients.mjs → a <5 min sessionStorage copy of the
+   last live doc when the worker is unreachable.
+   applyBrand is idempotent: it always resets the page to pristine first. Every string
+   that reaches CSS/HTML is whitelisted with the SAME rules as the worker's validateBrand
+   (defense in depth — the KV namespace is shared); invalid fields are dropped, never thrown. */
+const BRAND_TEXT_MAX = 80, BRAND_LOGO_MAX = 200000, BRAND_DOC_MAX = 600000;
+const BRAND_HEX_RE = /^#[0-9a-f]{6}$/;
+const BRAND_LOGO_RE = /^data:image\/(svg\+xml|png|webp|jpeg);base64,[A-Za-z0-9+/=]+$/;
+const BRAND_FONT_GOOGLE_RE = /^family=[A-Za-z0-9+:;@,.\-]{1,200}(&family=[A-Za-z0-9+:;@,.\-]{1,200}){0,3}$/;
+const BRAND_FONT_STACK_RE = /^[A-Za-z0-9 ,'"\-]{1,120}$/;
+const BRAND_LETTER_SPACING_RE = /^-?0?\.\d{1,3}em$|^0$/;
+const BRAND_RADIUS_RE = /^([0-9]|1[0-9]|2[0-4])px$/;
+const BRAND_COLOR_KEYS = ["primary", "secondary", "tertiary", "accent", "accentBright"];
+const BRAND_KEYS = {
+  root: ["name", "logo", "logoDark", "logoHeight", "tagline", "poweredBy", "colors", "fonts", "headings", "layout"],
+  colors: [...BRAND_COLOR_KEYS, "dark"],
+  fonts: ["google", "body", "heading", "mono"],
+  headings: ["transform", "weight", "letterSpacing", "gate", "menuLabel", "tabs", "titles"],
+  headingsPair: ["search", "util"],
+  layout: ["header", "radius", "density"],
+};
+const BRAND_ENUMS = {
+  transform: ["none", "uppercase", "capitalize"],
+  header: ["view-first", "title-first"],
+  density: ["comfortable", "compact"],
+};
+const isPlainObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+const brandText = (v) => typeof v === "string" ? v.replace(/[\x00-\x1f\x7f]/g, "") : "";
+
+// checkBrand(b) → { brand: cleaned copy (unknown/invalid fields dropped), errors: [{path, reason}] }
+// Same rules and paths as the worker, so a 422 from a save maps to the same control.
+function checkBrand(b) {
+  const errors = [];
+  const fail = (path, reason) => { errors.push({ path, reason }); };
+  if (!isPlainObj(b)) return { brand: null, errors: [{ path: "brand", reason: "must be an object" }] };
+  if (JSON.stringify(b).length > BRAND_DOC_MAX) fail("brand", "too large");
+  const unknown = (obj, allowed, path) => { for (const k of Object.keys(obj)) if (!allowed.includes(k)) fail(`${path}.${k}`, "unknown key"); };
+  const text = (src, dst, k, path) => {
+    const v = src[k];
+    if (v === undefined) return;
+    if (typeof v !== "string") return fail(path, "must be a string");
+    const s = brandText(v);
+    if (s.length > BRAND_TEXT_MAX) return fail(path, `too long (max ${BRAND_TEXT_MAX} characters)`);
+    if (/[<>]/.test(s)) return fail(path, "must not contain < or >");
+    dst[k] = s;
+  };
+  const color = (src, dst, k, path) => {
+    const v = src[k];
+    if (v === undefined) return;
+    if (typeof v !== "string") return fail(path, "must be a string");
+    const s = v.toLowerCase();
+    if (!BRAND_HEX_RE.test(s)) return fail(path, "must be a 6-digit hex color like #1a2b3c");
+    dst[k] = s;
+  };
+  const pattern = (src, dst, k, path, re, why) => {
+    const v = src[k];
+    if (v === undefined) return;
+    if (typeof v !== "string") return fail(path, "must be a string");
+    if (!re.test(v)) return fail(path, why);
+    dst[k] = v;
+  };
+  const oneOf = (src, dst, k, path, list) => {
+    const v = src[k];
+    if (v === undefined) return;
+    if (!list.includes(v)) return fail(path, `must be one of ${list.join(", ")}`);
+    dst[k] = v;
+  };
+  const intRange = (src, dst, k, path, lo, hi) => {
+    const v = src[k];
+    if (v === undefined) return;
+    if (!Number.isInteger(v) || v < lo || v > hi) return fail(path, `must be a whole number from ${lo} to ${hi}`);
+    dst[k] = v;
+  };
+  const logo = (src, dst, k, path) => {
+    const v = src[k];
+    if (v === undefined) return;
+    if (typeof v !== "string") return fail(path, "must be a string");
+    if (v.length > BRAND_LOGO_MAX) return fail(path, `too large (max ${BRAND_LOGO_MAX} characters)`);
+    if (!BRAND_LOGO_RE.test(v)) return fail(path, "must be a base64 data URI of type svg+xml, png, webp or jpeg");
+    dst[k] = v;
+  };
+  const out = {};
+  unknown(b, BRAND_KEYS.root, "brand");
+  text(b, out, "name", "brand.name");
+  logo(b, out, "logo", "brand.logo");
+  logo(b, out, "logoDark", "brand.logoDark");
+  intRange(b, out, "logoHeight", "brand.logoHeight", 12, 80);
+  text(b, out, "tagline", "brand.tagline");
+  if (b.poweredBy !== undefined) { if (typeof b.poweredBy === "boolean") out.poweredBy = b.poweredBy; else fail("brand.poweredBy", "must be true or false"); }
+  if (b.colors !== undefined) {
+    if (!isPlainObj(b.colors)) fail("brand.colors", "must be an object");
+    else {
+      unknown(b.colors, BRAND_KEYS.colors, "brand.colors");
+      const c = {};
+      for (const k of BRAND_COLOR_KEYS) color(b.colors, c, k, `brand.colors.${k}`);
+      if (b.colors.dark !== undefined) {
+        if (!isPlainObj(b.colors.dark)) fail("brand.colors.dark", "must be an object");
+        else {
+          unknown(b.colors.dark, BRAND_COLOR_KEYS, "brand.colors.dark");
+          const d = {};
+          for (const k of BRAND_COLOR_KEYS) color(b.colors.dark, d, k, `brand.colors.dark.${k}`);
+          if (Object.keys(d).length) c.dark = d;
+        }
+      }
+      if (Object.keys(c).length) out.colors = c;
+    }
+  }
+  if (b.fonts !== undefined) {
+    if (!isPlainObj(b.fonts)) fail("brand.fonts", "must be an object");
+    else {
+      unknown(b.fonts, BRAND_KEYS.fonts, "brand.fonts");
+      const f = {};
+      pattern(b.fonts, f, "google", "brand.fonts.google", BRAND_FONT_GOOGLE_RE, "must be Google Fonts family= parameters only (up to 4 families)");
+      for (const k of ["body", "heading", "mono"])
+        pattern(b.fonts, f, k, `brand.fonts.${k}`, BRAND_FONT_STACK_RE, "must be a font-family list (letters, digits, spaces, commas, quotes, hyphens; max 120)");
+      if (Object.keys(f).length) out.fonts = f;
+    }
+  }
+  if (b.headings !== undefined) {
+    if (!isPlainObj(b.headings)) fail("brand.headings", "must be an object");
+    else {
+      const src = b.headings, h = {};
+      unknown(src, BRAND_KEYS.headings, "brand.headings");
+      oneOf(src, h, "transform", "brand.headings.transform", BRAND_ENUMS.transform);
+      intRange(src, h, "weight", "brand.headings.weight", 300, 900);
+      pattern(src, h, "letterSpacing", "brand.headings.letterSpacing", BRAND_LETTER_SPACING_RE, "must be an em value like 0.02em or -0.01em (or 0)");
+      text(src, h, "gate", "brand.headings.gate");
+      text(src, h, "menuLabel", "brand.headings.menuLabel");
+      for (const grp of ["tabs", "titles"]) {
+        if (src[grp] === undefined) continue;
+        if (!isPlainObj(src[grp])) { fail(`brand.headings.${grp}`, "must be an object"); continue; }
+        unknown(src[grp], BRAND_KEYS.headingsPair, `brand.headings.${grp}`);
+        const g = {};
+        for (const k of BRAND_KEYS.headingsPair) text(src[grp], g, k, `brand.headings.${grp}.${k}`);
+        if (Object.keys(g).length) h[grp] = g;
+      }
+      if (Object.keys(h).length) out.headings = h;
+    }
+  }
+  if (b.layout !== undefined) {
+    if (!isPlainObj(b.layout)) fail("brand.layout", "must be an object");
+    else {
+      const src = b.layout, l = {};
+      unknown(src, BRAND_KEYS.layout, "brand.layout");
+      oneOf(src, l, "header", "brand.layout.header", BRAND_ENUMS.header);
+      pattern(src, l, "radius", "brand.layout.radius", BRAND_RADIUS_RE, "must be a whole pixel value from 0px to 24px");
+      oneOf(src, l, "density", "brand.layout.density", BRAND_ENUMS.density);
+      if (Object.keys(l).length) out.layout = l;
+    }
+  }
+  return { brand: out, errors };
+}
+
+// pristine-page snapshot, captured once before the first apply
+const BRAND0 = { title: document.title, icon: "", menu: "MENU", logoSvg: null, captured: false };
+function brandBaseline() {
+  if (BRAND0.captured) return;
+  BRAND0.captured = true;
+  const ic = document.querySelector('link[rel="icon"]');
+  BRAND0.icon = ic ? ic.getAttribute("href") : "";
+  const svg = document.querySelector("#gate .gate-panel > svg.logo-svg") || document.querySelector("svg.logo-svg");
+  BRAND0.logoSvg = svg ? svg.cloneNode(true) : null;
+  const sec = document.querySelector("#sidebar .side-sec");
+  if (sec) BRAND0.menu = sec.textContent;
+  document.querySelectorAll("#side-nav button[data-tab], #tabs button[data-tab]").forEach((btn) => {
+    if (btn.dataset.label0 !== undefined) return;
+    const tn = [...btn.childNodes].reverse().find((n) => n.nodeType === 3 && n.textContent.trim());
+    btn.dataset.label0 = tn ? tn.textContent.trim() : "";
+  });
+}
+const setTabLabel = (btn, label) => {
+  const tn = [...btn.childNodes].reverse().find((n) => n.nodeType === 3 && n.textContent.trim());
+  if (tn) tn.textContent = " " + label;
+  else btn.appendChild(document.createTextNode(" " + label));
+};
+
+// back to the stock MyRxCard page: undoes everything applyBrand can do
+function resetBrand() {
+  brandBaseline();
+  const root = document.documentElement;
+  for (const id of ["brand-style", "brand-font"]) { const el = document.getElementById(id); if (el) el.remove(); }
+  document.querySelectorAll(".logo-img, .powered-by, .brand-tagline").forEach((n) => n.remove());
+  for (const sel of [".side-logo", "#gate .gate-panel"]) {
+    const host = document.querySelector(sel);
+    if (host && BRAND0.logoSvg && !host.querySelector(":scope > svg.logo-svg")) host.insertBefore(BRAND0.logoSvg.cloneNode(true), host.firstChild);
+  }
+  root.classList.remove("brand-compact", "brand-title-first");
+  const ic = document.querySelector('link[rel="icon"]');
+  if (ic && BRAND0.icon) ic.setAttribute("href", BRAND0.icon);
+  const sec = document.querySelector("#sidebar .side-sec");
+  if (sec) sec.textContent = BRAND0.menu;
+  document.querySelectorAll("#side-nav button[data-tab], #tabs button[data-tab]").forEach((btn) => { if (btn.dataset.label0) setTabLabel(btn, btn.dataset.label0); });
+  const cs = window.CLIENT_SITE;
+  const gh = document.querySelector("#gate .gate-panel h1");
+  if (gh) gh.textContent = (cs && cs.name) || "Search performance";
+  document.title = cs && cs.name ? cs.name + " · MyRxCard Report" : BRAND0.title;
+  CHART_PALETTE.splice(0, CHART_PALETTE.length, ...CHART_PALETTE0);
+}
+
+// header title for a tab: the partner's own wording when the brand has one
+function tabTitle(name) {
+  const cs = window.CLIENT_SITE;
+  const t = cs && cs.brand && cs.brand.headings && cs.brand.headings.titles && cs.brand.headings.titles[name];
+  if (t) return t;
+  return name === "search" ? "Consumer web searches"
+    : name === "util" ? "Performance Summary - MyRxCard"
+    : name === "fees" ? "Admin Fees - Internal"
+    : name === "clients" ? "Clients - Admin" : "Document Studio - MyRxCard";
+}
+
+// apply a brand (null/invalid = stock look). Idempotent; safe to call any number of times.
+function applyBrand(input) {
+  resetBrand();
+  const cs = window.CLIENT_SITE;
+  const b = isPlainObj(input) ? checkBrand(input).brand : null;
+  if (cs) cs.brand = b || undefined;
+  if (b) {
+    const root = document.documentElement, head = document.head;
+    const tokens = (c) => {
+      const m = { primary: c.primary, secondary: c.secondary, tertiary: c.tertiary, accent: c.accent,
+        "accent-bright": c.accentBright, "chart-coll": c.secondary, "chart-rev": c.accent };
+      return Object.entries(m).filter(([, v]) => v).map(([k, v]) => `--${k}:${v}`).join(";");
+    };
+    let css = "";
+    const c = b.colors || {}, d = c.dark || {};
+    if (tokens(c)) css += `:root{${tokens(c)}${c.primary ? `;--nav-on:color-mix(in srgb, ${c.primary} 12%, #ffffff)` : ""}}`;
+    if (tokens(d)) css += `html.dark{${tokens(d)}${d.primary ? `;--nav-on:color-mix(in srgb, ${d.primary} 22%, #0b1420)` : ""}}`;
+    const f = b.fonts || {};
+    if (f.google) { const l = document.createElement("link"); l.id = "brand-font"; l.rel = "stylesheet"; l.href = "https://fonts.googleapis.com/css2?" + f.google + "&display=swap"; head.appendChild(l); }
+    if (f.body) css += `:root{--sans:${f.body}}`;
+    if (f.mono) css += `:root{--mono:${f.mono}}`;
+    if (f.heading) css += `h1,h2,h3,.brand h1,.gate-panel h1,.view-desc{font-family:${f.heading}}`;
+    const h = b.headings || {};
+    const hr = [h.transform ? `text-transform:${h.transform}` : "", h.weight ? `font-weight:${h.weight}` : "", h.letterSpacing ? `letter-spacing:${h.letterSpacing}` : ""].filter(Boolean).join(";");
+    if (hr) css += `.brand h1,.gate-panel h1{${hr}}`;
+    const lay = b.layout || {};
+    if (lay.radius) css += `.panel,.kpi,.pop,#side-nav button,.periodsel{border-radius:${lay.radius}}`;
+    root.classList.toggle("brand-compact", lay.density === "compact");
+    root.classList.toggle("brand-title-first", lay.header === "title-first");
+    if (css) { const st = document.createElement("style"); st.id = "brand-style"; st.textContent = css; head.appendChild(st); }
+    // logo: sidebar + gate; keep a small "Powered by MyRxCard" under it
+    if (b.logo) {
+      const height = (b.logoHeight || 32) + "px";
+      const alt = b.name || (cs && cs.name) || "";
+      document.querySelectorAll(".side-logo > svg.logo-svg, #gate .gate-panel > svg.logo-svg").forEach((svg) => {
+        const wrap = document.createDocumentFragment();
+        const light = document.createElement("img");
+        light.src = b.logo; light.alt = alt; light.className = "logo-img logo-light" + (b.logoDark ? " has-dark" : ""); light.style.height = height;
+        wrap.appendChild(light);
+        if (b.logoDark) { const dark = document.createElement("img"); dark.src = b.logoDark; dark.alt = alt; dark.className = "logo-img logo-dark"; dark.style.height = height; wrap.appendChild(dark); }
+        if (b.poweredBy !== false) {
+          const pb = document.createElement("div"); pb.className = "powered-by";
+          pb.innerHTML = 'Powered by <svg class="logo-svg" viewBox="0 0 572 136" role="img" aria-label="MyRxCard"><use href="#mrx-logo"/></svg>';
+          wrap.appendChild(pb);
+        }
+        svg.replaceWith(wrap);
+      });
+      if (b.logo.startsWith("data:image/svg")) { const ic = document.querySelector('link[rel="icon"]'); if (ic) ic.setAttribute("href", b.logo); }
+    }
+    // words: gate heading + tagline, menu label, tab names, window title
+    const gh = document.querySelector("#gate .gate-panel h1");
+    if (gh && h.gate) gh.textContent = h.gate;
+    if (gh && b.tagline) { const t = document.createElement("div"); t.className = "brand-tagline"; t.textContent = b.tagline; gh.parentNode.insertBefore(t, gh); }
+    const sec = document.querySelector("#sidebar .side-sec");
+    if (sec && h.menuLabel) sec.textContent = h.menuLabel;
+    if (h.tabs) document.querySelectorAll("#side-nav button[data-tab], #tabs button[data-tab]").forEach((btn) => {
+      const label = h.tabs[btn.dataset.tab];
+      if (label) setTabLabel(btn, label);
+    });
+    if (b.tagline) document.title = ((cs && cs.name) || b.name || "MyRxCard") + " · " + b.tagline;
+    // charts drawn from the fixed palette follow the partner's colors too
+    if (c.secondary) CHART_PALETTE[0] = c.secondary;
+    if (c.accent) CHART_PALETTE[1] = c.accent;
+    if (c.primary) CHART_PALETTE[2] = c.primary;
+    if (c.tertiary) CHART_PALETTE[4] = c.tertiary;
+  }
+  // anything already on screen follows the new look (titles, palette)
+  if ($("app").style.display === "block") $("app-title").textContent = tabTitle(state.tab);
+  if (state.events.length) renderAll();
+  if (util.loaded && util.data && (state.tab === "util" || state.tab === "fees")) renderUtil();
+}
+
+// live brand doc for a partner page: { source: "live"|"cache"|"baked", doc: BrandDoc|null }
+// 1.5 s budget so an unreachable worker never holds the gate; the last live doc is kept in
+// sessionStorage for 5 minutes as the outage fallback (wiped by LOG OUT like every mrx- key).
+async function fetchLiveBrand(slug, opts = {}) {
+  const key = "mrx-brand-" + slug;
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 1500);
+  try {
+    const res = await fetch(SYNC_API, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ brand_get: slug }), signal: ctl.signal });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const out = await res.json();
+    if (!out || out.ok !== true) throw new Error("bad response");
+    if (out.found && isPlainObj(out.doc)) {
+      try { sessionStorage.setItem(key, JSON.stringify({ t: Date.now(), doc: out.doc })); } catch { /* quota */ }
+      return { source: "live", doc: out.doc };
+    }
+    try { sessionStorage.removeItem(key); } catch { /* ignore */ }
+    return { source: "baked", doc: null };
+  } catch {
+    if (!opts.noCache) {
+      try {
+        const c = JSON.parse(sessionStorage.getItem(key) || "null");
+        if (c && isPlainObj(c.doc) && Date.now() - Number(c.t) < 5 * 60 * 1000) return { source: "cache", doc: c.doc };
+      } catch { /* ignore */ }
+    }
+    return { source: "baked", doc: null };
+  } finally { clearTimeout(timer); }
+}
+
+/* ---------------- Clients admin tab (root dashboard, master password only) ----------------
+   Gallery of every partner report (mock gates drawn from the KV brand docs, LIVE swaps in the
+   real /<slug>/?preview=gate page), a brand editor with a live preview of the real partner
+   page (postMessage: mrx-ready ← page; mrx-brand / mrx-theme / mrx-unlock → page), and the
+   password vault (ciphertext from KV, decrypted here with the master password, in memory only).
+   Every function bails on partner pages and in sample mode. Nothing here touches the dashboard's
+   own look — previews always live inside iframes. */
+const CLIENTS_FONTS = [
+  { name: "Sofia Pro (site default)", value: "" },
+  "Montserrat", "Source Sans 3", "Public Sans", "Lato", "Open Sans", "Roboto", "Nunito Sans", "Work Sans",
+  "Raleway", "Poppins", "IBM Plex Sans", "DM Sans", "Libre Franklin", "Merriweather", "Playfair Display",
+  "Lora", "Source Serif 4", "Tinos", "PT Serif",
+  { name: "Custom Google font…", value: "__custom" },
+];
+const CLIENTS_SERIF = new Set(["Merriweather", "Playfair Display", "Lora", "Source Serif 4", "Tinos", "PT Serif"]);
+const STOCK_COLORS = {
+  light: { primary: "#0a4c70", secondary: "#16688f", tertiary: "#3884a4", accent: "#e9ae2e", accentBright: "#f5c43c" },
+  dark: { primary: "#4fa3d1", secondary: "#5cb1de", tertiary: "#5c93b0", accent: "#e9ae2e", accentBright: "#f5c43c" },
+};
+const COLOR_LABELS = { primary: "Primary", secondary: "Secondary", tertiary: "Tertiary", accent: "Accent", accentBright: "Accent bright" };
+let clients = {
+  loaded: false, loading: false, list: [], pws: null, pwErr: "", theme: "light",
+  editing: null, draft: null, dirty: false, saving: false, edTheme: "light", edMode: "gate",
+  frames: [], editorFrame: null, remaskTimers: [], fontLinks: new Set(), postTimer: null, readyTimer: null,
+};
+const clientsActive = () => !window.CLIENT_SITE && state.mode === "live";
+const adminPw = () => gatePw || sessionStorage.getItem("mrx-pw");
+
+async function adminApi(action, extra = {}) {
+  const pw = adminPw();
+  if (!pw) throw new Error("no password");
+  const resp = await fetch(SYNC_API, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ admin_pw: pw, action, ...extra }),
+  });
+  const out = await resp.json().catch(() => ({}));
+  if (!resp.ok || out.error) {
+    let msg = out.error || `HTTP ${resp.status}`;
+    if (resp.status === 429) msg = "Too many failed passwords — locked for " + (out.retryAfter ? Math.max(1, Math.ceil(out.retryAfter / 60)) + " min" : "a while");
+    const err = new Error(msg);
+    err.status = resp.status;
+    if (out.path) err.path = out.path;
+    throw err;
+  }
+  return out;
+}
+
+const relTime = (iso) => {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "—";
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
+  if (s < 86400) return Math.round(s / 3600) + " h ago";
+  if (s < 7 * 86400) return Math.round(s / 86400) + " d ago";
+  return new Date(t).toLocaleDateString("en-US");
+};
+const mkEl = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+const mrxLogoSvg = () => {
+  const ns = "http://www.w3.org/2000/svg";
+  const s = document.createElementNS(ns, "svg");
+  s.setAttribute("viewBox", "0 0 572 136"); s.setAttribute("class", "logo-svg"); s.setAttribute("aria-hidden", "true");
+  const u = document.createElementNS(ns, "use"); u.setAttribute("href", "#mrx-logo");
+  s.appendChild(u);
+  return s;
+};
+const normHex = (v) => {
+  let s = String(v || "").trim().toLowerCase();
+  if (!s) return null;
+  if (s[0] !== "#") s = "#" + s;
+  if (/^#[0-9a-f]{3}$/.test(s)) s = "#" + s[1] + s[1] + s[2] + s[2] + s[3] + s[3];
+  return BRAND_HEX_RE.test(s) ? s : null;
+};
+const hexToRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const rgbToHex = (r, g, b) => "#" + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
+const relLum = (h) => { const [r, g, b] = hexToRgb(h).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+const contrastRatio = (a, b) => { const l1 = relLum(a), l2 = relLum(b); return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05); };
+const rgbToHsl = (r, g, b) => {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b), l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min, s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = max === r ? (g - b) / d + (g < b ? 6 : 0) : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h / 6, s, l];
+};
+const hslToRgb = (h, s, l) => {
+  if (s === 0) return [l * 255, l * 255, l * 255];
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+  const f = (t) => { t = (t + 1) % 1; return t < 1 / 6 ? p + (q - p) * 6 * t : t < 1 / 2 ? q : t < 2 / 3 ? p + (q - p) * (2 / 3 - t) * 6 : p; };
+  return [f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255];
+};
+// dark-mode twin of a light color: same hue, lighter tint that reads on deep navy
+const deriveDarkHex = (hex, key) => {
+  const [h, s, l] = rgbToHsl(...hexToRgb(hex));
+  const target = { primary: 0.62, secondary: 0.68, tertiary: 0.58, accent: 0.64, accentBright: 0.7 }[key] || 0.64;
+  const nl = Math.max(0.5, Math.min(0.82, target + (l - 0.45) * 0.2));
+  return rgbToHex(...hslToRgb(h, Math.min(1, s * 0.92), nl));
+};
+const bytesToB64 = (u8) => { let s = ""; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+const firstFamily = (stack) => { const m = String(stack || "").match(/^\s*(?:'([^']+)'|"([^"]+)"|([^,]+))/); return m ? (m[1] || m[2] || m[3] || "").trim() : ""; };
+const fontStack = (name) => `'${name}', ${CLIENTS_SERIF.has(name) ? "Georgia, serif" : "'Helvetica Neue', Arial, sans-serif"}`;
+const fontParam = (name) => "family=" + name.trim().replace(/\s+/g, "+") + ":wght@400;500;600;700";
+
+// drop empty strings / empty objects so an untouched form saves as the stock look (null)
+function compactBrand(b) {
+  if (!isPlainObj(b)) return {};
+  const out = {};
+  for (const [k, v] of Object.entries(b)) {
+    if (v === undefined || v === null) continue;
+    if (typeof v === "string") { if (v.trim()) out[k] = v; continue; }
+    if (isPlainObj(v)) { const c = compactBrand(v); if (Object.keys(c).length) out[k] = c; continue; }
+    if (k === "poweredBy" && v === true) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/* ---- gallery ---- */
+function initClientsTab() {
+  if (window.CLIENT_SITE) return;
+  // preview iframes announce readiness; only same-origin frames this tab created are honored
+  window.addEventListener("message", (e) => {
+    if (e.origin !== location.origin || !e.data || typeof e.data !== "object" || e.data.type !== "mrx-ready") return;
+    const f = clients.frames.find((x) => x.frame.contentWindow === e.source);
+    if (f) { f.ready = true; f.onReady(); }
+  });
+  $("cl-cards").addEventListener("click", onGalleryClick);
+  $("cl-theme-seg").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-theme]");
+    if (!b) return;
+    clients.theme = b.dataset.theme;
+    for (const x of $("cl-theme-seg").querySelectorAll("button")) x.classList.toggle("on", x === b);
+    $("cl-cards").classList.toggle("dark", clients.theme === "dark");
+    for (const f of clients.frames) if (f !== clients.editorFrame && f.ready) postToFrame(f, { type: "mrx-theme", dark: clients.theme === "dark" });
+  });
+  $("cl-refresh").addEventListener("click", () => loadClients(true));
+  window.addEventListener("resize", fitLiveFrames);
+  // editor
+  const form = $("cb-form");
+  form.addEventListener("submit", (e) => { e.preventDefault(); saveClient(); });
+  form.addEventListener("input", onFormInput);
+  form.addEventListener("change", onFormInput);
+  form.addEventListener("keydown", (e) => { if (e.key === "Enter" && e.target.matches("input:not([type=file])")) e.preventDefault(); });
+  $("cb-back").addEventListener("click", closeEditor);
+  $("cb-revert").addEventListener("click", revertToStock);
+  $("cb-derive").addEventListener("click", deriveDark);
+  $("cb-colors-clear").addEventListener("click", () => {
+    for (const inp of $("cb-colors").querySelectorAll("input.cl-input")) { inp.value = ""; inp.classList.remove("bad"); }
+    syncPickers(); onFormInput();
+  });
+  $("cb-logo-file").addEventListener("change", (e) => onLogoFile(e.target, "logo"));
+  $("cb-logodark-file").addEventListener("change", (e) => onLogoFile(e.target, "logoDark"));
+  $("cb-logo-remove").addEventListener("click", () => removeLogo("logo"));
+  $("cb-logodark-remove").addEventListener("click", () => removeLogo("logoDark"));
+  $("cb-export").addEventListener("click", exportBrandJson);
+  $("cb-import").addEventListener("click", importBrandJson);
+  $("cb-mode-seg").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-mode]");
+    if (!b || b.dataset.mode === clients.edMode) return;
+    clients.edMode = b.dataset.mode;
+    for (const x of $("cb-mode-seg").querySelectorAll("button")) x.classList.toggle("on", x === b);
+    loadEditorFrame();
+  });
+  $("cb-theme-seg").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-theme]");
+    if (!b) return;
+    clients.edTheme = b.dataset.theme;
+    for (const x of $("cb-theme-seg").querySelectorAll("button")) x.classList.toggle("on", x === b);
+    if (clients.editorFrame && clients.editorFrame.ready) postToFrame(clients.editorFrame, { type: "mrx-theme", dark: clients.edTheme === "dark" });
+  });
+  window.addEventListener("beforeunload", (e) => {
+    if (clients.dirty && !$("cl-editor").hidden) { e.preventDefault(); e.returnValue = ""; }
+  });
+  buildColorRows();
+  buildFontSelects();
+}
+
+function renderClients() {
+  if (!clientsActive()) return;
+  if (!clients.loaded) { loadClients(false); return; }
+  if ($("cl-editor").hidden) renderGallery();
+}
+
+async function loadClients(force) {
+  if (!clientsActive() || clients.loading) return;
+  if (clients.loaded && !force) { renderGallery(); return; }
+  clients.loading = true;
+  $("cl-status").textContent = "Loading partner reports…";
+  $("cl-refresh").disabled = true;
+  try {
+    const [brands, vault] = await Promise.all([
+      adminApi("brands.list"),
+      adminApi("pws.get").then((v) => ({ v })).catch((e) => ({ e })),
+    ]);
+    clients.list = (brands.clients || []).filter((d) => isPlainObj(d) && typeof d.slug === "string");
+    clients.list.sort((a, b) => (a.demo ? 1 : 0) - (b.demo ? 1 : 0) || String(a.name || a.slug).localeCompare(String(b.name || b.slug)));
+    clients.pws = null; clients.pwErr = "";
+    if (vault.e) {
+      clients.pwErr = vault.e.status === 404 ? "Passwords not seeded yet — run tools/sync-admin-kv.mjs seal-passwords" : "Passwords unavailable: " + vault.e.message;
+    } else {
+      try {
+        const plain = await decryptConfig(vault.v.enc, adminPw() || "");
+        clients.pws = isPlainObj(plain.passwords) ? plain.passwords : {};
+      } catch {
+        clients.pwErr = "Passwords not available — vault sealed with a different master password; re-run the seed script";
+      }
+    }
+    clients.loaded = true;
+    $("cl-status").textContent = clients.list.length ? "" : "No partner reports in KV yet — run tools/sync-admin-kv.mjs seed-brands";
+  } catch (err) {
+    $("cl-status").textContent = "Could not load: " + err.message;
+  } finally {
+    clients.loading = false;
+    $("cl-refresh").disabled = false;
+  }
+  renderGallery();
+}
+
+function renderGallery() {
+  if (!clientsActive()) return;
+  const host = $("cl-cards");
+  for (const f of [...clients.frames]) if (f !== clients.editorFrame) unregisterFrame(f.frame);
+  clientsRemaskAll();
+  host.textContent = "";
+  host.classList.toggle("dark", clients.theme === "dark");
+  $("cl-count").textContent = clients.list.length ? "· " + clients.list.length + " sites" : "";
+  $("cl-pw-hint").hidden = !clients.pws;
+  for (const doc of clients.list) host.appendChild(buildCard(doc));
+}
+
+function addFontLink(google) {
+  if (!BRAND_FONT_GOOGLE_RE.test(google) || clients.fontLinks.has(google)) return;
+  clients.fontLinks.add(google);
+  const l = document.createElement("link");
+  l.rel = "stylesheet"; l.className = "cl-font";
+  l.href = "https://fonts.googleapis.com/css2?" + google + "&display=swap";
+  document.head.appendChild(l);
+}
+
+// a small twin of the real gate, drawn only from validated brand fields (CSS custom
+// properties via setProperty, text via textContent — nothing from KV touches innerHTML)
+function buildMock(doc) {
+  const b = isPlainObj(doc.brand) ? checkBrand(doc.brand).brand : null;
+  const mock = mkEl("div", "cl-mock");
+  const c = (b && b.colors) || {}, d = c.dark || {};
+  for (const k of ["primary", "secondary", "tertiary"]) {
+    if (c[k]) mock.style.setProperty("--m-" + k, c[k]);
+    if (d[k]) mock.style.setProperty("--md-" + k, d[k]);
+  }
+  const f = (b && b.fonts) || {};
+  if (f.body) mock.style.setProperty("--m-font", f.body);
+  if (f.heading) mock.style.setProperty("--m-hfont", f.heading);
+  if (f.google) addFontLink(f.google);
+  const h = (b && b.headings) || {};
+  if (h.transform) mock.style.setProperty("--m-tt", h.transform);
+  if (h.weight) mock.style.setProperty("--m-w", String(h.weight));
+  if (h.letterSpacing) mock.style.setProperty("--m-ls", h.letterSpacing);
+  if (b && b.logoHeight) mock.style.setProperty("--m-logoh", Math.round(b.logoHeight * 0.55) + "px");
+  const panel = mkEl("div", "cl-mock-panel");
+  if (b && b.logo) {
+    const img = mkEl("img", "cl-mock-logo light" + (b.logoDark ? " has-dark" : "")); img.src = b.logo; img.alt = ""; panel.appendChild(img);
+    if (b.logoDark) { const di = mkEl("img", "cl-mock-logo dark"); di.src = b.logoDark; di.alt = ""; panel.appendChild(di); }
+    if (b.poweredBy !== false) { const pb = mkEl("div", "cl-mock-pb"); pb.append("Powered by "); pb.appendChild(mrxLogoSvg()); panel.appendChild(pb); }
+  } else panel.appendChild(mrxLogoSvg());
+  if (b && b.tagline) panel.appendChild(mkEl("div", "cl-mock-tag", b.tagline));
+  panel.appendChild(mkEl("div", "cl-mock-h1", h.gate || doc.name || doc.slug));
+  panel.appendChild(mkEl("div", "cl-mock-p", "Enter your report password to view your reports."));
+  const form = mkEl("div", "cl-mock-form");
+  form.append(mkEl("span", "cl-mock-input", "Password"), mkEl("span", "cl-mock-btn", "Unlock"));
+  panel.appendChild(form);
+  mock.appendChild(panel);
+  return mock;
+}
+
+function buildCard(doc) {
+  const card = mkEl("div", "panel cl-card" + (doc.demo ? " demo" : ""));
+  card.dataset.slug = doc.slug;
+  const wrap = mkEl("div", "cl-mockwrap");
+  wrap.appendChild(buildMock(doc));
+  card.appendChild(wrap);
+  const meta = mkEl("div", "cl-meta");
+  const nm = mkEl("div", "cl-name", doc.name || doc.slug);
+  if (doc.demo) nm.appendChild(mkEl("span", "cl-badge demo", "DEMO"));
+  meta.appendChild(nm);
+  const a = mkEl("a", "cl-url", "reports.myrxcard.com/" + doc.slug + "/");
+  a.href = "/" + encodeURIComponent(doc.slug) + "/"; a.target = "_blank"; a.rel = "noopener";
+  a.appendChild(mkEl("b", "", "OPEN ↗"));
+  meta.appendChild(a);
+  const badge = mkEl("span", "cl-badge");
+  if (doc.brand) {
+    badge.classList.add("custom");
+    badge.textContent = "CUSTOM · " + (doc.updatedFrom === "admin" ? "saved " + relTime(doc.updatedAt) : doc.updatedFrom === "seed" ? "seeded" : "built");
+    badge.title = doc.updatedAt ? "Last change " + new Date(doc.updatedAt).toLocaleString("en-US") : "";
+  } else badge.textContent = "STOCK LOOK";
+  meta.appendChild(badge);
+  card.appendChild(meta);
+  const acts = mkEl("div", "cl-actions");
+  const live = mkEl("button", "iconbtn", "LIVE"); live.type = "button"; live.dataset.act = "live"; live.title = "Swap the mock for the real partner page";
+  const edit = mkEl("button", "iconbtn cl-primary", "EDIT"); edit.type = "button"; edit.dataset.act = "edit";
+  acts.append(live, edit);
+  card.appendChild(acts);
+  card.appendChild(buildPwRow(doc));
+  return card;
+}
+
+function buildPwRow(doc) {
+  const row = mkEl("div", "cl-pwrow");
+  if (!clients.pws) { row.appendChild(mkEl("span", "docstatus", clients.pwErr || "Passwords unavailable")); return row; }
+  const pw = clients.pws[doc.slug];
+  if (typeof pw !== "string" || !pw) { row.appendChild(mkEl("span", "docstatus", "No password in the vault for this site — re-run seal-passwords")); return row; }
+  const inp = mkEl("input", "cl-input cl-pw");
+  inp.type = "password"; inp.readOnly = true; inp.autocomplete = "off"; inp.spellcheck = false;
+  inp.setAttribute("aria-label", doc.name + " report password");
+  inp.value = pw; // value only — never an attribute, never markup
+  const eye = mkEl("button", "iconbtn cl-eye"); eye.type = "button"; eye.dataset.act = "eye"; eye.title = "Show password"; eye.innerHTML = ICONS.eye;
+  const copy = mkEl("button", "iconbtn", "COPY"); copy.type = "button"; copy.dataset.act = "copy"; copy.title = "Copy password to the clipboard";
+  row.append(inp, eye, copy);
+  return row;
+}
+
+async function onGalleryClick(e) {
+  const btn = e.target.closest("button[data-act]");
+  if (!btn) return;
+  const card = btn.closest(".cl-card");
+  const doc = card && clients.list.find((d) => d.slug === card.dataset.slug);
+  if (!doc) return;
+  const act = btn.dataset.act;
+  if (act === "edit") openEditor(doc);
+  else if (act === "live") toggleLive(card, doc, btn);
+  else if (act === "eye") {
+    const inp = card.querySelector(".cl-pw");
+    const show = inp.type === "password";
+    inp.type = show ? "text" : "password";
+    btn.innerHTML = show ? ICONS.eyeOff : ICONS.eye;
+    btn.title = show ? "Hide password" : "Show password";
+    if (show) clients.remaskTimers.push(setTimeout(() => remaskRow(card), 30000));
+  } else if (act === "copy") {
+    const inp = card.querySelector(".cl-pw");
+    try {
+      await navigator.clipboard.writeText(inp.value);
+      btn.textContent = "COPIED"; btn.classList.add("cl-copied");
+      setTimeout(() => { btn.textContent = "COPY"; btn.classList.remove("cl-copied"); }, 1400);
+    } catch { btn.textContent = "COPY FAILED"; setTimeout(() => { btn.textContent = "COPY"; }, 1400); }
+  }
+}
+
+function remaskRow(card) {
+  const inp = card.querySelector(".cl-pw"), eye = card.querySelector(".cl-eye");
+  if (inp) inp.type = "password";
+  if (eye) { eye.innerHTML = ICONS.eye; eye.title = "Show password"; }
+}
+function clientsRemaskAll() {
+  if (window.CLIENT_SITE) return;
+  for (const t of clients.remaskTimers) clearTimeout(t);
+  clients.remaskTimers = [];
+  const host = $("cl-cards");
+  if (host) for (const card of host.querySelectorAll(".cl-card")) remaskRow(card);
+}
+
+/* ---- preview iframes (gallery LIVE + editor) ---- */
+function postToFrame(f, msg) {
+  try { f.frame.contentWindow.postMessage(msg, location.origin); } catch { /* frame gone */ }
+}
+function registerFrame(frame, slug, onReady) {
+  const entry = { frame, slug, ready: false, onReady };
+  clients.frames.push(entry);
+  return entry;
+}
+function unregisterFrame(frame) {
+  clients.frames = clients.frames.filter((f) => f.frame !== frame);
+  if (clients.editorFrame && clients.editorFrame.frame === frame) clients.editorFrame = null;
+}
+const previewUrl = (slug, mode) => "/" + encodeURIComponent(slug) + "/?preview=" + mode;
+const docBrandMsg = (doc) => ({ type: "mrx-brand", name: doc.name || "", brand: isPlainObj(doc.brand) ? doc.brand : null });
+
+function toggleLive(card, doc, btn) {
+  const wrap = card.querySelector(".cl-mockwrap");
+  const existing = wrap.querySelector("iframe.cl-live");
+  if (existing) {
+    unregisterFrame(existing); existing.remove();
+    wrap.querySelector(".cl-mock").hidden = false;
+    btn.textContent = "LIVE";
+    return;
+  }
+  const fr = document.createElement("iframe");
+  fr.className = "cl-live"; fr.title = (doc.name || doc.slug) + " — live preview";
+  fr.setAttribute("aria-hidden", "true"); fr.tabIndex = -1;
+  const entry = registerFrame(fr, doc.slug, () => {
+    postToFrame(entry, { type: "mrx-theme", dark: clients.theme === "dark" });
+    postToFrame(entry, docBrandMsg(doc));
+  });
+  wrap.querySelector(".cl-mock").hidden = true;
+  wrap.appendChild(fr);
+  fr.src = previewUrl(doc.slug, "gate");
+  btn.textContent = "MOCK";
+  fitLiveFrames();
+}
+function fitLiveFrames() {
+  for (const fr of document.querySelectorAll("iframe.cl-live")) {
+    const w = fr.parentNode ? fr.parentNode.clientWidth : 0;
+    if (w) fr.style.setProperty("--cl-scale", (w / 1200).toFixed(4));
+  }
+}
+
+/* ---- editor ---- */
+function buildColorRows() {
+  const host = $("cb-colors");
+  host.textContent = "";
+  host.append(mkEl("div", "kicker", "Light mode"), mkEl("div", "kicker", "Dark mode"));
+  for (const k of BRAND_COLOR_KEYS) {
+    for (const set of ["light", "dark"]) {
+      const row = mkEl("div", "cl-color");
+      const sfx = (set === "dark" ? "d-" : "") + k;
+      const lab = mkEl("label", "", COLOR_LABELS[k]); lab.htmlFor = "cb-h-" + sfx;
+      const pick = mkEl("input"); pick.type = "color"; pick.id = "cb-c-" + sfx; pick.dataset.key = k; pick.dataset.set = set; pick.value = STOCK_COLORS[set][k];
+      pick.setAttribute("aria-label", COLOR_LABELS[k] + " " + set + " picker");
+      const hex = mkEl("input", "cl-input"); hex.id = "cb-h-" + sfx; hex.dataset.key = k; hex.dataset.set = set; hex.maxLength = 7; hex.spellcheck = false;
+      hex.placeholder = STOCK_COLORS[set][k]; hex.dataset.path = "brand.colors." + (set === "dark" ? "dark." : "") + k;
+      row.append(lab, pick, hex);
+      host.appendChild(row);
+    }
+  }
+}
+function buildFontSelects() {
+  for (const id of ["cb-font-heading", "cb-font-body"]) {
+    const sel = $(id);
+    sel.textContent = "";
+    for (const f of CLIENTS_FONTS) {
+      const o = document.createElement("option");
+      o.value = typeof f === "string" ? f : f.value;
+      o.textContent = typeof f === "string" ? f : f.name;
+      sel.appendChild(o);
+    }
+  }
+}
+// keep each color picker in step with its hex field (and flag bad hex).
+// `commit` (a change event, or a deliberate re-check) is when a typed value
+// is expanded (#abc -> #aabbcc) and judged; on plain input events the field
+// being typed into is left alone, otherwise "#1a2" would be rewritten to
+// "#11aa22" mid-keystroke and the 7-char limit would swallow the rest.
+function syncPickers(changed, commit) {
+  for (const hex of $("cb-colors").querySelectorAll("input.cl-input")) {
+    const pick = $("cb-c-" + (hex.dataset.set === "dark" ? "d-" : "") + hex.dataset.key);
+    if (changed === pick) { hex.value = pick.value.toLowerCase(); hex.classList.remove("bad"); continue; }
+    const v = normHex(hex.value);
+    const settled = changed !== hex || !!commit;
+    hex.classList.toggle("bad", settled && !!hex.value.trim() && !v);
+    if (v) { if (commit && (!changed || changed === hex)) hex.value = v; pick.value = v; }
+    else if (!hex.value.trim()) pick.value = STOCK_COLORS[hex.dataset.set][hex.dataset.key];
+  }
+}
+
+function openEditor(doc) {
+  if (clients.draft && clients.dirty && !confirm("Discard unsaved changes to " + (clients.editing ? clients.editing.name : "this client") + "?")) return;
+  clientsRemaskAll();
+  clients.editing = doc;
+  const chk = isPlainObj(doc.brand) ? checkBrand(doc.brand) : { brand: {}, errors: [] };
+  const brand = chk.brand || {};
+  delete brand.name; // the worker copies the client name in on every write
+  clients.draft = { name: doc.name || "", brand: compactBrand(brand) };
+  clients.dirty = false;
+  clients.edTheme = isDark() ? "dark" : "light";
+  clients.edMode = "gate";
+  for (const x of $("cb-theme-seg").querySelectorAll("button")) x.classList.toggle("on", x.dataset.theme === clients.edTheme);
+  for (const x of $("cb-mode-seg").querySelectorAll("button")) x.classList.toggle("on", x.dataset.mode === "gate");
+  $("cb-client").textContent = "· " + (doc.name || doc.slug) + " · reports.myrxcard.com/" + doc.slug + "/";
+  clearFieldErrors();
+  $("cb-status").textContent = chk.errors.length ? "Some stored fields were invalid and dropped: " + chk.errors.map((e) => e.path).join(", ") : "";
+  $("cb-json").value = ""; $("cb-json-err").textContent = "";
+  populateForm();
+  $("cl-gallery").hidden = true;
+  $("cl-editor").hidden = false;
+  loadEditorFrame();
+  window.scrollTo({ top: 0 });
+}
+
+function closeEditor() {
+  if (clients.dirty && !confirm("Discard unsaved changes to " + (clients.editing ? clients.editing.name : "this client") + "?")) return;
+  const fr = $("cb-frame");
+  unregisterFrame(fr);
+  clearTimeout(clients.readyTimer);
+  fr.src = "about:blank";
+  clients.editing = null; clients.draft = null; clients.dirty = false;
+  $("cl-editor").hidden = true;
+  $("cl-gallery").hidden = false;
+  renderGallery();
+}
+
+function loadEditorFrame() {
+  const fr = $("cb-frame");
+  unregisterFrame(fr);
+  clearTimeout(clients.readyTimer);
+  if (!clients.editing) return;
+  const slug = clients.editing.slug;
+  $("cb-preview-status").textContent = "Loading preview…";
+  const entry = registerFrame(fr, slug, () => {
+    clearTimeout(clients.readyTimer);
+    $("cb-preview-status").textContent = "";
+    postToFrame(entry, { type: "mrx-theme", dark: clients.edTheme === "dark" });
+    postDraft(true);
+    if (clients.edMode === "app") {
+      const pw = clients.pws && clients.pws[slug];
+      if (pw) postToFrame(entry, { type: "mrx-unlock", pw });
+      else $("cb-preview-status").textContent = "APP preview needs this site's password from the vault — showing the gate.";
+    }
+  });
+  clients.editorFrame = entry;
+  fr.src = previewUrl(slug, clients.edMode);
+  // a partner page built before preview mode existed never answers
+  clients.readyTimer = setTimeout(() => {
+    if (!entry.ready) $("cb-preview-status").textContent = "The partner page has not reported in — rebuild the partner pages (build-clients --html-only) for live previews.";
+  }, 6000);
+}
+
+function postDraft(now) {
+  clearTimeout(clients.postTimer);
+  const send = () => {
+    const f = clients.editorFrame, d = clients.draft;
+    if (!f || !f.ready || !d) return;
+    postToFrame(f, { type: "mrx-brand", name: d.name, brand: Object.keys(d.brand).length ? d.brand : null });
+  };
+  if (now) send(); else clients.postTimer = setTimeout(send, 150);
+}
+
+function populateForm() {
+  const d = clients.draft, b = d.brand;
+  const h = b.headings || {}, tabs = h.tabs || {}, titles = h.titles || {}, c = b.colors || {}, dk = c.dark || {}, f = b.fonts || {}, l = b.layout || {};
+  $("cb-name").value = d.name;
+  $("cb-gate").value = h.gate || ""; $("cb-gate").placeholder = d.name || "";
+  $("cb-tagline").value = b.tagline || "";
+  $("cb-menu").value = h.menuLabel || "";
+  $("cb-tab-search").value = tabs.search || ""; $("cb-tab-util").value = tabs.util || "";
+  $("cb-title-search").value = titles.search || ""; $("cb-title-util").value = titles.util || "";
+  $("cb-powered").checked = b.poweredBy !== false;
+  $("cb-logoh").value = b.logoHeight ? String(b.logoHeight) : "";
+  for (const hex of $("cb-colors").querySelectorAll("input.cl-input")) {
+    const src = hex.dataset.set === "dark" ? dk : c;
+    hex.value = src[hex.dataset.key] || "";
+    hex.classList.remove("bad");
+  }
+  syncPickers();
+  // fonts: curated family, custom family, or default
+  const pickFont = (id, stack) => {
+    const fam = firstFamily(stack);
+    const sel = $(id);
+    if (!fam) { sel.value = ""; return ""; }
+    if (CLIENTS_FONTS.includes(fam)) { sel.value = fam; return ""; }
+    sel.value = "__custom"; return fam;
+  };
+  const c1 = pickFont("cb-font-heading", f.heading), c2 = pickFont("cb-font-body", f.body);
+  $("cb-font-custom").value = c1 || c2 || "";
+  $("cb-font-custom-row").hidden = !(c1 || c2);
+  $("cb-h-transform").value = h.transform || "";
+  $("cb-h-weight").value = h.weight ? String(h.weight) : "";
+  const ls = $("cb-h-ls");
+  if (h.letterSpacing && ![...ls.options].some((o) => o.value === h.letterSpacing)) { const o = document.createElement("option"); o.value = h.letterSpacing; o.textContent = h.letterSpacing; ls.appendChild(o); }
+  ls.value = h.letterSpacing || "";
+  $("cb-l-header").value = l.header || "";
+  $("cb-l-density").value = l.density || "";
+  const rad = $("cb-l-radius");
+  if (l.radius && ![...rad.options].some((o) => o.value === l.radius)) { const o = document.createElement("option"); o.value = l.radius; o.textContent = l.radius; rad.appendChild(o); }
+  rad.value = l.radius || "";
+  populateLogoThumbs();
+  updateContrast();
+}
+
+function populateLogoThumbs() {
+  const b = clients.draft ? clients.draft.brand : {};
+  for (const [key, id] of [["logo", "cb-logo-thumb"], ["logoDark", "cb-logodark-thumb"]]) {
+    const host = $(id);
+    host.textContent = "";
+    if (b[key]) { const img = document.createElement("img"); img.src = b[key]; img.alt = ""; host.appendChild(img); }
+    else host.appendChild(mkEl("span", "", "none"));
+  }
+}
+
+function updateContrast() {
+  const b = clients.draft ? clients.draft.brand : {};
+  const sec = (b.colors && b.colors.secondary) || STOCK_COLORS.light.secondary;
+  const r = contrastRatio(sec, "#f2f8ff");
+  const el = $("cb-contrast");
+  el.textContent = "· button text on secondary " + r.toFixed(1) + ":1" + (r < 3 ? " — too low, aim for 3:1 or better" : "");
+  el.classList.toggle("low", r < 3);
+}
+
+// form → draft (only the fields the form owns; logos, fonts.mono etc. are preserved)
+function readFormIntoDraft() {
+  const d = clients.draft;
+  if (!d) return;
+  const v = (id) => $(id).value;
+  const setText = (obj, key, val) => { val = brandText(val).trim(); if (val) obj[key] = val; else delete obj[key]; };
+  d.name = brandText(v("cb-name")).trim();
+  const b = d.brand;
+  b.headings = b.headings || {}; b.headings.tabs = b.headings.tabs || {}; b.headings.titles = b.headings.titles || {};
+  setText(b.headings, "gate", v("cb-gate"));
+  setText(b, "tagline", v("cb-tagline"));
+  setText(b.headings, "menuLabel", v("cb-menu"));
+  setText(b.headings.tabs, "search", v("cb-tab-search")); setText(b.headings.tabs, "util", v("cb-tab-util"));
+  setText(b.headings.titles, "search", v("cb-title-search")); setText(b.headings.titles, "util", v("cb-title-util"));
+  b.poweredBy = $("cb-powered").checked;
+  const lh = parseInt(v("cb-logoh"), 10);
+  if (Number.isInteger(lh)) b.logoHeight = lh; else delete b.logoHeight;
+  b.colors = b.colors || {}; b.colors.dark = b.colors.dark || {};
+  for (const hex of $("cb-colors").querySelectorAll("input.cl-input")) {
+    const tgt = hex.dataset.set === "dark" ? b.colors.dark : b.colors;
+    const val = normHex(hex.value);
+    if (val) tgt[hex.dataset.key] = val; else delete tgt[hex.dataset.key];
+  }
+  const custom = brandText(v("cb-font-custom")).trim().replace(/[^A-Za-z0-9 ]/g, "").slice(0, 60);
+  const fam = (id) => { const val = v(id); return val === "__custom" ? custom : val; };
+  const hf = fam("cb-font-heading"), bf = fam("cb-font-body");
+  $("cb-font-custom-row").hidden = !(v("cb-font-heading") === "__custom" || v("cb-font-body") === "__custom");
+  const fonts = { ...(b.fonts || {}) };
+  delete fonts.google; delete fonts.heading; delete fonts.body;
+  const fams = [...new Set([hf, bf].filter(Boolean))];
+  if (fams.length) fonts.google = fams.map(fontParam).join("&");
+  if (hf) fonts.heading = fontStack(hf);
+  if (bf) fonts.body = fontStack(bf);
+  b.fonts = fonts;
+  const tr = v("cb-h-transform"); if (tr) b.headings.transform = tr; else delete b.headings.transform;
+  const w = parseInt(v("cb-h-weight"), 10); if (w) b.headings.weight = w; else delete b.headings.weight;
+  const ls = v("cb-h-ls"); if (ls) b.headings.letterSpacing = ls; else delete b.headings.letterSpacing;
+  b.layout = b.layout || {};
+  const hd = v("cb-l-header"); if (hd) b.layout.header = hd; else delete b.layout.header;
+  const dn = v("cb-l-density"); if (dn) b.layout.density = dn; else delete b.layout.density;
+  const rd = v("cb-l-radius"); if (rd) b.layout.radius = rd; else delete b.layout.radius;
+  d.brand = compactBrand(b);
+}
+
+function onFormInput(e) {
+  if (!clients.draft) return;
+  const t = e && e.target;
+  if (t && t.type === "file") return; // handled by onLogoFile
+  if (t && t.closest && t.closest("#cb-colors")) syncPickers(t, e.type === "change");
+  readFormIntoDraft();
+  clients.dirty = true;
+  updateContrast();
+  postDraft(false);
+}
+
+async function onLogoFile(input, key) {
+  const file = input.files && input.files[0];
+  input.value = "";
+  if (!file || !clients.draft) return;
+  clearFieldErrors("brand." + key);
+  try {
+    clients.draft.brand[key] = await fileToLogoDataUri(file);
+    clients.dirty = true;
+    populateLogoThumbs();
+    postDraft(true);
+  } catch (err) {
+    showFieldError("brand." + key, err.message);
+  }
+}
+function removeLogo(key) {
+  if (!clients.draft || !clients.draft.brand[key]) return;
+  delete clients.draft.brand[key];
+  clients.dirty = true;
+  populateLogoThumbs();
+  postDraft(true);
+}
+const loadImageFile = (file) => new Promise((resolve, reject) => {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+  img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("Could not read that image")); };
+  img.src = url;
+});
+// SVG: parsed and sanitized as a DOM — regex checks on the text miss
+// entity-encoded values (&#106;avascript:), attributes with no leading
+// whitespace (<svg/onload=…>), protocol-relative hrefs and <set>/<animate>
+// reaching an on* attribute — then RE-SERIALIZED, so the bytes stored in KV
+// and baked into every partner page are the cleaned tree, never the upload.
+// Today the logo only ever lands in <img src> and the favicon, where none of
+// this could run; the sanitizer is for whatever renders it inline tomorrow.
+const SVG_NS = "http://www.w3.org/2000/svg";
+const SVG_DROP_ELEMENTS = new Set(["script", "foreignobject", "set", "animate", "animatetransform", "animatemotion", "iframe", "embed", "object", "handler", "listener", "audio", "video"]);
+// CSS that could fetch or run: url() to anything but a local #id, @import, expression(), bindings
+const CSS_UNSAFE_RE = /url\(\s*["']?\s*(?!#)|@import|expression\s*\(|javascript:|-moz-binding|behavior\s*:/i;
+const SVG_IMAGE_DATA_RE = /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/;
+function sanitizeSvgText(text) {
+  const doc = new DOMParser().parseFromString(text, "image/svg+xml");
+  const root = doc.documentElement;
+  if (!root || doc.querySelector("parsererror")) throw new Error("That file is not a well-formed SVG");
+  if (root.namespaceURI !== SVG_NS || root.localName !== "svg") throw new Error("That file is not an SVG");
+  let dropped = 0;
+  for (const el of [...doc.querySelectorAll("*")]) {
+    if (!el.isConnected) continue; // inside something already removed
+    const tag = el.localName.toLowerCase();
+    if (el.namespaceURI !== SVG_NS || SVG_DROP_ELEMENTS.has(tag)) { el.remove(); dropped++; continue; }
+    if (tag === "style") { // Illustrator/Inkscape class styles are common; keep them unless they reach out
+      if (CSS_UNSAFE_RE.test(el.textContent || "")) { el.remove(); dropped++; }
+      continue;
+    }
+    for (const a of [...el.attributes]) {
+      const full = a.name.toLowerCase(), local = a.localName.toLowerCase(), val = a.value.trim();
+      if (full.startsWith("on") || local.startsWith("on")) { el.removeAttributeNode(a); dropped++; continue; }
+      if (local === "href" || local === "src") { // internal references only; <image> may embed a raster
+        const ok = val.startsWith("#") || (tag === "image" && SVG_IMAGE_DATA_RE.test(val));
+        if (!ok) { el.removeAttributeNode(a); dropped++; }
+        continue;
+      }
+      if (local === "style" && CSS_UNSAFE_RE.test(val)) { el.removeAttributeNode(a); dropped++; continue; }
+      if (/javascript:|data:text\/html/i.test(val) && local !== "class" && local !== "id") { el.removeAttributeNode(a); dropped++; }
+    }
+  }
+  const out = new XMLSerializer().serializeToString(root); // documentElement only: no doctype, no PIs
+  if (/<script|<foreignObject|\son[a-z]+\s*=|javascript:/i.test(out)) throw new Error("SVG rejected — could not be cleaned"); // belt and braces
+  return { svg: out, dropped };
+}
+// Rasters: re-encoded through a canvas (max 640×200) as WebP, PNG when WebP is unavailable.
+async function fileToLogoDataUri(file) {
+  const isSvg = file.type === "image/svg+xml" || /\.svg$/i.test(file.name);
+  if (isSvg) {
+    const text = await file.text();
+    if (!/<svg[\s>\/]/i.test(text)) throw new Error("That file is not an SVG");
+    const { svg, dropped } = sanitizeSvgText(text);
+    const uri = "data:image/svg+xml;base64," + bytesToB64(new TextEncoder().encode(svg));
+    if (uri.length > BRAND_LOGO_MAX) throw new Error("SVG too large (about 150 KB max) — simplify it first");
+    if (!BRAND_LOGO_RE.test(uri)) throw new Error("Could not encode the SVG");
+    if (dropped) $("cb-status").textContent = "SVG cleaned — " + dropped + " unsafe part" + (dropped === 1 ? "" : "s") + " (scripts, handlers, external references) removed before storing";
+    return uri;
+  }
+  if (!/^image\/(png|webp|jpeg)$/.test(file.type)) throw new Error("Use an SVG, PNG, WebP or JPEG file");
+  const img = await loadImageFile(file);
+  const scale = Math.min(1, 640 / img.naturalWidth, 200 / img.naturalHeight);
+  const w = Math.max(1, Math.round(img.naturalWidth * scale)), h = Math.max(1, Math.round(img.naturalHeight * scale));
+  const cv = document.createElement("canvas");
+  cv.width = w; cv.height = h;
+  cv.getContext("2d").drawImage(img, 0, 0, w, h);
+  let uri = cv.toDataURL("image/webp", 0.9);
+  if (!uri.startsWith("data:image/webp")) uri = cv.toDataURL("image/png");
+  if (uri.length > BRAND_LOGO_MAX && uri.startsWith("data:image/webp")) uri = cv.toDataURL("image/webp", 0.7);
+  if (uri.length > BRAND_LOGO_MAX) throw new Error("Logo still over 200 KB after resizing — try a simpler image");
+  if (!BRAND_LOGO_RE.test(uri)) throw new Error("Could not encode the image");
+  return uri;
+}
+
+function deriveDark() {
+  if (!clients.draft) return;
+  for (const k of BRAND_COLOR_KEYS) {
+    const light = normHex($("cb-h-" + k).value) || STOCK_COLORS.light[k];
+    const dark = deriveDarkHex(light, k);
+    $("cb-h-d-" + k).value = dark; $("cb-h-d-" + k).classList.remove("bad");
+    $("cb-c-d-" + k).value = dark;
+  }
+  onFormInput();
+}
+
+function exportBrandJson() {
+  if (!clients.draft) return;
+  readFormIntoDraft();
+  $("cb-json").value = JSON.stringify(clients.draft.brand, null, 2);
+  $("cb-json-err").textContent = "";
+  $("cb-json").select();
+}
+function importBrandJson() {
+  if (!clients.draft) return;
+  let obj;
+  try { obj = JSON.parse($("cb-json").value); } catch { $("cb-json-err").textContent = "Not valid JSON"; return; }
+  if (obj === null) obj = {};
+  const chk = checkBrand(obj);
+  if (!chk.brand) { $("cb-json-err").textContent = "Brand JSON must be an object"; return; }
+  if (chk.errors.length) { $("cb-json-err").textContent = chk.errors.map((e) => e.path + ": " + e.reason).join(" · "); return; }
+  delete chk.brand.name;
+  clients.draft.brand = compactBrand(chk.brand);
+  clients.dirty = true;
+  clearFieldErrors();
+  populateForm();
+  postDraft(true);
+  $("cb-json-err").textContent = "";
+  $("cb-status").textContent = "Imported — review, then SAVE";
+}
+
+function clearFieldErrors(path) {
+  for (const el of $("cb-form").querySelectorAll(".cl-err[data-dyn]")) if (!path || el.dataset.path === path) el.remove();
+}
+// 422 paths from the worker use the same "brand.colors.dark.primary" shape as data-path
+function showFieldError(path, msg) {
+  let ctl = null, p = path;
+  while (p && !ctl) { ctl = $("cb-form").querySelector(`[data-path="${p}"]`); if (!ctl) p = p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : ""; }
+  if (!ctl) { $("cb-status").textContent = path + ": " + msg; return; }
+  const anchor = ctl.closest(".cl-field, .cl-color, .cl-logo") || ctl;
+  const err = mkEl("div", "cl-err", msg); err.dataset.dyn = "1"; err.dataset.path = path;
+  anchor.insertAdjacentElement("afterend", err);
+  if (anchor.classList.contains("cl-logo")) return;
+  if (ctl.focus && ctl.type !== "file") ctl.focus({ preventScroll: false });
+}
+
+function upsertDoc(doc) {
+  if (!isPlainObj(doc) || typeof doc.slug !== "string") return;
+  const i = clients.list.findIndex((d) => d.slug === doc.slug);
+  if (i >= 0) clients.list[i] = doc; else clients.list.push(doc);
+  clients.list.sort((a, b) => (a.demo ? 1 : 0) - (b.demo ? 1 : 0) || String(a.name || a.slug).localeCompare(String(b.name || b.slug)));
+}
+
+async function saveClient() {
+  if (clients.saving || !clients.draft || !clients.editing) return;
+  readFormIntoDraft();
+  clearFieldErrors();
+  const d = clients.draft;
+  const name = brandText(d.name).trim();
+  if (!name || name.length > BRAND_TEXT_MAX || /[<>]/.test(name)) { showFieldError("name", "Client name is required (max 80 characters, no < or >)"); return; }
+  syncPickers(null, true);
+  const bad = $("cb-colors").querySelector("input.cl-input.bad");
+  if (bad) { showFieldError(bad.dataset.path, "Not a hex color — use #rrggbb"); return; }
+  const chk = checkBrand(d.brand);
+  if (chk.errors.length) { for (const e of chk.errors) showFieldError(e.path, e.reason); $("cb-status").textContent = "Fix the highlighted fields"; return; }
+  const brand = Object.keys(chk.brand).length ? chk.brand : null;
+  clients.saving = true;
+  $("cb-save").disabled = true; $("cb-revert").disabled = true;
+  $("cb-status").textContent = "Saving…";
+  try {
+    const out = await adminApi("brand.put", { slug: clients.editing.slug, name, brand });
+    upsertDoc(out.doc);
+    clients.editing = out.doc || clients.editing;
+    clients.dirty = false;
+    $("cb-status").textContent = "Saved — live on the partner page within about a minute";
+    stamp(true, "BRAND SAVED · " + name.toUpperCase());
+  } catch (err) {
+    if (err.path) showFieldError(err.path, err.message);
+    $("cb-status").textContent = "Save failed: " + err.message;
+  } finally {
+    clients.saving = false;
+    $("cb-save").disabled = false; $("cb-revert").disabled = false;
+  }
+}
+
+async function revertToStock() {
+  if (clients.saving || !clients.editing) return;
+  const name = brandText($("cb-name").value).trim() || clients.editing.name || clients.editing.slug;
+  if (!confirm("Revert " + name + " to the stock MyRxCard look? This saves immediately and the partner page follows within about a minute.")) return;
+  clients.saving = true;
+  $("cb-save").disabled = true; $("cb-revert").disabled = true;
+  $("cb-status").textContent = "Reverting…";
+  try {
+    const out = await adminApi("brand.put", { slug: clients.editing.slug, name, brand: null });
+    upsertDoc(out.doc);
+    clients.editing = out.doc || clients.editing;
+    clients.draft = { name, brand: {} };
+    clients.dirty = false;
+    clearFieldErrors();
+    populateForm();
+    postDraft(true);
+    $("cb-status").textContent = "Reverted to the stock look — live within about a minute";
+    stamp(true, "BRAND RESET · " + name.toUpperCase());
+  } catch (err) {
+    $("cb-status").textContent = "Revert failed: " + err.message;
+  } finally {
+    clients.saving = false;
+    $("cb-save").disabled = false; $("cb-revert").disabled = false;
+  }
 }
 
 /* ---------------- document studio ---------------- */
@@ -5035,6 +6437,9 @@ function enterApp(mode) {
   $("app").style.display = "block";
   $("sample-badge").hidden = mode !== "sample";
   $("logout-btn").hidden = mode !== "live"; // nothing to lock in sample mode
+  // the Clients admin tab exists only on the root dashboard in live mode
+  const showAdmin = mode === "live" && !window.CLIENT_SITE;
+  for (const el of [document.querySelector('#side-nav button[data-tab="clients"]'), $("side-admin-sec")]) if (el) el.style.display = showAdmin ? "" : "none";
   if (mode === "sample") {
     $("foot-src").textContent = "Source: bundled sample export (not live)";
     stamp(true, "STATIC SAMPLE");
@@ -5043,9 +6448,11 @@ function enterApp(mode) {
 
 async function boot() {
   initPromptCharts(); // no-op on client microsite pages (CLIENT_SITE gate)
+  initClientsTab();   // idem — Clients admin tab listeners
   // LOG OUT: forget every remembered passphrase for this origin (root site and
   // client sites alike) and return to the gate
   $("logout-btn").addEventListener("click", () => {
+    clientsRemaskAll();
     for (const k of Object.keys(sessionStorage)) if (k.startsWith("mrx-")) sessionStorage.removeItem(k);
     location.reload();
   });
@@ -6010,75 +7417,7 @@ async function boot() {
   // which injects window.CLIENT_SITE) ships no Xano config and a data file that
   // contains ONLY that client's rows. The gate validates the password by
   // decrypting the client's own utilization.enc.json; the app is utilization-only.
-  // Partner branding. build-clients.mjs injects window.CLIENT_SITE.brand per client:
-  //   { logo, logoDark (data URIs), logoHeight, tagline, colors{primary,secondary,tertiary,accent,accentBright,dark{…}},
-  //     fonts{google,body,heading,mono}, headings{transform,weight,letterSpacing,gate,menuLabel,tabs{},titles{}},
-  //     layout{header:'view-first'|'title-first', radius, density:'comfortable'|'compact'}, poweredBy }
-  // Everything is optional; a client without a brand block keeps the MyRxCard look.
-  function applyBrand(b) {
-    if (!b || typeof b !== "object") return;
-    const root = document.documentElement, head = document.head;
-    const hex = (v) => /^#[0-9a-f]{3,8}$/i.test(String(v || "")) ? v : null;
-    const tokens = (c) => {
-      const m = { primary: c.primary, secondary: c.secondary, tertiary: c.tertiary, accent: c.accent,
-        "accent-bright": c.accentBright, "chart-coll": c.secondary, "chart-rev": c.accent };
-      return Object.entries(m).filter(([, v]) => hex(v)).map(([k, v]) => `--${k}:${v}`).join(";");
-    };
-    let css = "";
-    const c = b.colors || {}, d = c.dark || {};
-    if (tokens(c)) css += `:root{${tokens(c)}${hex(c.primary) ? `;--nav-on:color-mix(in srgb, ${c.primary} 12%, #ffffff)` : ""}}`;
-    if (tokens(d)) css += `html.dark{${tokens(d)}${hex(d.primary) ? `;--nav-on:color-mix(in srgb, ${d.primary} 22%, #0b1420)` : ""}}`;
-    const f = b.fonts || {};
-    if (f.google) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "https://fonts.googleapis.com/css2?" + f.google + "&display=swap"; head.appendChild(l); }
-    if (f.body) css += `:root{--sans:${f.body}}`;
-    if (f.mono) css += `:root{--mono:${f.mono}}`;
-    if (f.heading) css += `h1,h2,h3,.brand h1,.gate-panel h1,.view-desc{font-family:${f.heading}}`;
-    const h = b.headings || {};
-    const hr = [h.transform ? `text-transform:${h.transform}` : "", h.weight ? `font-weight:${h.weight}` : "", h.letterSpacing ? `letter-spacing:${h.letterSpacing}` : ""].filter(Boolean).join(";");
-    if (hr) css += `.brand h1,.gate-panel h1{${hr}}`;
-    const lay = b.layout || {};
-    if (lay.radius) css += `.panel,.kpi,.pop,#side-nav button,.periodsel{border-radius:${lay.radius}}`;
-    if (lay.density === "compact") root.classList.add("brand-compact");
-    if (lay.header === "title-first") root.classList.add("brand-title-first");
-    if (css) { const st = document.createElement("style"); st.id = "brand-style"; st.textContent = css; head.appendChild(st); }
-    // logo: sidebar + gate; keep a small "Powered by MyRxCard" under it
-    if (b.logo) {
-      const height = (b.logoHeight || 32) + "px";
-      document.querySelectorAll("svg.logo-svg").forEach((svg) => {
-        const wrap = document.createDocumentFragment();
-        const light = document.createElement("img");
-        light.src = b.logo; light.alt = b.name || window.CLIENT_SITE.name || ""; light.className = "logo-img logo-light" + (b.logoDark ? " has-dark" : ""); light.style.height = height;
-        wrap.appendChild(light);
-        if (b.logoDark) { const dark = document.createElement("img"); dark.src = b.logoDark; dark.alt = light.alt; dark.className = "logo-img logo-dark"; dark.style.height = height; wrap.appendChild(dark); }
-        if (b.poweredBy !== false) {
-          const pb = document.createElement("div"); pb.className = "powered-by";
-          pb.innerHTML = 'Powered by <svg class="logo-svg" viewBox="0 0 572 136" role="img" aria-label="MyRxCard"><use href="#mrx-logo"/></svg>';
-          wrap.appendChild(pb);
-        }
-        svg.replaceWith(wrap);
-      });
-      if (String(b.logo).startsWith("data:image/svg")) { const ic = document.querySelector('link[rel="icon"]'); if (ic) ic.href = b.logo; }
-    }
-    // words: gate heading + tagline, menu label, tab names, tab title
-    const gh = document.querySelector("#gate .gate-panel h1");
-    if (gh && h.gate) gh.textContent = h.gate;
-    if (gh && b.tagline) { const t = document.createElement("div"); t.className = "brand-tagline"; t.textContent = b.tagline; gh.parentNode.insertBefore(t, gh); }
-    const sec = document.querySelector("#sidebar .side-sec");
-    if (sec && h.menuLabel) sec.textContent = h.menuLabel;
-    if (h.tabs) document.querySelectorAll("#side-nav button[data-tab], #tabs button[data-tab]").forEach((btn) => {
-      const label = h.tabs[btn.dataset.tab]; if (!label) return;
-      const tn = [...btn.childNodes].reverse().find((n) => n.nodeType === 3 && n.textContent.trim());
-      if (tn) tn.textContent = " " + label;
-    });
-    if (b.tagline) document.title = (window.CLIENT_SITE.name || "") + " · " + b.tagline;
-    // charts drawn from a fixed palette follow the partner's colors too
-    if (typeof CHART_PALETTE !== "undefined" && Array.isArray(CHART_PALETTE)) {
-      if (hex(c.secondary)) CHART_PALETTE[0] = c.secondary;
-      if (hex(c.accent)) CHART_PALETTE[1] = c.accent;
-      if (hex(c.primary)) CHART_PALETTE[2] = c.primary;
-      if (hex(c.tertiary)) CHART_PALETTE[4] = c.tertiary;
-    }
-  }
+  // Partner branding lives at file scope now (applyBrand / resetBrand / fetchLiveBrand above boot).
   const cssTok = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || "#0A4C70";
 
   if (window.CLIENT_SITE) {
@@ -6086,21 +7425,53 @@ async function boot() {
     // (scoped to their own microsites); Avalon-internal tabs stay hidden.
     for (const b of document.querySelectorAll("#side-nav button, #tabs button"))
       if (b.dataset.tab !== "util" && b.dataset.tab !== "search") b.style.display = "none";
+    if ($("side-admin-sec")) $("side-admin-sec").style.display = "none";
     document.querySelector("#gate .gate-panel h1").textContent = window.CLIENT_SITE.name;
     document.querySelector("#gate .gate-panel p").textContent = "Enter your report password to view your reports.";
     document.title = window.CLIENT_SITE.name + " · MyRxCard Report";
-    applyBrand(window.CLIENT_SITE.brand);
+    const slug = String(window.CLIENT_SITE.slug || "");
+    // PREVIEW MODE — the root dashboard's Clients tab frames this page with
+    // ?preview=gate|app and drives brand / theme / unlock over postMessage.
+    // No KV brand fetch, no sessionStorage auto-unlock, nothing persisted;
+    // gate mode never even downloads the encrypted data.
+    const previewMode = (() => {
+      if (window.self === window.top) return "";
+      const p = new URLSearchParams(location.search).get("preview");
+      return p === "gate" || p === "app" ? p : "";
+    })();
+    // the live (KV) brand and the encrypted data load in parallel so the gate is not delayed
+    const brandP = previewMode ? null : fetchLiveBrand(slug);
     let clientBlob = null;
-    try {
-      const res = await fetch("utilization.enc.json", { cache: "no-store" });
-      if (res.ok) clientBlob = await res.json();
-    } catch { /* not deployed */ }
-    if (!clientBlob) { $("setup").style.display = "block"; return; }
-    if (!window.isSecureContext || !crypto.subtle) {
-      $("gate").hidden = false;
-      $("gate-err").textContent = "This page needs a secure connection. Redirecting to https…";
-      location.replace("https://" + location.host + location.pathname + location.hash);
-      return;
+    if (previewMode !== "gate") {
+      try {
+        const res = await fetch("utilization.enc.json", { cache: "no-store" });
+        if (res.ok) clientBlob = await res.json();
+      } catch { /* not deployed */ }
+    }
+    if (previewMode) {
+      $("theme-btn").style.display = "none"; // theme is driven by the parent only
+      $("gate-pw").disabled = true; $("gate-btn").disabled = true; $("gate-pw").removeAttribute("autofocus");
+    } else {
+      // precedence: live KV doc (brand null = stock look, by the admin's choice) →
+      // baked marker brand (KV has no opinion, or is unreachable with no fresh cache).
+      // Applied while the gate is still hidden, so there is no flash of the stock look.
+      const live = await brandP;
+      if (live.doc) {
+        const nm = brandText(live.doc.name).trim();
+        if (nm && !/[<>]/.test(nm)) window.CLIENT_SITE.name = nm.slice(0, BRAND_TEXT_MAX);
+        applyBrand(live.doc.brand);
+      } else {
+        applyBrand(window.CLIENT_SITE.brand);
+      }
+    }
+    if (previewMode !== "gate") {
+      if (!clientBlob) { $("setup").style.display = "block"; return; }
+      if (!window.isSecureContext || !crypto.subtle) {
+        $("gate").hidden = false;
+        $("gate-err").textContent = "This page needs a secure connection. Redirecting to https…";
+        location.replace("https://" + location.host + location.pathname + location.hash);
+        return;
+      }
     }
     const pwKey = "mrx-pw-" + window.CLIENT_SITE.slug;
 
@@ -6335,6 +7706,41 @@ async function boot() {
       }
       throw lastErr;
     };
+    if (previewMode) {
+      // Only the framing dashboard (same origin) may talk to a preview. mrx-brand
+      // re-skins in place (null = stock), mrx-theme flips html.dark without touching
+      // localStorage, mrx-unlock (app mode) decrypts in memory — never sessionStorage.
+      let revealed = false, unlocked = false;
+      const reveal = () => { if (!revealed && !unlocked) { revealed = true; $("gate").hidden = false; } };
+      window.addEventListener("message", async (e) => {
+        if (e.origin !== location.origin || !e.data || typeof e.data !== "object") return;
+        const m = e.data;
+        if (m.type === "mrx-brand") {
+          const nm = brandText(m.name).trim();
+          if (nm && !/[<>]/.test(nm)) window.CLIENT_SITE.name = nm.slice(0, BRAND_TEXT_MAX);
+          applyBrand(m.brand && typeof m.brand === "object" ? m.brand : null);
+          reveal();
+        } else if (m.type === "mrx-theme") {
+          document.documentElement.classList.toggle("dark", !!m.dark);
+          if (state.events.length) renderAll();
+          if (util.loaded && util.data && (state.tab === "util" || state.tab === "fees")) renderUtil();
+        } else if (m.type === "mrx-unlock" && previewMode === "app" && !unlocked && clientBlob) {
+          const pw = String(m.pw || "");
+          try {
+            const data = await decryptConfig(clientBlob, pw);
+            unlocked = true;
+            await enterClient(data, pw);
+            $("logout-btn").style.display = "none"; // a preview must never wipe the admin's session
+          } catch {
+            $("gate-err").textContent = "Preview password did not unlock this report.";
+            reveal();
+          }
+        }
+      });
+      setTimeout(reveal, 400); // the parent normally posts the brand within a few ms of mrx-ready
+      try { window.parent.postMessage({ type: "mrx-ready", slug }, location.origin); } catch { /* ignore */ }
+      return;
+    }
     const cached = sessionStorage.getItem(pwKey);
     if (cached) {
       try { const { data, pw } = await tryPw(cached); await enterClient(data, pw); return; }
