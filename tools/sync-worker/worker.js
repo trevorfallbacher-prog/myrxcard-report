@@ -25,6 +25,21 @@
 //                          client-side with the master password; the worker
 //                          only ever stores and returns ciphertext.
 //
+// reports.avalonsaves.com admin (live client brands + a worker-sealed client vault):
+//   POST / { aa_brand_get: "<slug>" }                 PUBLIC — {ok, found, doc} (whitelisted projection; never a password)
+//   POST / { aa_admin_pw, action: "ping" }            MASTER — {ok, kv, vault:"absent"|"ok"|"sealed"|"error"} ("error" = KV unreadable right now)
+//   POST / { aa_admin_pw, action: "clients.list" }    MASTER — {ok, vault, updatedAt, clients:[{slug,label,demo,demoBadge,doc}]} (no passwords)
+//   POST / { aa_admin_pw, action: "client.reveal", slug }       MASTER — {ok, slug, pw}
+//   POST / { aa_admin_pw, action: "clients.seed", force? }      MASTER — seal CLIENT_PWS into the vault + stock docs (force: ONLY over a sealed vault)
+//   POST / { aa_admin_pw, action: "clients.reseal", oldPw }     MASTER — re-key the vault after a REPORT_PW rotation
+//   POST / { aa_admin_pw, action: "client.put", slug, label?, pw?, regenPw?, demo?, demoBadge?, brand? }
+//   POST / { aa_admin_pw, action: "client.delete", slug, force? }
+//   aa_admin_pw is REPORT_PW, the Avalon Assist master. KV keys (prefix "aa:"):
+//     aa:brand:<slug> → BrandDoc {v, slug, name, demo, demoBadge, brand|null, updatedAt, updatedFrom}
+//     aa:clients      → {v, updatedAt, enc} — the client-password vault, sealed by
+//                        THIS worker under REPORT_PW (PBKDF2 310k + AES-GCM);
+//                        plaintext lives only in isolate memory (see aaLoadVault).
+//
 // The upsert happens here, directly against Xano's Metadata API content
 // endpoints (search by bucket_key → update or insert) — no Xano-side
 // endpoint to build or expose.
@@ -35,17 +50,21 @@
 //          XANO_META_TOKEN   Xano Metadata API token (expires — see README)
 // (After any `wrangler deploy`, re-run a `wrangler secret put` to re-bind.)
 //
-// AUTH SURFACE: REPORT_PW is the same value as the reports.myrxcard.com master
-// password, so report_pw, feed_pw with site "" and admin_pw all prove the
-// master. Every one of them goes through checkPassword(): one per-network
-// failure counter (in-memory, plus the ADMIN_RL rate-limit binding when bound)
-// checked before any PBKDF2, constant-time compares for the secret-backed
-// routes, and never a password value in a log line.
+// AUTH SURFACE: two masters, one gate. REPORT_PW is the reports.avalonsaves.com
+// (Avalon Assist) report password: it unlocks report_pw, proves aa_admin_pw and
+// is the key that seals aa:clients. The reports.myrxcard.com master is a
+// DIFFERENT value, proven only by verifyMaster decrypting /config.enc.json
+// (admin_pw, feed_pw with site ""). Every one of them goes through
+// checkPassword(): one per-network failure counter per scope ("master" for the
+// MyRxCard master, "aa" for the Avalon routes, "site:<slug>" for partner feeds;
+// in-memory, plus the ADMIN_RL rate-limit binding when bound) checked before
+// any PBKDF2, constant-time compares for the secret-backed routes, and never a
+// password value in a log line.
 //
 // Brand schema validation lives in ../brand-validate.mjs (shared with
 // build-clients.mjs and the tests); wrangler bundles the import on deploy.
 
-import { validateBrand, validateName, isPlainObject, BRAND_DOC_MAX } from "../brand-validate.mjs";
+import { validateBrand, validateBrandAA, validateName, isPlainObject, BRAND_DOC_MAX } from "../brand-validate.mjs";
 
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "content-type" };
 const json = (obj, status = 200) =>
@@ -120,6 +139,11 @@ function pbkdf2Sha256_32(password, salt, iterations) { // -> Uint8Array(32) (one
   for (let i=1;i<iterations;i++){ u = hmac32(st, u); for (let j=0;j<32;j++) t[j]^=u[j]; }
   return t;
 }
+// base64 <-> bytes. Decode into a preallocated buffer: Uint8Array.from(str, fn)
+// materialises a multi-million-element iterator for the big report files and
+// spikes memory. Encode via btoa over a string (the vault is a few KB).
+const b64dec = (str) => { const bin = atob(str), out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; };
+const b64enc = (u8) => { let bin = ""; for (let i = 0; i < u8.length; i++) bin += String.fromCharCode(u8[i]); return btoa(bin); };
 const FEED_SITE = "https://reports.myrxcard.com";
 const verifiedFeedPw = new Map(); // `${slug}|${pw}` -> expiry ms
 let feedTableId = null; // search_events table id, resolved by name once per isolate
@@ -144,12 +168,9 @@ async function verifyReportPassword(slug, pw) {
   }
   if (!blob || !blob.salt || !blob.iv || !blob.data) { console.log(`feed: ${url} -> not an encrypted blob`); return false; }
   try {
-    // decode into a preallocated buffer: Uint8Array.from(str, fn) materialises a
-    // multi-million-element iterator for the big files and spikes memory
-    const b64 = (str) => { const bin = atob(str), out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; };
-    const raw = pbkdf2Sha256_32(new TextEncoder().encode(pw), b64(blob.salt), 310000);
+    const raw = pbkdf2Sha256_32(new TextEncoder().encode(pw), b64dec(blob.salt), 310000);
     const aesKey = await crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["decrypt"]);
-    await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(blob.iv) }, aesKey, b64(blob.data));
+    await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64dec(blob.iv) }, aesKey, b64dec(blob.data));
   } catch (e) { console.log(`feed: verify failed: ${e && e.name}: ${e && e.message}`); return false; }
   verifiedFeedPw.set(key, now + 15 * 60 * 1000);
   return true;
@@ -162,13 +183,16 @@ async function verifyReportPassword(slug, pw) {
 async function verifyMaster(pw) { return verifyReportPassword("", pw); }
 // ---- brute-force lockout, shared by every password-proving route ----
 // Checked BEFORE the ~190 ms PBKDF2 (or the secret compare): 5 failures within
-// 10 minutes lock the caller out for 10 minutes; a success clears the counter.
+// 10 minutes lock the caller out for 10 minutes; a MASTER success clears the
+// counter (a client password proving itself under "aa" never does).
 // Keyed by NETWORK + scope, not bare IP: an IPv6 caller is collapsed to its
 // /64 (a single subscriber's allocation), so address rotation inside it buys
-// nothing. Scope "master" is shared by admin_pw, feed_pw with site "" and
-// report_pw — the three routes that prove the master; partner-page feed
-// guesses count under "site:<slug>". Per isolate; the ADMIN_RL binding (see
-// wrangler.toml) adds a limit that survives isolate churn.
+// nothing. Scope "master" is shared by admin_pw and feed_pw with site "" (the
+// routes that prove the MyRxCard master); scope "aa" by report_pw and
+// aa_admin_pw (the Avalon Assist master, REPORT_PW) — so guesses at one site
+// never lock the other's admin; partner-page feed guesses count under
+// "site:<slug>". Per isolate; the ADMIN_RL binding (see wrangler.toml) adds a
+// limit that survives isolate churn.
 const authFails = new Map(); // netKey -> { n, first, until } (ms)
 const LOCK_MAX = 5, LOCK_WINDOW_MS = 10 * 60 * 1000, LOCK_FOR_MS = 10 * 60 * 1000, LOCK_MAP_MAX = 2000;
 function ipv6Prefix64(ip) { // "2001:db8::1" -> "2001:0db8:0000:0000::/64"
@@ -215,6 +239,12 @@ function lockoutEvict(now) {
 // optional Rate Limiting binding (per network, counts attempts across
 // isolates), then `verify`. Returns a Response to send on refusal, or null
 // when the caller is authenticated. Logs never carry the password.
+// `verify` resolves to "master" (the scope's own credential: clears the
+// failure counter), true (authenticated with a lesser credential that shares
+// the scope — a client or demo password under "aa" — the counter is left
+// alone, so a handed-out demo password can never launder guesses at the
+// master), false (a failure), or a Response when it could not decide (KV
+// unavailable): that Response is sent as-is with no lockout accounting.
 async function checkPassword(req, env, scope, verify) {
   const key = netKey(req, scope);
   const wait = lockoutSeconds(key);
@@ -225,12 +255,14 @@ async function checkPassword(req, env, scope, verify) {
       if (!success) { console.log(`auth: rate limited (${key})`); return json({ error: "locked", retryAfter: 60 }, 429); }
     } catch (e) { console.log(`auth: rate limiter unavailable: ${e && e.message}`); } // in-memory lockout still applies
   }
-  if (!(await verify())) {
+  const r = await verify();
+  if (r instanceof Response) return r;
+  if (!r) {
     lockoutFail(key);
     console.log(`auth: bad password (${key})`); // never the value
     return json({ error: "bad password" }, 403);
   }
-  lockoutReset(key);
+  if (r === "master") lockoutReset(key);
   return null;
 }
 // Constant-time string equality for the secret-backed routes (REPORT_PW,
@@ -251,8 +283,22 @@ async function hmacHex16(secret, message) {
   const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
   return [...new Uint8Array(sig)].slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+// Which rows a client key owns (its own slug for a real client, demo.from for
+// a demo): a WHOLE-WORD match over tpa + client_name, with "-" in the slug
+// standing for an optional "-"/" " — "marpai" owns "Marpai Health" and
+// "Marpai TPA", "acme-health" owns "Acme Health" / "AcmeHealth", and "pai" or
+// "rx" own nothing (a bare substring test let a short slug own every client's
+// rows). Keys always satisfy ADMIN_SLUG_RE, so the pattern needs no escaping.
+const ownsRe = new Map(); // slug -> RegExp (a handful of clients; bounded anyway)
 function clientOwns(row, slug) {
-  return (((row.tpa || "") + " " + (row.client_name || "")).toLowerCase().includes(slug));
+  if (!ADMIN_SLUG_RE.test(slug)) return false;
+  let re = ownsRe.get(slug);
+  if (!re) {
+    if (ownsRe.size > 200) ownsRe.clear();
+    re = new RegExp("(^|[^a-z0-9])" + slug.replace(/-/g, "[- ]?") + "([^a-z0-9]|$)");
+    ownsRe.set(slug, re);
+  }
+  return re.test(((row.tpa || "") + " " + (row.client_name || "")).toLowerCase());
 }
 function whitelabel(row, label) {
   const out = {};
@@ -371,6 +417,171 @@ const ADMIN_SLUG_RE = /^[a-z0-9-]{1,40}$/;
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 const MAX_ADMIN_BODY_BYTES = 1000000;
 
+// ---- reports.avalonsaves.com admin: client vault + brand docs ----
+// Vault aa:clients = {v:1, updatedAt, enc:{salt, iv, data}} sealed by THIS
+// worker under REPORT_PW (pbkdf2Sha256_32 310k -> AES-GCM-256; fresh 16-byte
+// salt and 12-byte IV per seal — IV reuse under GCM is catastrophic).
+// Plaintext {v:1, clients:{<slug>:{pw, label, demo?:{from, scale}, demoBadge?}}}
+// lives only in isolate memory: aaVault caches the last read for 60 s and
+// re-derives only when the ciphertext actually changed, so the ~190 ms PBKDF2
+// is paid once per isolate per vault change — never on aa_brand_get, never on
+// a master unlock (the master compare runs first). A vault that will not open
+// under the current REPORT_PW ("sealed") degrades the read route to the
+// CLIENT_PWS secret instead of locking every client out; clients.reseal
+// re-keys it with the old password after a rotation.
+const AA_BRAND_KEY_PREFIX = "aa:brand:";
+const AA_CLIENTS_KEY = "aa:clients";
+const AA_RESERVED_SLUGS = new Set(["nash", "tools", "admin", "root", "index", "404", "assets"]);
+const AA_PW_RE = /^[\x21-\x7e]{8,128}$/;
+const AA_SCALE_MIN = 0.05, AA_SCALE_MAX = 20;
+const AA_SCALE_FIELDS = ["awp", "aa_price", "aa_savings", "avalon_savings"];
+const AA_VAULT_TTL_MS = 60000;
+const AA_PW_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"; // no 0/O/1/I/l look-alikes
+const AA_SEALED = "vault sealed with a different password";
+const AA_KV_FAILED = "KV read failed"; // 503: KV unreadable right now — retry, never write
+const AA_REAL_SLUG_MIN = 3; // a real client's slug is its CRM match key (clientOwns)
+const AA_ACTIONS = new Set(["ping", "clients.list", "client.reveal", "clients.seed", "clients.reseal", "client.put", "client.delete"]);
+const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+let aaVault = { at: 0, pw: undefined, raw: null, state: "absent", clients: null, updatedAt: null }; // state: absent | ok | sealed | error
+
+async function aaKey(pw, salt, usages) {
+  const raw = pbkdf2Sha256_32(new TextEncoder().encode(pw), salt, 310000);
+  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, usages);
+}
+// {<slug>:{pw, label, demo?, demoBadge?}} from any source (vault plaintext or
+// the CLIENT_PWS secret): only well-formed entries survive, keys lowercased.
+function aaNormalizeClients(map) {
+  const out = {};
+  if (!isPlainObject(map)) return out;
+  for (const [k, c] of Object.entries(map)) {
+    const slug = String(k).toLowerCase();
+    if (!ADMIN_SLUG_RE.test(slug) || !isPlainObject(c) || typeof c.pw !== "string" || !c.pw) continue;
+    const e = { pw: c.pw, label: typeof c.label === "string" && c.label.trim() ? c.label : slug };
+    if (isPlainObject(c.demo) && typeof c.demo.from === "string" && ADMIN_SLUG_RE.test(c.demo.from.toLowerCase()) && typeof c.demo.scale === "number") e.demo = { from: c.demo.from.toLowerCase(), scale: c.demo.scale };
+    if (typeof c.demoBadge === "boolean") e.demoBadge = c.demoBadge;
+    out[slug] = e;
+  }
+  return out;
+}
+function aaSecretClients(env) {
+  let map = {};
+  try { map = JSON.parse(env.CLIENT_PWS || "{}"); } catch {}
+  return aaNormalizeClients(map);
+}
+// ciphertext record -> {clients, updatedAt}; throws on a wrong key or a malformed record
+async function aaOpenVault(raw, pw) {
+  const rec = JSON.parse(raw);
+  const enc = rec && rec.enc;
+  if (!isPlainObject(enc) || [enc.salt, enc.iv, enc.data].some((v) => typeof v !== "string" || !B64_RE.test(v))) throw new Error("malformed vault record");
+  const key = await aaKey(pw, b64dec(enc.salt), ["decrypt"]);
+  const pt = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64dec(enc.iv) }, key, b64dec(enc.data))));
+  if (!isPlainObject(pt) || !isPlainObject(pt.clients)) throw new Error("malformed vault plaintext");
+  return { clients: aaNormalizeClients(pt.clients), updatedAt: typeof rec.updatedAt === "string" ? rec.updatedAt : null };
+}
+// Cached vault state for this isolate: {state:"absent"|"ok"|"sealed"|"error", clients, updatedAt}.
+// Re-read from KV after AA_VAULT_TTL_MS (or when REPORT_PW itself changed, or
+// when `fresh` — every writer passes it, so a reseal never starts from a
+// roster another isolate has since changed); the PBKDF2 runs only when the
+// stored ciphertext differs from the cached one. A KV read FAILURE is its own
+// state, "error": never cached (at: 0) and never mistaken for "absent" —
+// which the writers would otherwise paper over with the CLIENT_PWS secret.
+async function aaLoadVault(env, fresh) {
+  const now = Date.now();
+  if (!fresh && aaVault.pw === env.REPORT_PW && now - aaVault.at < AA_VAULT_TTL_MS) return aaVault;
+  let raw = null;
+  try { raw = await env.AAPS_DATA.get(AA_CLIENTS_KEY); }
+  catch (e) {
+    console.log(`aa: vault read failed: ${e && e.name}`); // never a value
+    aaVault = { at: 0, pw: env.REPORT_PW, raw: null, state: "error", clients: null, updatedAt: null };
+    return aaVault;
+  }
+  if (typeof raw !== "string") { aaVault = { at: now, pw: env.REPORT_PW, raw: null, state: "absent", clients: null, updatedAt: null }; return aaVault; }
+  if (raw === aaVault.raw && aaVault.pw === env.REPORT_PW) { aaVault.at = now; return aaVault; }
+  try {
+    const { clients, updatedAt } = await aaOpenVault(raw, String(env.REPORT_PW || ""));
+    aaVault = { at: now, pw: env.REPORT_PW, raw, state: "ok", clients, updatedAt };
+  } catch (e) {
+    console.log(`aa: vault did not open: ${e && e.name}`); // never a value
+    aaVault = { at: now, pw: env.REPORT_PW, raw, state: "sealed", clients: null, updatedAt: null };
+  }
+  return aaVault;
+}
+// Seal `clients` under the current REPORT_PW, write it, and serve it from this
+// isolate immediately (the cache is primed from the plaintext just written).
+async function aaSeal(env, clients) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await aaKey(String(env.REPORT_PW || ""), salt, ["encrypt"]);
+  const data = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(JSON.stringify({ v: 1, clients })));
+  const updatedAt = new Date().toISOString();
+  const raw = JSON.stringify({ v: 1, updatedAt, enc: { salt: b64enc(salt), iv: b64enc(iv), data: b64enc(new Uint8Array(data)) } });
+  await env.AAPS_DATA.put(AA_CLIENTS_KEY, raw);
+  aaVault = { at: Date.now(), pw: env.REPORT_PW, raw, state: "ok", clients: aaNormalizeClients(clients), updatedAt };
+  return updatedAt;
+}
+// The admin roster: the open vault, or CLIENT_PWS while no vault exists yet.
+// A sealed vault is an error here (the read route degrades; the admin must
+// reseal), and so is an unreadable KV (503: retry — the alternative is to
+// write over a vault that is really there) — returns {clients (a private
+// copy), fromVault, updatedAt} | {error}. Writers pass `fresh`.
+async function aaRoster(env, fresh) {
+  const v = await aaLoadVault(env, fresh);
+  if (v.state === "error") return { error: json({ error: AA_KV_FAILED }, 503) };
+  if (v.state === "sealed") return { error: json({ error: AA_SEALED }, 500) };
+  if (v.state === "ok") return { clients: JSON.parse(JSON.stringify(v.clients)), fromVault: true, updatedAt: v.updatedAt };
+  return { clients: aaSecretClients(env), fromVault: false, updatedAt: null };
+}
+// The public projection of a brand doc: never a password, never demo.from/scale.
+function aaPublicDoc(d) {
+  if (!isPlainObject(d) || typeof d.slug !== "string") return null;
+  return { v: 1, slug: d.slug, name: typeof d.name === "string" ? d.name : d.slug, demo: !!d.demo, demoBadge: d.demoBadge !== false,
+    brand: isPlainObject(d.brand) ? d.brand : null, updatedAt: typeof d.updatedAt === "string" ? d.updatedAt : null, updatedFrom: d.updatedFrom === "seed" ? "seed" : "admin" };
+}
+async function aaGetDoc(env, slug, opts) {
+  let d = null;
+  try { d = await env.AAPS_DATA.get(AA_BRAND_KEY_PREFIX + slug, { type: "json", ...(opts || {}) }); } catch {}
+  return aaPublicDoc(d);
+}
+// Invariant: every client in the roster has an aa:brand:<slug> doc. Writes a
+// stock one where missing; returns the roster's slugs sorted.
+async function aaEnsureDocs(env, clients) {
+  const slugs = Object.keys(clients).sort();
+  for (const slug of slugs) {
+    if (await aaGetDoc(env, slug)) continue;
+    const c = clients[slug];
+    await env.AAPS_DATA.put(AA_BRAND_KEY_PREFIX + slug, JSON.stringify({ v: 1, slug, name: c.label, demo: !!c.demo, demoBadge: c.demoBadge !== false, brand: null, updatedAt: new Date().toISOString(), updatedFrom: "seed" }));
+  }
+  return slugs;
+}
+// xxxx-xxxx-xxxx over a 31-symbol alphabet (~60 bits) from getRandomValues,
+// with rejection sampling so no symbol is favoured.
+function aaGenPw() {
+  const n = AA_PW_ALPHABET.length, lim = 256 - (256 % n);
+  let s = "";
+  while (s.length < 12) for (const b of crypto.getRandomValues(new Uint8Array(24))) if (b < lim && s.length < 12) s += AA_PW_ALPHABET[b % n];
+  return `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8, 12)}`;
+}
+// ...and never one that already unlocks something else (the first safeEqual
+// match decides a caller's identity).
+async function aaFreshPw(env, clients, slug) {
+  for (;;) {
+    const pw = aaGenPw();
+    if (await safeEqual(pw, env.REPORT_PW)) continue;
+    let dup = false;
+    for (const [s, c] of Object.entries(clients)) if (s !== slug && (await safeEqual(pw, c.pw))) { dup = true; break; }
+    if (!dup) return pw;
+  }
+}
+// Demo anonymization of an already white-labeled row: no case/group numbers,
+// ages to the bottom of their 5-year band, dollar fields scaled. member_ref
+// is re-HMACed by the caller under the DEMO slug so tokens never join up with
+// the source client's site.
+function aaAnonymize(w, scale) {
+  delete w.assist_number;
+  delete w.group_number;
+  if (typeof w.member_age === "number" && Number.isFinite(w.member_age)) w.member_age = Math.floor(w.member_age / 5) * 5;
+  for (const k of AA_SCALE_FIELDS) if (typeof w[k] === "number") w[k] = Math.round(w[k] * scale * 100) / 100;
+}
+
 // Read and parse the JSON body under a hard byte cap that does not trust the
 // Content-Length header (absent on chunked uploads, unparseable if forged):
 // the header is a fast path to a 413, the stream count is the real limit.
@@ -428,7 +639,7 @@ export default {
       return json({ ok: true, found: true, doc });
     }
     if (body.admin_pw !== undefined) {
-      const denied = await checkPassword(req, env, "master", () => verifyMaster(String(body.admin_pw || "")));
+      const denied = await checkPassword(req, env, "master", async () => (await verifyMaster(String(body.admin_pw || ""))) ? "master" : false);
       if (denied) return denied;
       const action = String(body.action || "");
       if (action === "ping") return json({ ok: true, kv: !!env.AAPS_DATA });
@@ -505,6 +716,156 @@ export default {
       }
       return json({ error: "bad action" }, 400);
     }
+    // ---- reports.avalonsaves.com admin routes ----
+    // Same placement rule as the myrx block: above the Xano guard, so the
+    // client pages' brand fetch and the admin tab work without the Xano token.
+    // PUBLIC: a client page fetching its live brand. One KV key by validated
+    // slug, projected through aaPublicDoc — never the vault, never CLIENT_PWS.
+    if (body.aa_brand_get !== undefined) {
+      const slug = String(body.aa_brand_get || "").toLowerCase();
+      if (!ADMIN_SLUG_RE.test(slug)) return json({ error: "bad site" }, 400);
+      if (!env.AAPS_DATA) return json({ error: "KV not bound" }, 500);
+      const doc = await aaGetDoc(env, slug, { cacheTtl: 60 });
+      if (!doc) return json({ ok: true, found: false, doc: null });
+      return json({ ok: true, found: true, doc });
+    }
+    if (body.aa_admin_pw !== undefined) {
+      // the Avalon Assist master is REPORT_PW itself: constant-time compare,
+      // lockout scope "aa" (shared with report_pw, separate from the MyRx master)
+      const denied = await checkPassword(req, env, "aa", async () => (await safeEqual(typeof body.aa_admin_pw === "string" ? body.aa_admin_pw : "", env.REPORT_PW)) ? "master" : false);
+      if (denied) return denied;
+      const action = String(body.action || "");
+      if (!AA_ACTIONS.has(action)) return json({ error: "bad action" }, 400);
+      if (action === "ping") return json({ ok: true, kv: !!env.AAPS_DATA, vault: env.AAPS_DATA ? (await aaLoadVault(env)).state : "absent" });
+      if (!env.AAPS_DATA) return json({ error: "KV not bound" }, 500);
+      // Vault absent -> seal the CLIENT_PWS entries; always make sure every
+      // client has a stock brand doc. Idempotent. force is ONLY the recovery
+      // for a vault sealed under a password nobody has: over an open vault it
+      // would discard every admin-created client and rotated password, so it
+      // is refused there. Reads KV afresh — never the 60 s cache.
+      if (action === "clients.seed") {
+        const v = await aaLoadVault(env, true);
+        if (v.state === "error") return json({ error: AA_KV_FAILED }, 503);
+        if (body.force === true && v.state !== "sealed") return json({ error: "force only recovers a sealed vault", hint: "vault is " + v.state }, 409);
+        if (v.state === "sealed" && body.force !== true) return json({ error: AA_SEALED, hint: "force" }, 409);
+        let clients = v.state === "ok" ? v.clients : null;
+        const sealed = !clients;
+        if (sealed) { clients = aaSecretClients(env); await aaSeal(env, clients); }
+        const slugs = await aaEnsureDocs(env, clients);
+        return json({ ok: true, sealed, count: slugs.length, slugs });
+      }
+      // REPORT_PW rotated: open the vault with the previous password, reseal
+      // under the current one. Reads KV directly — the cache says "sealed".
+      if (action === "clients.reseal") {
+        const oldPw = typeof body.oldPw === "string" ? body.oldPw : "";
+        if (!oldPw || oldPw.length > 200) return json({ error: "oldPw: required", path: "oldPw" }, 422);
+        let raw = null;
+        try { raw = await env.AAPS_DATA.get(AA_CLIENTS_KEY); } catch { return json({ error: AA_KV_FAILED }, 503); }
+        if (typeof raw !== "string") return json({ error: "not seeded" }, 404);
+        let opened;
+        try { opened = await aaOpenVault(raw, oldPw); } catch { return json({ error: AA_SEALED }, 409); }
+        await aaSeal(env, opened.clients);
+        return json({ ok: true, count: Object.keys(opened.clients).length });
+      }
+      // everything below works on an open roster; the writers re-read KV so a
+      // reseal never starts from a roster cached up to 60 s ago in this isolate
+      // (a client created, rotated or deleted elsewhere would be undone)
+      const roster = await aaRoster(env, action === "client.put" || action === "client.delete");
+      if (roster.error) return roster.error;
+      const clients = roster.clients;
+      const slug = String(body.slug || "").toLowerCase();
+      if (action === "clients.list") {
+        const list = [];
+        for (const [s, c] of Object.entries(clients)) list.push({ slug: s, label: c.label, demo: c.demo ? { from: c.demo.from, scale: c.demo.scale } : null, demoBadge: c.demoBadge !== false, doc: await aaGetDoc(env, s) });
+        list.sort((a, b) => a.label.localeCompare(b.label));
+        return json({ ok: true, vault: roster.fromVault, updatedAt: roster.updatedAt, clients: list });
+      }
+      // the ONLY route that returns a client password: one slug, on demand
+      if (action === "client.reveal") {
+        if (!ADMIN_SLUG_RE.test(slug) || !own(clients, slug)) return json({ error: "unknown client" }, 404);
+        return json({ ok: true, slug, pw: clients[slug].pw });
+      }
+      if (action === "client.put") {
+        if (!ADMIN_SLUG_RE.test(slug)) return json({ error: "bad slug", path: "slug" }, 400);
+        const existing = own(clients, slug) ? clients[slug] : null;
+        if (!existing && AA_RESERVED_SLUGS.has(slug)) return json({ error: "slug: reserved", path: "slug" }, 422);
+        // a real client's slug is the key clientOwns matches against the CRM
+        // (a demo's rows come from demo.from): too short and it owns everyone's
+        if (!existing && body.demo === undefined && slug.length < AA_REAL_SLUG_MIN) return json({ error: `slug: real client slugs need at least ${AA_REAL_SLUG_MIN} characters`, path: "slug" }, 422);
+        const entry = existing ? { ...existing } : {};
+        if (body.label !== undefined || !existing) {
+          if (body.label === undefined) return json({ error: "label: required", path: "label" }, 422);
+          const nm = validateName(body.label);
+          if (nm.error) return json({ error: `label: ${nm.error}`, path: "label" }, 422);
+          entry.label = nm.name;
+        }
+        // password: supplied, regenerated (existing clients), or generated on create
+        let pwSet = false;
+        if (body.pw !== undefined) {
+          const pw = body.pw;
+          if (typeof pw !== "string" || !AA_PW_RE.test(pw)) return json({ error: "pw: 8-128 printable characters, no spaces", path: "pw" }, 422);
+          if (await safeEqual(pw, env.REPORT_PW)) return json({ error: "pw: must differ from the report password", path: "pw" }, 422);
+          for (const [s, c] of Object.entries(clients)) if (s !== slug && (await safeEqual(pw, c.pw))) return json({ error: "pw: already used by another client", path: "pw" }, 422);
+          entry.pw = pw; pwSet = true;
+        } else if (!existing || body.regenPw === true) {
+          entry.pw = await aaFreshPw(env, clients, slug); pwSet = true;
+        }
+        if (body.demo !== undefined) {
+          const d = body.demo;
+          if (!isPlainObject(d) || Object.keys(d).some((k) => k !== "from" && k !== "scale")) return json({ error: "demo: must be {from, scale}", path: "demo" }, 422);
+          if (existing && !existing.demo) return json({ error: "demo: only demo clients", path: "demo" }, 422);
+          // from must be a KNOWN, REAL client: clientOwns is a substring match
+          // over tpa + client_name and must never see arbitrary text
+          const from = typeof d.from === "string" ? d.from.toLowerCase() : "";
+          if (!ADMIN_SLUG_RE.test(from) || from === slug || !own(clients, from) || clients[from].demo) return json({ error: "demo.from: unknown client", path: "demo.from" }, 422);
+          const scale = typeof d.scale === "number" ? Math.round(d.scale * 1000) / 1000 : NaN;
+          if (!Number.isFinite(scale) || scale < AA_SCALE_MIN || scale > AA_SCALE_MAX) return json({ error: "demo.scale: must be a number from 0.05 to 20", path: "demo.scale" }, 422);
+          entry.demo = { from, scale };
+        }
+        if (body.demoBadge !== undefined) {
+          if (typeof body.demoBadge !== "boolean") return json({ error: "demoBadge: must be true or false", path: "demoBadge" }, 422);
+          entry.demoBadge = body.demoBadge;
+        }
+        const brand = body.brand;
+        if (brand !== undefined && brand !== null) {
+          if (!isPlainObject(brand)) return json({ error: "brand: must be an object or null", path: "brand" }, 422);
+          if (JSON.stringify(brand).length > BRAND_DOC_MAX) return json({ error: "too large", path: "brand" }, 413);
+          const err = validateBrandAA(brand);
+          if (err) {
+            if (err.status === 413) return json({ error: "too large", path: err.path }, 413);
+            return json({ error: `${err.path}: ${err.reason}`, path: err.path }, err.status);
+          }
+        }
+        clients[slug] = entry;
+        // the vault is resealed iff the entry changed (or the roster was still
+        // CLIENT_PWS: first write materialises the vault, docs included)
+        if (!roster.fromVault) await aaEnsureDocs(env, clients);
+        if (!existing || !roster.fromVault || body.label !== undefined || pwSet || body.demo !== undefined || body.demoBadge !== undefined) await aaSeal(env, clients);
+        const prev = await aaGetDoc(env, slug);
+        const doc = { v: 1, slug, name: entry.label, demo: !!entry.demo, demoBadge: entry.demoBadge !== false,
+          brand: brand !== undefined ? brand : (prev && prev.brand) || null, updatedAt: new Date().toISOString(), updatedFrom: "admin" };
+        if (doc.brand) doc.brand.name = entry.label;
+        await env.AAPS_DATA.put(AA_BRAND_KEY_PREFIX + slug, JSON.stringify(doc));
+        // the password rides along only when this call set it (create, custom, regenPw)
+        const client = { slug, label: entry.label, demo: entry.demo ? { ...entry.demo } : null, demoBadge: entry.demoBadge !== false };
+        if (pwSet) client.pw = entry.pw;
+        return json({ ok: true, client, doc });
+      }
+      if (action === "client.delete") {
+        if (!ADMIN_SLUG_RE.test(slug) || !own(clients, slug)) return json({ error: "unknown client" }, 404);
+        if (!clients[slug].demo) {
+          for (const [s, c] of Object.entries(clients)) if (c.demo && c.demo.from === slug) return json({ error: `referenced by demo ${s}` }, 409);
+          if (body.force !== true) return json({ error: "only demo clients can be deleted", hint: "force" }, 409);
+        }
+        delete clients[slug];
+        await aaSeal(env, clients);
+        await env.AAPS_DATA.delete(AA_BRAND_KEY_PREFIX + slug);
+        // a real client's password may still be in the CLIENT_PWS secret, which
+        // the read route falls back to while the vault is absent or sealed
+        return json({ ok: true, slug, secretFallback: own(aaSecretClients(env), slug) });
+      }
+      return json({ error: "bad action" }, 400);
+    }
     if (!env.XANO_META_TOKEN || !env.XANO_CONTENT_URL) return json({ error: "Xano connection not configured" }, 500);
     // Live website-search feed for reports.myrxcard.com (root dashboard and the
     // /<slug>/ partner pages). Replaces the public Xano GET on search_events,
@@ -517,8 +878,10 @@ export default {
     if (body.feed_pw !== undefined) {
       const slug = String(body.site || "").toLowerCase();
       if (!/^[a-z0-9-]{0,40}$/.test(slug)) return json({ error: "bad site" }, 400);
-      // site "" proves the MASTER (same check as admin_pw) — same lockout counter
-      const denied = await checkPassword(req, env, slug ? "site:" + slug : "master", () => verifyReportPassword(slug, String(body.feed_pw || "")));
+      // site "" proves the MASTER (same check as admin_pw) — same lockout counter.
+      // Either way the password proven here is its scope's own credential
+      // (the partner's under "site:<slug>"), so a success clears that counter.
+      const denied = await checkPassword(req, env, slug ? "site:" + slug : "master", async () => (await verifyReportPassword(slug, String(body.feed_pw || ""))) ? "master" : false);
       if (denied) return denied;
       // Find the search_events table by NAME through the Metadata API. Never
       // by id: XANO_EVENTS_URL pointed at the Avalon process-events table, and
@@ -555,20 +918,30 @@ export default {
       return json({ ok: true, generatedAt: new Date().toISOString(), events });
     }
     // read route for the gated reports. The master password returns everything;
-    // a client password (CLIENT_PWS secret) returns only that client's rows,
-    // white-labeled server-side — the browser never sees other clients, fees,
-    // supplier pricing, or real sourcing names.
+    // a client password returns only that client's rows, white-labeled
+    // server-side — the browser never sees other clients, fees, supplier
+    // pricing, or real sourcing names. Client passwords come from the sealed
+    // aa:clients vault when it opens, else from the CLIENT_PWS secret; a DEMO
+    // client is a scaled, anonymized clone of a real client's rows.
     if (body.report_pw !== undefined) {
-      // REPORT_PW is the reports.myrxcard.com master password, so this route
-      // is a master oracle too: same lockout scope, constant-time compares.
+      // REPORT_PW is the Avalon Assist master (NOT the MyRxCard one): this
+      // route is that site's master oracle, so it shares lockout scope "aa"
+      // with aa_admin_pw and uses constant-time compares throughout.
       let clientMeta = null;
-      const denied = await checkPassword(req, env, "master", async () => {
+      const denied = await checkPassword(req, env, "aa", async () => {
         const given = typeof body.report_pw === "string" ? body.report_pw : "";
-        if (await safeEqual(given, env.REPORT_PW)) return true;
-        let map = {};
-        try { map = JSON.parse(env.CLIENT_PWS || "{}"); } catch {}
-        for (const [slug, c] of Object.entries(map)) {
-          if (c && typeof c.pw === "string" && (await safeEqual(given, c.pw))) { clientMeta = { slug, label: c.label || slug }; return true; }
+        if (await safeEqual(given, env.REPORT_PW)) return "master"; // the only success that clears the "aa" counter
+        const v = env.AAPS_DATA ? await aaLoadVault(env) : null;
+        // KV unreadable is neither "absent" nor "sealed": no CLIENT_PWS fallback
+        // (it would re-arm a password retired from the vault) — 503, retry,
+        // and no lockout accounting for the caller
+        if (v && v.state === "error") return json({ error: AA_KV_FAILED }, 503);
+        const clients = v && v.state === "ok" ? v.clients : aaSecretClients(env); // absent / sealed / no KV: the secret (documented degrade)
+        for (const [slug, c] of Object.entries(clients)) {
+          if (await safeEqual(given, c.pw)) {
+            clientMeta = { slug, label: c.label, demo: !!c.demo, demoBadge: c.demoBadge !== false, from: c.demo ? c.demo.from : slug, scale: c.demo ? c.demo.scale : 1 };
+            return true; // a client credential: authenticated, but it never resets the master's counter
+          }
         }
         return false;
       });
@@ -597,12 +970,15 @@ export default {
       if (clientMeta) {
         const out = [];
         for (const r of clean) {
-          if (!clientOwns(r, clientMeta.slug)) continue;
-          const w = whitelabel(r, clientMeta.label);
+          if (!clientOwns(r, clientMeta.from)) continue; // a demo clones its source client's rows
+          const w = whitelabel(r, clientMeta.label);      // ...under the demo's own label
+          if (clientMeta.demo) aaAnonymize(w, clientMeta.scale);
+          // tokens are re-HMACed under the CALLER's slug (the demo's, for a demo)
           if (w.member_ref) w.member_ref = await hmacHex16(env.MEMBER_SALT, clientMeta.slug + "|" + w.member_ref);
           out.push(w);
         }
-        return json({ ok: true, generatedAt: new Date().toISOString(), client: clientMeta, cases: out });
+        const { slug, label, demo, demoBadge } = clientMeta;
+        return json({ ok: true, generatedAt: new Date().toISOString(), client: { slug, label, demo, demoBadge }, cases: out });
       }
       // master view also carries per-client account profiles (KV, pushed from
       // the Accounts Deluge function): covered lives, AA-client flag, status

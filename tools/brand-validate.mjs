@@ -1,7 +1,14 @@
 // brand-validate.mjs — the partner-brand schema check shared by the sync
-// worker (brand.put), build-clients.mjs (before a KV doc is baked into a
-// committed <slug>/index.html) and test-admin-routes.mjs. The page mirrors
+// worker (brand.put for reports.myrxcard.com, client.put for
+// reports.avalonsaves.com), build-clients.mjs (before a KV doc is baked into a
+// committed <slug>/index.html) and test-admin-routes.mjs. Each page mirrors
 // the same rules in checkBrand as defense in depth.
+//
+// One rule set, two PROFILES (which keys exist at each level, which color
+// names, which enums): BRAND_PROFILE_MYRX is the default, so the one-argument
+// validateBrand(b) call is unchanged; validateBrandAA(b) is the Avalon Assist
+// variant (navy/teal/green/blue, gateHeading, no per-tab headings, no header
+// layout, no mono font).
 //
 // The worker imports this file relatively; wrangler bundles it on deploy.
 // No Cloudflare or Node imports here — plain ESM so it runs anywhere.
@@ -36,8 +43,27 @@ export const BRAND_ENUMS = {
   header: ["view-first", "title-first"],
   density: ["comfortable", "compact"],
 };
+export const BRAND_PROFILE_MYRX = { colorKeys: BRAND_COLOR_KEYS, keys: BRAND_KEYS, enums: BRAND_ENUMS };
+// ---- Avalon Assist profile (reports.avalonsaves.com admin) ----
+export const BRAND_COLOR_KEYS_AA = ["navy", "teal", "green", "blue"];
+export const BRAND_PROFILE_AA = {
+  colorKeys: BRAND_COLOR_KEYS_AA,
+  keys: {
+    root: ["name", "logo", "logoDark", "logoHeight", "tagline", "gateHeading", "poweredBy", "colors", "fonts", "headings", "layout"],
+    colors: [...BRAND_COLOR_KEYS_AA, "dark"],
+    fonts: ["google", "body", "heading"],
+    headings: ["transform", "weight", "letterSpacing"],
+    layout: ["radius", "density"],
+  },
+  enums: {
+    transform: ["none", "uppercase", "capitalize"],
+    density: ["comfortable", "compact"],
+  },
+};
 export const isPlainObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
-export function validateBrand(b) {
+export function validateBrand(b, profile = BRAND_PROFILE_MYRX) {
+  const { colorKeys, keys, enums } = profile;
+  const has = (group, k) => (keys[group] || []).includes(k); // does this profile carry the key at all?
   const fail = (path, reason, status) => ({ path, reason, status: status || 422 });
   if (!isPlainObject(b)) return fail("brand", "must be an object");
   if (JSON.stringify(b).length > BRAND_DOC_MAX) return fail("brand", "too large", 413);
@@ -93,61 +119,64 @@ export function validateBrand(b) {
     return null;
   };
   const colorSet = (obj, path) => {
-    for (const k of BRAND_COLOR_KEYS) { const e = color(obj, k, `${path}.${k}`); if (e) return e; }
+    for (const k of colorKeys) { const e = color(obj, k, `${path}.${k}`); if (e) return e; }
     return null;
   };
   let e;
-  if ((e = unknown(b, BRAND_KEYS.root, "brand"))) return e;
+  if ((e = unknown(b, keys.root, "brand"))) return e;
   if ((e = text(b, "name", "brand.name"))) return e;
   if ((e = logo(b, "logo", "brand.logo"))) return e;
   if ((e = logo(b, "logoDark", "brand.logoDark"))) return e;
   if ((e = intRange(b, "logoHeight", "brand.logoHeight", 12, 80))) return e;
   if ((e = text(b, "tagline", "brand.tagline"))) return e;
+  if (has("root", "gateHeading") && (e = text(b, "gateHeading", "brand.gateHeading"))) return e;
   if (b.poweredBy !== undefined && typeof b.poweredBy !== "boolean") return fail("brand.poweredBy", "must be true or false");
   if (b.colors !== undefined) {
     if (!isPlainObject(b.colors)) return fail("brand.colors", "must be an object");
-    if ((e = unknown(b.colors, BRAND_KEYS.colors, "brand.colors"))) return e;
+    if ((e = unknown(b.colors, keys.colors, "brand.colors"))) return e;
     if ((e = colorSet(b.colors, "brand.colors"))) return e;
     if (b.colors.dark !== undefined) {
       if (!isPlainObject(b.colors.dark)) return fail("brand.colors.dark", "must be an object");
-      if ((e = unknown(b.colors.dark, BRAND_COLOR_KEYS, "brand.colors.dark"))) return e;
+      if ((e = unknown(b.colors.dark, colorKeys, "brand.colors.dark"))) return e;
       if ((e = colorSet(b.colors.dark, "brand.colors.dark"))) return e;
     }
   }
   if (b.fonts !== undefined) {
     if (!isPlainObject(b.fonts)) return fail("brand.fonts", "must be an object");
-    if ((e = unknown(b.fonts, BRAND_KEYS.fonts, "brand.fonts"))) return e;
+    if ((e = unknown(b.fonts, keys.fonts, "brand.fonts"))) return e;
     if ((e = pattern(b.fonts, "google", "brand.fonts.google", BRAND_FONT_GOOGLE_RE, "must be Google Fonts family= parameters only (up to 4 families)"))) return e;
-    for (const k of ["body", "heading", "mono"]) {
+    for (const k of keys.fonts.filter((k) => k !== "google")) {
       if ((e = pattern(b.fonts, k, `brand.fonts.${k}`, BRAND_FONT_STACK_RE, "must be a font-family list (letters, digits, spaces, commas, quotes, hyphens; max 120)"))) return e;
     }
   }
   if (b.headings !== undefined) {
     const h = b.headings;
     if (!isPlainObject(h)) return fail("brand.headings", "must be an object");
-    if ((e = unknown(h, BRAND_KEYS.headings, "brand.headings"))) return e;
-    if ((e = oneOf(h, "transform", "brand.headings.transform", BRAND_ENUMS.transform))) return e;
+    if ((e = unknown(h, keys.headings, "brand.headings"))) return e;
+    if ((e = oneOf(h, "transform", "brand.headings.transform", enums.transform))) return e;
     if ((e = intRange(h, "weight", "brand.headings.weight", 300, 900))) return e;
     if ((e = pattern(h, "letterSpacing", "brand.headings.letterSpacing", BRAND_LETTER_SPACING_RE, "must be an em value like 0.02em or -0.01em (or 0)"))) return e;
-    if ((e = text(h, "gate", "brand.headings.gate"))) return e;
-    if ((e = text(h, "menuLabel", "brand.headings.menuLabel"))) return e;
+    if (has("headings", "gate") && (e = text(h, "gate", "brand.headings.gate"))) return e;
+    if (has("headings", "menuLabel") && (e = text(h, "menuLabel", "brand.headings.menuLabel"))) return e;
     for (const grp of ["tabs", "titles"]) {
-      if (h[grp] === undefined) continue;
+      if (!has("headings", grp) || h[grp] === undefined) continue;
       if (!isPlainObject(h[grp])) return fail(`brand.headings.${grp}`, "must be an object");
-      if ((e = unknown(h[grp], BRAND_KEYS.headingsPair, `brand.headings.${grp}`))) return e;
-      for (const k of BRAND_KEYS.headingsPair) if ((e = text(h[grp], k, `brand.headings.${grp}.${k}`))) return e;
+      if ((e = unknown(h[grp], keys.headingsPair, `brand.headings.${grp}`))) return e;
+      for (const k of keys.headingsPair) if ((e = text(h[grp], k, `brand.headings.${grp}.${k}`))) return e;
     }
   }
   if (b.layout !== undefined) {
     const l = b.layout;
     if (!isPlainObject(l)) return fail("brand.layout", "must be an object");
-    if ((e = unknown(l, BRAND_KEYS.layout, "brand.layout"))) return e;
-    if ((e = oneOf(l, "header", "brand.layout.header", BRAND_ENUMS.header))) return e;
+    if ((e = unknown(l, keys.layout, "brand.layout"))) return e;
+    if (has("layout", "header") && (e = oneOf(l, "header", "brand.layout.header", enums.header))) return e;
     if ((e = pattern(l, "radius", "brand.layout.radius", BRAND_RADIUS_RE, "must be a whole pixel value from 0px to 24px"))) return e;
-    if ((e = oneOf(l, "density", "brand.layout.density", BRAND_ENUMS.density))) return e;
+    if ((e = oneOf(l, "density", "brand.layout.density", enums.density))) return e;
   }
   return null;
 }
+// Avalon Assist brand (reports.avalonsaves.com): same rules, the AA profile.
+export const validateBrandAA = (b) => validateBrand(b, BRAND_PROFILE_AA);
 
 // The client display name follows the same text rules as brand strings and
 // must be present. Returns { name } (control characters stripped, trimmed)
