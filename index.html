@@ -4718,6 +4718,10 @@ function tabTitle(name) {
 }
 
 // apply a brand (null/invalid = stock look). Idempotent; safe to call any number of times.
+// Resolved brand token as a hex string, for the few render sites that need a
+// literal color (inline SVG fills / chart configs). File scope: used by the
+// search-tab renderer, which runs outside boot().
+const cssTok = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || "#0A4C70";
 function applyBrand(input) {
   resetBrand();
   const cs = window.CLIENT_SITE;
@@ -7421,7 +7425,6 @@ async function boot() {
   // contains ONLY that client's rows. The gate validates the password by
   // decrypting the client's own utilization.enc.json; the app is utilization-only.
   // Partner branding lives at file scope now (applyBrand / resetBrand / fetchLiveBrand above boot).
-  const cssTok = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || "#0A4C70";
 
   if (window.CLIENT_SITE) {
     // Clients get their utilization report AND live website-search activity
