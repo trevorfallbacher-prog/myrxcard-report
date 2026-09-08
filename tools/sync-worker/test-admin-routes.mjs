@@ -543,7 +543,7 @@ check("clients.seed -> sealed:true, count 2, slugs sorted", r.status === 200 && 
   // the vault opens with the same PBKDF2/AES-GCM scheme the harness uses (interop with tools/store.mjs)
   const enc = new TextEncoder(), b64 = (x) => Buffer.from(x, "base64");
   const baseKey = await crypto.subtle.importKey("raw", enc.encode(TEST_REPORT_PW), "PBKDF2", false, ["deriveKey"]);
-  const aesKey = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b64(rec.enc.salt), iterations: 310000, hash: "SHA-256" }, baseKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  const aesKey = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: b64(rec.enc.salt), iterations: rec.enc.iter === 100000 ? 100000 : 310000, hash: "SHA-256" }, baseKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
   let pt = null; try { pt = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(rec.enc.iv) }, aesKey, b64(rec.enc.data)))); } catch {}
   check("  vault opens under REPORT_PW with WebCrypto PBKDF2-310k/AES-GCM and holds {v:1, clients}", pt && pt.v === 1 && pt.clients && pt.clients.vault && pt.clients.vault.pw === "client-vault-pw" && pt.clients.marpai.label === "Marpai", JSON.stringify(pt && Object.keys(pt)));
 }

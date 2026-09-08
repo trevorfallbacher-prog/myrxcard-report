@@ -444,7 +444,19 @@ const AA_ACTIONS = new Set(["ping", "clients.list", "client.reveal", "clients.se
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 let aaVault = { at: 0, pw: undefined, raw: null, state: "absent", clients: null, updatedAt: null }; // state: absent | ok | sealed | error
 
-async function aaKey(pw, salt, usages) {
+// Vault key. New seals use the NATIVE WebCrypto PBKDF2 at 100k iterations
+// (Workers cap WebCrypto PBKDF2 at 100k) — ~30 ms instead of the ~400 ms the
+// pure-JS 310k derivation costs here; a vault write (open + reseal) was ~1.2 s
+// CPU and tripped the Worker limit on cold isolates. Only the worker ever
+// opens this vault, so it is not bound to the page's 310k file format. Records
+// sealed before this change (no enc.iter) still open through the JS path and
+// are re-sealed in the new format on their next write.
+const AA_VAULT_ITER = 100000;
+async function aaKey(pw, salt, usages, iter) {
+  if (iter === AA_VAULT_ITER) {
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey({ name: "PBKDF2", salt, iterations: AA_VAULT_ITER, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, usages);
+  }
   const raw = pbkdf2Sha256_32(new TextEncoder().encode(pw), salt, 310000);
   return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, usages);
 }
@@ -473,7 +485,7 @@ async function aaOpenVault(raw, pw) {
   const rec = JSON.parse(raw);
   const enc = rec && rec.enc;
   if (!isPlainObject(enc) || [enc.salt, enc.iv, enc.data].some((v) => typeof v !== "string" || !B64_RE.test(v))) throw new Error("malformed vault record");
-  const key = await aaKey(pw, b64dec(enc.salt), ["decrypt"]);
+  const key = await aaKey(pw, b64dec(enc.salt), ["decrypt"], enc.iter === AA_VAULT_ITER ? AA_VAULT_ITER : undefined);
   const pt = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64dec(enc.iv) }, key, b64dec(enc.data))));
   if (!isPlainObject(pt) || !isPlainObject(pt.clients)) throw new Error("malformed vault plaintext");
   return { clients: aaNormalizeClients(pt.clients), updatedAt: typeof rec.updatedAt === "string" ? rec.updatedAt : null };
@@ -510,10 +522,10 @@ async function aaLoadVault(env, fresh) {
 // isolate immediately (the cache is primed from the plaintext just written).
 async function aaSeal(env, clients) {
   const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await aaKey(String(env.REPORT_PW || ""), salt, ["encrypt"]);
+  const key = await aaKey(String(env.REPORT_PW || ""), salt, ["encrypt"], AA_VAULT_ITER);
   const data = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(JSON.stringify({ v: 1, clients })));
   const updatedAt = new Date().toISOString();
-  const raw = JSON.stringify({ v: 1, updatedAt, enc: { salt: b64enc(salt), iv: b64enc(iv), data: b64enc(new Uint8Array(data)) } });
+  const raw = JSON.stringify({ v: 1, updatedAt, enc: { salt: b64enc(salt), iv: b64enc(iv), data: b64enc(new Uint8Array(data)), iter: AA_VAULT_ITER } });
   await env.AAPS_DATA.put(AA_CLIENTS_KEY, raw);
   aaVault = { at: Date.now(), pw: env.REPORT_PW, raw, state: "ok", clients: aaNormalizeClients(clients), updatedAt };
   return updatedAt;
