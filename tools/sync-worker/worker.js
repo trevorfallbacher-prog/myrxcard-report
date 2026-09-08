@@ -449,6 +449,7 @@ export default {
         const name = nm.name;
         const brand = body.brand;
         if (brand === undefined) return json({ error: "brand: must be an object or null", path: "brand" }, 422);
+        if (body.demoBadge !== undefined && typeof body.demoBadge !== "boolean") return json({ error: "demoBadge: must be true or false", path: "demoBadge" }, 422);
         if (brand !== null) {
           if (!isPlainObject(brand)) return json({ error: "brand: must be an object or null", path: "brand" }, 422);
           if (JSON.stringify(brand).length > BRAND_DOC_MAX) return json({ error: "too large", path: "brand" }, 413);
@@ -471,6 +472,8 @@ export default {
           type: (typeof body.type === "string" && /^[a-z]{1,20}$/.test(body.type) && body.type)
             || (existing && typeof existing.type === "string" && existing.type) || "pharmacy",
           demo: typeof body.demo === "boolean" ? body.demo : (existing ? !!existing.demo : false),
+          // demo sites only: whether the page shows the DEMO DATA badge (data is anonymized regardless)
+          demoBadge: typeof body.demoBadge === "boolean" ? body.demoBadge : (existing && typeof existing.demoBadge === "boolean" ? existing.demoBadge : true),
           brand,
           updatedAt: new Date().toISOString(),
           updatedFrom: body.updatedFrom === "seed" ? "seed" : "admin",

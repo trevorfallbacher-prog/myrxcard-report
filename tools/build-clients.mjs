@@ -170,9 +170,9 @@ function resolveBrand(client, kv) {
   if (kv && kv.found) {
     const name = typeof kv.doc.name === "string" && kv.doc.name ? kv.doc.name : client.name;
     const brand = kv.doc.brand && typeof kv.doc.brand === "object" ? { ...kv.doc.brand, name } : undefined;
-    return { name, brand, source: kv.doc.brand ? "KV brand" : "KV stock" };
+    return { name, brand, demoBadge: kv.doc.demoBadge !== false, source: kv.doc.brand ? "KV brand" : "KV stock" };
   }
-  return { name: client.name, brand: codeBrand(client), source: kv && kv.failed ? "code default (KV unavailable)" : "code default" };
+  return { name: client.name, brand: codeBrand(client), demoBadge: true, source: kv && kv.failed ? "code default (KV unavailable)" : "code default" };
 }
 
 // "<" is escaped so admin-edited text (tagline, headings…) can never close
@@ -237,7 +237,8 @@ if (htmlOnly) {
       if (prev && prev.demo) demo = prev.demo;
       else { demo = { from: client.demo.from, note: client.demo.note, nameMap: {} }; console.warn(`! /${client.slug}/ demo nameMap not found in the existing copy — searches will not be relabeled until a claims rebuild`); }
     }
-    const { name, brand, source } = resolveBrand(client, kvBrands.get(client.slug));
+    const { name, brand, demoBadge, source } = resolveBrand(client, kvBrands.get(client.slug));
+    if (demo && demoBadge === false) demo = { ...demo, badge: false }; // offline fallback for the admin's badge choice
     const marker = markerFor({ slug: client.slug, name, type: client.type, brand, demo });
     writeFileSync(join(dir, "index.html"), rootIndex.replace("<body>", "<body>\n" + marker));
     built.push(client.slug);
@@ -292,8 +293,9 @@ if (htmlOnly) {
     // password (instead of the multi-MB utilization file)
     writeFileSync(join(dir, "gate.enc.json"), JSON.stringify(await encryptJSON({ v: 1, slug: client.slug, purpose: "gate" }, secrets[client.slug])) + "\n");
     // brand block: KV doc if the owner has one, else the code default (logos inlined as data URIs)
-    const { name, brand, source } = resolveBrand(client, kvBrands.get(client.slug));
-    const demo = client.demo ? { from: client.demo.from, note: client.demo.note, nameMap: client.demo.nameMap || {} } : undefined;
+    const { name, brand, demoBadge, source } = resolveBrand(client, kvBrands.get(client.slug));
+    let demo = client.demo ? { from: client.demo.from, note: client.demo.note, nameMap: client.demo.nameMap || {} } : undefined;
+    if (demo && demoBadge === false) demo = { ...demo, badge: false };
     const marker = markerFor({ slug: client.slug, name, type: client.type, brand, demo });
     writeFileSync(join(dir, "index.html"), rootIndex.replace("<body>", "<body>\n" + marker));
 

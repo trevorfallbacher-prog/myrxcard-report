@@ -1525,6 +1525,7 @@
               <div class="cl-field"><label for="cb-title-util">Utilization page title</label><input class="cl-input" id="cb-title-util" data-path="brand.headings.titles.util" maxlength="80" placeholder="Performance Summary - MyRxCard"></div>
             </div>
             <label class="cl-check"><input type="checkbox" id="cb-powered" data-path="brand.poweredBy" checked> Show &ldquo;Powered by MyRxCard&rdquo; under the logo</label>
+            <label class="cl-check" id="cb-demobadge-wrap" hidden><input type="checkbox" id="cb-demobadge" data-path="demoBadge" checked> Show the &ldquo;DEMO DATA &middot; anonymized sample&rdquo; badge on the page <span class="hint">&middot; demo sites only; the data stays anonymized either way</span></label>
           </div>
           <div class="cl-sec">
             <div class="kicker">Logo <span class="hint">&middot; SVG, PNG, WebP or JPEG &middot; rasters are resized to 640&times;200 &middot; 200 KB max</span></div>
@@ -5101,7 +5102,7 @@ function buildCard(doc) {
   card.appendChild(wrap);
   const meta = mkEl("div", "cl-meta");
   const nm = mkEl("div", "cl-name", doc.name || doc.slug);
-  if (doc.demo) nm.appendChild(mkEl("span", "cl-badge demo", "DEMO"));
+  if (doc.demo) nm.appendChild(mkEl("span", "cl-badge demo", doc.demoBadge === false ? "DEMO · badge hidden" : "DEMO"));
   meta.appendChild(nm);
   const a = mkEl("a", "cl-url", "reports.myrxcard.com/" + doc.slug + "/");
   a.href = "/" + encodeURIComponent(doc.slug) + "/"; a.target = "_blank"; a.rel = "noopener";
@@ -5353,6 +5354,8 @@ function populateForm() {
   $("cb-tab-search").value = tabs.search || ""; $("cb-tab-util").value = tabs.util || "";
   $("cb-title-search").value = titles.search || ""; $("cb-title-util").value = titles.util || "";
   $("cb-powered").checked = b.poweredBy !== false;
+  $("cb-demobadge-wrap").hidden = !(clients.editing && clients.editing.demo);
+  $("cb-demobadge").checked = !(clients.editing && clients.editing.demoBadge === false);
   $("cb-logoh").value = b.logoHeight ? String(b.logoHeight) : "";
   for (const hex of $("cb-colors").querySelectorAll("input.cl-input")) {
     const src = hex.dataset.set === "dark" ? dk : c;
@@ -5419,6 +5422,7 @@ function readFormIntoDraft() {
   setText(b.headings.tabs, "search", v("cb-tab-search")); setText(b.headings.tabs, "util", v("cb-tab-util"));
   setText(b.headings.titles, "search", v("cb-title-search")); setText(b.headings.titles, "util", v("cb-title-util"));
   b.poweredBy = $("cb-powered").checked;
+  d.demoBadge = $("cb-demobadge").checked;
   const lh = parseInt(v("cb-logoh"), 10);
   if (Number.isInteger(lh)) b.logoHeight = lh; else delete b.logoHeight;
   b.colors = b.colors || {}; b.colors.dark = b.colors.dark || {};
@@ -5632,7 +5636,7 @@ async function saveClient() {
   $("cb-save").disabled = true; $("cb-revert").disabled = true;
   $("cb-status").textContent = "Saving…";
   try {
-    const out = await adminApi("brand.put", { slug: clients.editing.slug, name, brand });
+    const out = await adminApi("brand.put", { slug: clients.editing.slug, name, brand, ...(clients.editing.demo ? { demoBadge: d.demoBadge !== false } : {}) });
     upsertDoc(out.doc);
     clients.editing = out.doc || clients.editing;
     clients.dirty = false;
@@ -5655,7 +5659,7 @@ async function revertToStock() {
   $("cb-save").disabled = true; $("cb-revert").disabled = true;
   $("cb-status").textContent = "Reverting…";
   try {
-    const out = await adminApi("brand.put", { slug: clients.editing.slug, name, brand: null });
+    const out = await adminApi("brand.put", { slug: clients.editing.slug, name, brand: null, ...(clients.editing.demo ? { demoBadge: $("cb-demobadge").checked } : {}) });
     upsertDoc(out.doc);
     clients.editing = out.doc || clients.editing;
     clients.draft = { name, brand: {} };
@@ -7455,6 +7459,10 @@ async function boot() {
       // baked marker brand (KV has no opinion, or is unreachable with no fresh cache).
       // Applied while the gate is still hidden, so there is no flash of the stock look.
       const live = await brandP;
+      // demo sites: the admin can hide the DEMO DATA badge (data stays anonymized);
+      // the live doc wins, the baked marker's demo.badge is the offline fallback
+      window.CLIENT_SITE.demoBadge = live.doc ? live.doc.demoBadge !== false
+        : !(window.CLIENT_SITE.demo && window.CLIENT_SITE.demo.badge === false);
       if (live.doc) {
         const nm = brandText(live.doc.name).trim();
         if (nm && !/[<>]/.test(nm)) window.CLIENT_SITE.name = nm.slice(0, BRAND_TEXT_MAX);
@@ -7692,7 +7700,7 @@ async function boot() {
       util.data = data;
       util.loaded = true;
       enterApp("live");
-      if (DEMO) { const b = $("sample-badge"); b.textContent = "DEMO DATA · anonymized sample"; b.title = DEMO.note || ""; b.hidden = false; }
+      if (DEMO && window.CLIENT_SITE.demoBadge !== false) { const b = $("sample-badge"); b.textContent = "DEMO DATA · anonymized sample"; b.title = DEMO.note || ""; b.hidden = false; }
       await setTab("util");
       loadClientSearch(); // background; the search tab fills in when it lands
     };
