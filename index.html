@@ -2993,29 +2993,32 @@ function shortMoney(n) {
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 
 async function loadUtil() {
-  util.data = null;
-  util.merged = null;
-  util.error = null;
+  // decrypt into locals and swap at the end: a store that is already on screen
+  // must never go blank while a reload is in flight
+  let next = null, error = null;
   // 1) encrypted store (published by the watcher) — decrypt with the gate passphrase
   try {
     const res = await fetch("utilization.enc.json", { cache: "no-store" });
     if (res.ok) {
       const blob = await res.json();
       if (gatePw) {
-        try { util.data = await decryptConfig(blob, gatePw); }
-        catch { util.error = "Could not decrypt the utilization report with this session's password."; }
+        try { next = await decryptConfig(blob, gatePw); }
+        catch { error = "Could not decrypt the utilization report with this session's password."; }
       } else {
-        util.error = "Utilization is encrypted — unlock the report to view it.";
+        error = "Utilization is encrypted — unlock the report to view it.";
       }
     }
   } catch { /* not deployed, fall through */ }
   // 2) plain store fallback (local/preview, or if you chose not to encrypt)
-  if (!util.data && !util.error) {
+  if (!next && !error) {
     try {
       const res = await fetch("utilization.json", { cache: "no-store" });
-      if (res.ok) util.data = await res.json();
+      if (res.ok) next = await res.json();
     } catch { /* leave null */ }
   }
+  util.data = next;
+  util.merged = null;
+  util.error = error;
   util.loaded = true;
 }
 
@@ -4144,7 +4147,10 @@ function ensureUtilData() {
   if (!util.loadPromise) util.loadPromise = loadUtil().then(() => {
     if (util.data && !util.merged) util.merged = mergedPeriod(util.data);
     if (!util.f) utilFilterReset(); // crossover filters facts before any tab initialized the slicers
+    // a util/fees view painted while the store was still loading shows its empty
+    // placeholder — repaint it now (setTab's own await covers the first visit)
     if (state.tab === "search") renderAll();
+    else if ((state.tab === "util" || state.tab === "fees") && !$(state.tab === "fees" ? "fees-empty" : "util-empty").hidden) renderUtil();
   });
   return util.loadPromise;
 }
@@ -7702,6 +7708,7 @@ async function boot() {
       gatePw = pw;
       util.data = data;
       util.loaded = true;
+      util.loadPromise = Promise.resolve(); // the gate already decrypted the store — ensureUtilData must not reload (and blank) it
       enterApp("live");
       if (DEMO && window.CLIENT_SITE.demoBadge !== false) { const b = $("sample-badge"); b.textContent = "DEMO DATA · anonymized sample"; b.title = DEMO.note || ""; b.hidden = false; }
       await setTab("util");
