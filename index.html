@@ -2953,8 +2953,16 @@ async function sync() {
 // quarterly claims .xlsx is dropped into the Avalon Reports folder).
 let util = { loaded: false, data: null, period: null, trend: { measure: "money", dims: "2d" }, tf: { gran: "Q", sel: null } };
 
+// Storage access itself can throw (Safari "Block all cookies", partitioned or
+// private contexts). Every read/write goes through these so a storage error
+// never aborts the script at file scope or blocks an otherwise successful unlock.
+function lsGet(k) { try { return localStorage.getItem(k); } catch { return null; } }
+function ssGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
+function ssSet(k, v) { try { sessionStorage.setItem(k, v); } catch { /* best-effort: the session just isn't remembered */ } }
+function ssDel(k) { try { sessionStorage.removeItem(k); } catch { /* ignore */ } }
+
 // apply the saved theme before anything renders (charts read theme at render)
-if (localStorage.getItem("mrx-theme") === "dark") document.documentElement.classList.add("dark");
+if (lsGet("mrx-theme") === "dark") document.documentElement.classList.add("dark");
 const isDark = () => document.documentElement.classList.contains("dark");
 
 // outline icon set (TailAdmin-style), keyed for stat/KPI tiles
@@ -4505,6 +4513,18 @@ async function setTab(name) {
   }
   updatePrintMeta();
 }
+// Event-driven entry to setTab: a throw inside ensureUtilData/renderUtil must
+// surface (stamp + notice) instead of dying as an unhandled rejection with the
+// stamp stuck on LOADING…
+function openTab(name) {
+  return setTab(name).catch((e) => {
+    console.error(e);
+    stamp(false, "RENDER FAILED");
+    const n = $("notice");
+    n.style.display = "block";
+    n.textContent = "This view could not be rendered (" + (e && e.message ? e.message : String(e)) + "). Try another tab or reload the page.";
+  });
+}
 
 /* ---------------- partner branding ----------------
    Brand = { name?, logo?, logoDark? (data URIs), logoHeight?, tagline?, poweredBy?,
@@ -4855,7 +4875,7 @@ let clients = {
   frames: [], editorFrame: null, remaskTimers: [], fontLinks: new Set(), postTimer: null, readyTimer: null,
 };
 const clientsActive = () => !window.CLIENT_SITE && state.mode === "live";
-const adminPw = () => gatePw || sessionStorage.getItem("mrx-pw");
+const adminPw = () => gatePw || ssGet("mrx-pw");
 
 async function adminApi(action, extra = {}) {
   const pw = adminPw();
@@ -5693,6 +5713,7 @@ async function revertToStock() {
 const DOCS_API = "https://myrxcard-docs.trevorfallbacher.workers.dev";
 let docs = {
   pdf: null, busy: false, template: null, templatesLoaded: false, draft: [],
+  job: null,     // token of the in-flight runDocBuild poll; doc-reset nulls it to cancel the loop
   footer: "FOR MORE INFORMATION, CONTACT INFO@AVALONSAVES.COM OR CALL (844)696-4566",
   undo: [],      // JSON snapshots of {draft, footer}, newest last
   joining: null, // block index collecting columns while join-mode is active
@@ -5720,7 +5741,7 @@ function undoDraft() {
 }
 function updateUndoBtn() { const b = $("dp-undo-btn"); if (b) b.disabled = !docs.undo.length; }
 
-const docsPw = () => gatePw || sessionStorage.getItem("mrx-pw") || prompt("Team password");
+const docsPw = () => gatePw || ssGet("mrx-pw") || prompt("Team password");
 
 // AI visuals backend (tools/image-worker): brand-palette icons as SVG and
 // brand-styled illustrations; gated by the same report password
@@ -6376,6 +6397,8 @@ async function runDocBuild() {
   if (!blocks.length && !req) { st.textContent = "type something into the page (or write a brief) first"; return; }
   docs.busy = true;
   $("doc-run").disabled = true;
+  const myJob = Symbol("doc-job"); // reset (or a newer build) replaces docs.job; this loop then stands down
+  docs.job = myJob;
   try {
     const body = { kind: "generate", mode: "generate", footer: docs.footer, instruction: req || "Build the document exactly from the draft blocks." };
     if (blocks.length) body.blocks = blocks; // deterministic build from the page
@@ -6393,10 +6416,13 @@ async function runDocBuild() {
     }
     st.textContent = "queued for the design agent…";
     const sub = await docsApi("/jobs/submit", body);
+    if (docs.job !== myJob) return; // cancelled by doc-reset while submitting
     const t0 = Date.now();
     for (;;) {
       await new Promise((r) => setTimeout(r, 6000));
+      if (docs.job !== myJob) return; // cancelled: never touch #doc-status again
       const s2 = await docsApi("/jobs/status", { id: sub.id });
+      if (docs.job !== myJob) return;
       if (s2.status === "done") break;
       if (s2.status === "failed") throw new Error(s2.error || "the design agent hit an error");
       const mins = (Date.now() - t0) / 60000;
@@ -6406,6 +6432,7 @@ async function runDocBuild() {
       if (mins > 15) throw new Error("timed out — the result will still appear here if you retry once the agent catches up");
     }
     const res2 = await docsApi("/jobs/result", { id: sub.id });
+    if (docs.job !== myJob) return; // the admin reset the page while the result was in flight
     docs.pdf = res2.pdf;
     $("doc-frame").removeAttribute("srcdoc");
     $("doc-frame").src = URL.createObjectURL(b64ToBlob(res2.pdf, "application/pdf"));
@@ -6415,10 +6442,13 @@ async function runDocBuild() {
     layoutDocPanels();
     st.textContent = (res2.note ? res2.note + " · " : "") + "tweak the page and build again, or save it as a template";
   } catch (e) {
-    st.textContent = "failed: " + e.message;
+    if (docs.job === myJob) st.textContent = "failed: " + e.message;
   } finally {
-    docs.busy = false;
-    $("doc-run").disabled = false;
+    if (docs.job === myJob) { // a cancelled job leaves busy/doc-run to whoever replaced it
+      docs.job = null;
+      docs.busy = false;
+      $("doc-run").disabled = false;
+    }
   }
 }
 
@@ -6437,8 +6467,8 @@ async function unlock(password) {
   // keep the working passphrase for this session so the Utilization tab can
   // decrypt utilization.enc.json too (same store as the already-decrypted cfg)
   gatePw = okPw;
-  sessionStorage.setItem("mrx-cfg", JSON.stringify(cfg));
-  sessionStorage.setItem("mrx-pw", okPw);
+  ssSet("mrx-cfg", JSON.stringify(cfg));
+  ssSet("mrx-pw", okPw);
   enterApp("live");
   await sync();
   setInterval(sync, 5 * 60 * 1000);
@@ -6466,7 +6496,7 @@ async function boot() {
   // client sites alike) and return to the gate
   $("logout-btn").addEventListener("click", () => {
     clientsRemaskAll();
-    for (const k of Object.keys(sessionStorage)) if (k.startsWith("mrx-")) sessionStorage.removeItem(k);
+    try { for (const k of Object.keys(sessionStorage)) if (k.startsWith("mrx-")) sessionStorage.removeItem(k); } catch { /* storage denied: nothing was remembered */ }
     location.reload();
   });
   $("period-select").addEventListener("change", () => {
@@ -6614,7 +6644,7 @@ async function boot() {
   themeIcon();
   $("theme-btn").addEventListener("click", () => {
     document.documentElement.classList.toggle("dark");
-    localStorage.setItem("mrx-theme", isDark() ? "dark" : "light");
+    try { localStorage.setItem("mrx-theme", isDark() ? "dark" : "light"); } catch { /* theme just won't persist */ }
     themeIcon();
     if (state.events.length) renderAll();
     if (util.loaded && util.data && state.tab === "util") renderUtil();
@@ -6656,11 +6686,11 @@ async function boot() {
   initReveals(); // panels reveal (and numbers roll) as they scroll into view
   $("tabs").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-tab]");
-    if (b) setTab(b.dataset.tab);
+    if (b) openTab(b.dataset.tab);
   });
   $("side-nav").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-tab]");
-    if (b) { setTab(b.dataset.tab); $("sidebar").classList.remove("open"); }
+    if (b) { openTab(b.dataset.tab); $("sidebar").classList.remove("open"); }
   });
   $("menu-btn").addEventListener("click", (e) => {
     e.stopPropagation();
@@ -7199,6 +7229,9 @@ async function boot() {
   $("doc-print").addEventListener("click", downloadResultPdf);
   $("doc-download").addEventListener("click", downloadResultPdf);
   $("doc-reset").addEventListener("click", () => {
+    docs.job = null; // cancel an in-flight build poll so it cannot overwrite the cleared status
+    docs.busy = false;
+    $("doc-run").disabled = false;
     docs.pdf = null;
     docs.template = null;
     docs.draft = [];
@@ -7758,10 +7791,10 @@ async function boot() {
       try { window.parent.postMessage({ type: "mrx-ready", slug }, location.origin); } catch { /* ignore */ }
       return;
     }
-    const cached = sessionStorage.getItem(pwKey);
+    const cached = ssGet(pwKey);
     if (cached) {
       try { const { data, pw } = await tryPw(cached); await enterClient(data, pw); return; }
-      catch { sessionStorage.removeItem(pwKey); }
+      catch { ssDel(pwKey); }
     }
     $("gate").hidden = false;
     $("gate-form").addEventListener("submit", async (e) => {
@@ -7770,7 +7803,7 @@ async function boot() {
       btn.disabled = true; btn.textContent = "…"; $("gate-err").textContent = "";
       try {
         const { data, pw } = await tryPw($("gate-pw").value);
-        sessionStorage.setItem(pwKey, pw);
+        ssSet(pwKey, pw); // best-effort: a storage error must not block a successful unlock
         await enterClient(data, pw);
       } catch {
         $("gate-err").textContent = "That password didn't unlock the report.";
@@ -7790,10 +7823,10 @@ async function boot() {
 
   if (encBlob) {
     window.__ENC_CONFIG = encBlob;
-    const cached = sessionStorage.getItem("mrx-cfg");
+    const cached = ssGet("mrx-cfg");
     if (cached) {
       cfg = JSON.parse(cached);
-      gatePw = sessionStorage.getItem("mrx-pw");
+      gatePw = ssGet("mrx-pw");
       enterApp("live");
       await sync();
       setInterval(sync, 5 * 60 * 1000);
@@ -7839,7 +7872,13 @@ async function boot() {
   $("setup").style.display = "block";
 }
 
-boot();
+boot().catch((e) => { // a boot failure must be visible — never a blank page with no gate
+  console.error(e);
+  try {
+    $("gate").hidden = false;
+    $("gate-err").textContent = "This report could not start: " + (e && e.message ? e.message : String(e));
+  } catch { /* nothing left to show it on */ }
+});
 </script>
 </body>
 </html>

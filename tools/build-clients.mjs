@@ -183,6 +183,31 @@ function markerFor({ slug, name, type, brand, demo }) {
   return `<script>window.CLIENT_SITE = ${json};</script>`;
 }
 
+// Does an existing gate.enc.json still open with this client's current password?
+// Mirrors the worker's check (PBKDF2-SHA256 310k -> AES-GCM-256, blob {salt,iv,data}
+// base64) so an --html-only rebuild can leave a good gate file alone instead of
+// re-encrypting it with a fresh salt on every run (which churned one file per
+// client per build). Returns null when the file is fine, else why it needs writing.
+async function gateFileProblem(path, slug, password) {
+  if (!existsSync(path)) return "missing";
+  let blob;
+  try { blob = JSON.parse(readFileSync(path, "utf8")); } catch { return "unreadable"; }
+  if (!isPlainObject(blob) || [blob.salt, blob.iv, blob.data].some((v) => typeof v !== "string")) return "malformed";
+  try {
+    const b = (x) => new Uint8Array(Buffer.from(x, "base64"));
+    const baseKey = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveKey"]);
+    const aesKey = await crypto.subtle.deriveKey(
+      { name: "PBKDF2", salt: b(blob.salt), iterations: 310000, hash: "SHA-256" },
+      baseKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b(blob.iv) }, aesKey, b(blob.data));
+    const doc = JSON.parse(new TextDecoder().decode(plain));
+    if (!isPlainObject(doc) || doc.purpose !== "gate" || doc.slug !== slug) return "wrong contents";
+    return null;
+  } catch {
+    return "does not decrypt with the current password";
+  }
+}
+
 // The demo block from an already-built copy (nameMap is derived from claims
 // rows, so --html-only has to carry it over rather than recompute it).
 function existingMarker(slug) {
@@ -228,9 +253,20 @@ if (htmlOnly) {
   for (const client of CLIENTS) {
     const dir = join(REPO_ROOT, client.slug);
     if (!existsSync(join(dir, "utilization.enc.json"))) { console.warn(`! /${client.slug}/ has no utilization.enc.json yet — skipped (build it from claims first)`); continue; }
-    // (re)write the tiny gate file whenever the password is known, so sites built
-    // before gate files existed pick one up on an html-only rebuild
-    if (secrets[client.slug]) writeFileSync(join(dir, "gate.enc.json"), JSON.stringify(await encryptJSON({ v: 1, slug: client.slug, purpose: "gate" }, secrets[client.slug])) + "\n");
+    // The tiny gate file is written only when it is missing or no longer opens
+    // with the client's current password (sites built before gate files existed,
+    // or a password change since). A good one is left byte-for-byte alone so an
+    // html-only rebuild does not churn every client's gate.enc.json with a fresh
+    // salt. The claims build below still writes it unconditionally.
+    let gateNote = "";
+    if (secrets[client.slug]) {
+      const gatePath = join(dir, "gate.enc.json");
+      const problem = await gateFileProblem(gatePath, client.slug, secrets[client.slug]);
+      if (problem) {
+        writeFileSync(gatePath, JSON.stringify(await encryptJSON({ v: 1, slug: client.slug, purpose: "gate" }, secrets[client.slug])) + "\n");
+        gateNote = `, gate.enc.json rewritten (${problem})`;
+      }
+    }
     const prev = existingMarker(client.slug);
     let demo;
     if (client.demo) {
@@ -242,7 +278,7 @@ if (htmlOnly) {
     const marker = markerFor({ slug: client.slug, name, type: client.type, brand, demo });
     writeFileSync(join(dir, "index.html"), rootIndex.replace("<body>", "<body>\n" + marker));
     built.push(client.slug);
-    console.log(`✓ /${client.slug}/  ${printable(name)} — index.html rebuilt (${brand ? "branded" : "stock look"}, ${source})`);
+    console.log(`✓ /${client.slug}/  ${printable(name)} — index.html rebuilt (${brand ? "branded" : "stock look"}, ${source}${gateNote})`);
   }
   if (!built.length) { console.error("No client folders to rebuild."); process.exit(1); }
 } else {
