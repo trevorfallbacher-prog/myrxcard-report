@@ -122,6 +122,21 @@
   .gate-panel button:hover { background: var(--tertiary); }
   .gate-panel button:disabled { background: var(--hair-bright); color: #fff; cursor: default; }
   .gate-error { color: var(--danger); font-size: 13px; margin-top: 12px; min-height: 18px; }
+  /* email sign-in (Cloudflare Access via the worker's same-host /login route). Everything
+     stays hidden until the site's access settings are configured, so the stock gate is unchanged. */
+  .gate-panel form[hidden], .gate-sso[hidden], .gate-session[hidden] { display: none; }
+  .gate-or { display: flex; align-items: center; gap: 10px; margin: 14px 0 12px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-mute); }
+  .gate-or::before, .gate-or::after { content: ""; flex: 1; height: 1px; background: var(--hair); }
+  .gate-sso-btn {
+    display: block; text-align: center; background: transparent; color: var(--secondary); border: 1px solid var(--secondary);
+    border-radius: 8px; padding: 9px 18px; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer;
+    transition: background 150ms ease-out, color 150ms ease-out;
+  }
+  .gate-sso-btn:hover { background: var(--secondary); color: #F2F8FF; }
+  .gate-session { margin-top: 14px; font-size: 13px; color: var(--ink-soft); line-height: 1.6; overflow-wrap: anywhere; }
+  .gate-session b { color: var(--ink); font-weight: 600; }
+  .gate-session a { color: var(--secondary); text-decoration: none; white-space: nowrap; }
+  .gate-session a:hover { text-decoration: underline; }
 
   /* ---------- Shell: white sidebar + white topbar on soft canvas (TailAdmin v2) ---------- */
   #app { display: none; }
@@ -961,6 +976,30 @@
   .cl-err { color: var(--danger); font-size: 12px; margin-top: 4px; }
   .cl-err:empty { display: none; }
   .cl-copied { color: var(--success) !important; border-color: var(--success) !important; }
+  /* email sign-in admin: site-level ACCESS SETUP box + per-card allow-lists (chips) */
+  .cl-access { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+  .cl-access-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .cl-access-head .kicker { display: flex; align-items: center; gap: 10px; }
+  .cl-access-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 10px; align-items: end; }
+  .cl-access-sec { display: flex; flex-direction: column; gap: 8px; }
+  .cl-card .cl-access-sec { border-top: 1px solid var(--hair); padding-top: 10px; }
+  .cl-chiprow { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .cl-chiprow > label { font-size: 12px; color: var(--ink-soft); }
+  .cl-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cl-chips:empty { display: none; }
+  .cl-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; font-family: var(--mono); font-size: 12px; padding: 3px 6px 3px 9px; border-radius: 999px; background: var(--card-solid); border: 1px solid var(--hair); color: var(--ink); }
+  .cl-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cl-chip button { background: none; border: 0; padding: 0 2px; color: var(--ink-mute); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
+  .cl-chip button:hover { color: var(--danger); }
+  .cl-chipadd { display: flex; gap: 6px; align-items: center; }
+  .cl-chipadd .cl-input { flex: 1; padding: 6px 9px; font-size: 12px; }
+  .cl-escrow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; color: var(--ink-soft); }
+  .cl-access-logwrap { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+  .cl-access-log { display: flex; flex-direction: column; gap: 3px; width: 100%; max-height: 240px; overflow: auto; font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft); }
+  .cl-access-log[hidden] { display: none; }
+  .cl-access-log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .cl-access-log .empty { color: var(--ink-mute); }
+  @media (max-width: 720px) { .cl-access-grid { grid-template-columns: 1fr; } }
   /* editor */
   .cl-editor-grid { display: grid; grid-template-columns: minmax(0, 460px) minmax(0, 1fr); gap: 20px; align-items: start; }
   .cl-form { display: flex; flex-direction: column; gap: 20px; }
@@ -1014,6 +1053,14 @@
       <button id="gate-btn" type="submit">Unlock</button>
     </form>
     <div class="gate-error" id="gate-err"></div>
+    <div class="gate-sso" id="gate-sso" hidden>
+      <div class="gate-or">or</div>
+      <a class="gate-sso-btn" id="gate-sso-btn" href="/login/">Sign in with company email</a>
+    </div>
+    <div class="gate-session" id="gate-session" hidden>
+      Signed in as <b id="gate-session-email"></b> &middot;
+      <a href="#" id="gate-signout">Sign out</a> &middot; <a href="#" id="gate-usepw">Use a password instead</a>
+    </div>
   </div>
 </div>
 
@@ -1501,6 +1548,32 @@
       <span class="kicker">Partner reports <span class="hint" id="cl-count"></span></span>
       <div class="segbtns" id="cl-theme-seg" title="Show the mock gates in light or dark mode"><button type="button" data-theme="light" class="on">LIGHT</button><button type="button" data-theme="dark">DARK</button></div>
       <button class="iconbtn" id="cl-refresh" type="button" title="Reload brands and passwords from the worker">REFRESH</button>
+    </div>
+    <!-- Email sign-in (Cloudflare Access) — site-level settings; per-client allow-lists live on each card -->
+    <div class="panel cl-access" id="cl-access">
+      <div class="cl-access-head">
+        <span class="kicker">Email sign-in <span class="cl-badge" id="cl-access-status">not configured</span></span>
+        <span class="hint">Cloudflare Access team + application AUD tag &middot; see tools/sync-worker/SSO-SETUP.md</span>
+      </div>
+      <div class="cl-access-grid">
+        <div class="cl-field"><label for="cl-access-team">Team name</label><input class="cl-input" id="cl-access-team" placeholder="team name, e.g. avalon" maxlength="80" spellcheck="false" autocomplete="off" disabled></div>
+        <div class="cl-field"><label for="cl-access-aud">Application AUD</label><input class="cl-input" id="cl-access-aud" placeholder="Access application AUD tag (64 hex)" maxlength="80" spellcheck="false" autocomplete="off" disabled></div>
+        <button class="iconbtn cl-primary" type="button" id="cl-access-save" disabled>SAVE</button>
+      </div>
+      <div class="docstatus" id="cl-access-msg"></div>
+      <div class="cl-access-sec" id="cl-access-root">
+        <div class="kicker">Master access (opens the full dashboard) &mdash; company domains and named people only</div>
+        <div id="cl-access-root-domains" data-kind="domains"></div>
+        <div id="cl-access-root-emails" data-kind="emails"></div>
+      </div>
+      <div class="cl-escrow" id="cl-escrow">
+        <span id="cl-escrow-status">Email sign-in keys: missing</span>
+        <button class="iconbtn" type="button" id="cl-escrow-update" title="Seal the current client passwords (and the master password) for the worker so email sign-in can open reports" disabled>UPDATE</button>
+      </div>
+      <div class="cl-access-logwrap">
+        <button class="iconbtn" type="button" id="cl-access-log-refresh" title="Last 100 sign-ins, key releases and denials">SIGN-IN LOG</button>
+        <div class="cl-access-log" id="cl-access-log-list" hidden></div>
+      </div>
     </div>
     <div class="docstatus" id="cl-status"></div>
     <div class="cl-cards" id="cl-cards"></div>
@@ -4874,6 +4947,9 @@ let clients = {
   loaded: false, loading: false, list: [], pws: null, pwErr: "", theme: "light",
   editing: null, draft: null, dirty: false, saving: false, edTheme: "light", edMode: "gate",
   frames: [], editorFrame: null, remaskTimers: [], fontLinks: new Set(), postTimer: null, readyTimer: null,
+  // email sign-in (access.get): the KV access document, its status flags and the escrow state
+  access: null, accessErr: "", accessLog: null, escrowing: false,
+  accessMeta: { configured: false, secrets: { session: false, escrow: false }, escrow: { state: "missing", updatedAt: null, pwsUpdatedAt: null, count: 0 } },
 };
 const clientsActive = () => !window.CLIENT_SITE && state.mode === "live";
 const adminPw = () => gatePw || ssGet("mrx-pw");
@@ -4987,6 +5063,11 @@ function initClientsTab() {
     for (const f of clients.frames) if (f !== clients.editorFrame && f.ready) postToFrame(f, { type: "mrx-theme", dark: clients.theme === "dark" });
   });
   $("cl-refresh").addEventListener("click", () => loadClients(true));
+  // email sign-in box
+  $("cl-access-save").addEventListener("click", saveAccessSetup);
+  for (const id of ["cl-access-team", "cl-access-aud"]) $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); saveAccessSetup(); } });
+  $("cl-escrow-update").addEventListener("click", escrowNow);
+  $("cl-access-log-refresh").addEventListener("click", refreshAccessLog);
   window.addEventListener("resize", fitLiveFrames);
   // editor
   const form = $("cb-form");
@@ -5041,9 +5122,10 @@ async function loadClients(force) {
   $("cl-status").textContent = "Loading partner reports…";
   $("cl-refresh").disabled = true;
   try {
-    const [brands, vault] = await Promise.all([
+    const [brands, vault, access] = await Promise.all([
       adminApi("brands.list"),
       adminApi("pws.get").then((v) => ({ v })).catch((e) => ({ e })),
+      adminApi("access.get").then((v) => ({ v })).catch((e) => ({ e })),
     ]);
     clients.list = (brands.clients || []).filter((d) => isPlainObj(d) && typeof d.slug === "string");
     clients.list.sort((a, b) => (a.demo ? 1 : 0) - (b.demo ? 1 : 0) || String(a.name || a.slug).localeCompare(String(b.name || b.slug)));
@@ -5057,6 +5139,23 @@ async function loadClients(force) {
       } catch {
         clients.pwErr = "Passwords not available — vault sealed with a different master password; re-run the seed script";
       }
+    }
+    // email sign-in settings: a failure here never blocks the client list
+    clients.access = null; clients.accessErr = ""; clients.accessLog = null;
+    if (access.e) {
+      clients.accessErr = "Email sign-in settings unavailable: " + access.e.message;
+    } else {
+      const m = access.v;
+      clients.access = accessPayload(isPlainObj(m.access) ? m.access : {});
+      const esc = isPlainObj(m.escrow) ? m.escrow : {};
+      clients.accessMeta = {
+        configured: !!m.configured,
+        secrets: { session: !!(m.secrets && m.secrets.session), escrow: !!(m.secrets && m.secrets.escrow) },
+        escrow: { state: esc.state === "ok" || esc.state === "stale" ? esc.state : "missing", updatedAt: esc.updatedAt || null, pwsUpdatedAt: esc.pwsUpdatedAt || null, count: Number(esc.count) || 0 },
+      };
+      // the vault changed since the keys were last escrowed: refresh them now (the first
+      // escrow is always an explicit act — the UPDATE button — never automatic)
+      if (clients.pws && clients.accessMeta.secrets.escrow && clients.accessMeta.escrow.state === "stale") escrowNow();
     }
     clients.loaded = true;
     $("cl-status").textContent = clients.list.length ? "" : "No partner reports in KV yet — run tools/sync-admin-kv.mjs seed-brands";
@@ -5078,6 +5177,7 @@ function renderGallery() {
   host.classList.toggle("dark", clients.theme === "dark");
   $("cl-count").textContent = clients.list.length ? "· " + clients.list.length + " sites" : "";
   $("cl-pw-hint").hidden = !clients.pws;
+  renderAccessBox();
   for (const doc of clients.list) host.appendChild(buildCard(doc));
 }
 
@@ -5153,6 +5253,7 @@ function buildCard(doc) {
   acts.append(live, edit);
   card.appendChild(acts);
   card.appendChild(buildPwRow(doc));
+  card.appendChild(buildAccessSec(doc));
   return card;
 }
 
@@ -5169,6 +5270,211 @@ function buildPwRow(doc) {
   const copy = mkEl("button", "iconbtn", "COPY"); copy.type = "button"; copy.dataset.act = "copy"; copy.title = "Copy password to the clipboard";
   row.append(inp, eye, copy);
   return row;
+}
+
+/* ---- email sign-in (Cloudflare Access) admin: access document, chips, escrow, sign-in log ---- */
+// Same rules the worker applies in access.put (the worker stays authoritative; these only give
+// an immediate message for the obvious cases).
+const PUBLIC_EMAIL_DOMAINS = new Set(["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "proton.me", "protonmail.com", "aol.com"]);
+const ACCESS_DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+const ACCESS_EMAIL_RE = /^[a-z0-9._%+'-]{1,64}@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+const ACCESS_MAX = { domains: 20, emails: 200 };
+const ACCESS_KIND_LABEL = { domains: "Company domains", emails: "Named people" };
+const ACCESS_KIND_PLACEHOLDER = { domains: "company domain, e.g. uwhealth.org", emails: "person@company.com" };
+function checkAccessValue(kind, raw) {
+  const v = String(raw || "").trim().toLowerCase();
+  if (kind === "domains") {
+    if (!ACCESS_DOMAIN_RE.test(v)) throw new Error("not a domain");
+    if (PUBLIC_EMAIL_DOMAINS.has(v)) throw new Error("public email providers cannot be allowed as a domain");
+  } else if (!ACCESS_EMAIL_RE.test(v)) throw new Error("not an email address");
+  return v;
+}
+const accessEntry = (e) => ({
+  domains: isPlainObj(e) && Array.isArray(e.domains) ? e.domains.filter((x) => typeof x === "string") : [],
+  emails: isPlainObj(e) && Array.isArray(e.emails) ? e.emails.filter((x) => typeof x === "string") : [],
+});
+// the document as access.put takes it: editable fields only, empty client entries dropped
+function accessPayload(doc) {
+  const d = isPlainObj(doc) ? doc : {};
+  const out = { teamDomain: typeof d.teamDomain === "string" ? d.teamDomain : "", aud: typeof d.aud === "string" ? d.aud : "", root: accessEntry(d.root), clients: {} };
+  for (const [slug, e] of Object.entries(isPlainObj(d.clients) ? d.clients : {})) {
+    const n = accessEntry(e);
+    if (n.domains.length || n.emails.length) out.clients[slug] = n;
+  }
+  return out;
+}
+async function saveAccess(next) {
+  const out = await adminApi("access.put", { access: accessPayload(next) });
+  clients.access = accessPayload(isPlainObj(out.access) ? out.access : next);
+  clients.accessMeta.configured = !!out.configured;
+  return out;
+}
+// a chip editor for one allow-list: chips with ×, an input + ADD. `onChange` gets the next array.
+function buildChipRow(host, kind, values, onChange) {
+  host.textContent = "";
+  host.classList.add("cl-chiprow"); host.dataset.kind = kind;
+  host.appendChild(mkEl("label", "", ACCESS_KIND_LABEL[kind]));
+  const chips = mkEl("div", "cl-chips");
+  for (const v of values) {
+    const chip = mkEl("span", "cl-chip");
+    chip.appendChild(mkEl("span", "", v));
+    const x = mkEl("button", "", "×"); x.type = "button"; x.title = "Remove " + v; x.setAttribute("aria-label", "Remove " + v);
+    x.addEventListener("click", () => onChange(values.filter((y) => y !== v)));
+    chip.appendChild(x);
+    chips.appendChild(chip);
+  }
+  const add = mkEl("div", "cl-chipadd");
+  const inp = mkEl("input", "cl-input"); inp.type = "text"; inp.placeholder = ACCESS_KIND_PLACEHOLDER[kind]; inp.spellcheck = false; inp.autocomplete = "off"; inp.maxLength = 254;
+  inp.setAttribute("aria-label", ACCESS_KIND_LABEL[kind]);
+  const btn = mkEl("button", "iconbtn", "ADD"); btn.type = "button";
+  const err = mkEl("div", "cl-err");
+  const commit = () => {
+    err.textContent = ""; inp.classList.remove("bad");
+    if (!inp.value.trim()) return;
+    let v;
+    try { v = checkAccessValue(kind, inp.value); } catch (e) { err.textContent = e.message; inp.classList.add("bad"); return; }
+    if (values.includes(v)) { inp.value = ""; return; }
+    if (values.length >= ACCESS_MAX[kind]) { err.textContent = "at most " + ACCESS_MAX[kind]; return; }
+    inp.disabled = true; btn.disabled = true;
+    onChange([...values, v].sort());
+  };
+  btn.addEventListener("click", commit);
+  inp.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } });
+  inp.addEventListener("input", () => { inp.classList.remove("bad"); err.textContent = ""; });
+  add.append(inp, btn);
+  host.append(chips, add, err);
+  return host;
+}
+// scope = "root" | "<slug>"; saves immediately, then re-renders the affected box / card from the stored document
+async function onAccessChipChange(scope, kind, values) {
+  if (!clients.access) return;
+  const next = accessPayload(clients.access);
+  if (scope === "root") next.root[kind] = values;
+  else { next.clients[scope] = next.clients[scope] || { domains: [], emails: [] }; next.clients[scope][kind] = values; }
+  try { await saveAccess(next); $("cl-status").textContent = ""; }
+  catch (err) { $("cl-status").textContent = "Email sign-in not saved: " + err.message; }
+  if (scope === "root") { renderRootChips(); renderAccessStatus(); }
+  else refreshCardAccess(scope);
+}
+function renderAccessStatus() {
+  const doc = clients.access, meta = clients.accessMeta;
+  const pill = $("cl-access-status");
+  const secretsOk = !!(meta.secrets && meta.secrets.session && meta.secrets.escrow);
+  pill.textContent = !doc ? "unavailable" : !secretsOk ? "worker secrets missing" : meta.configured ? "configured" : "not configured";
+  pill.classList.toggle("custom", !!doc && secretsOk && meta.configured);
+  pill.title = !doc ? clients.accessErr : !secretsOk ? "SESSION_SECRET / ESCROW_KEY are not set on the worker — see tools/sync-worker/SSO-SETUP.md" : meta.configured ? "The gate shows “Sign in with company email”" : "Team name and AUD tag are both needed before the gate shows the button";
+}
+function renderRootChips() {
+  const entry = accessEntry(clients.access && clients.access.root);
+  for (const kind of ["domains", "emails"]) {
+    const host = $("cl-access-root-" + kind);
+    if (!clients.access) { host.textContent = ""; continue; }
+    buildChipRow(host, kind, entry[kind], (vals) => onAccessChipChange("root", kind, vals));
+  }
+}
+function renderEscrow() {
+  const esc = clients.accessMeta.escrow || {};
+  $("cl-escrow-status").textContent = clients.escrowing ? "Email sign-in keys: updating…"
+    : !clients.access ? "Email sign-in keys: unavailable"
+    : esc.state === "ok" ? "Email sign-in keys: up to date · " + relTime(esc.updatedAt)
+    : esc.state === "stale" ? "Email sign-in keys: stale — the vault changed since the last update"
+    : "Email sign-in keys: missing";
+  $("cl-escrow-update").disabled = !clients.pws || !clients.access || clients.escrowing;
+}
+function renderAccessBox() {
+  const doc = clients.access;
+  renderAccessStatus();
+  $("cl-access-msg").textContent = doc ? "" : clients.accessErr;
+  for (const id of ["cl-access-team", "cl-access-aud", "cl-access-save"]) $(id).disabled = !doc;
+  for (const id of ["cl-access-team", "cl-access-aud"]) $(id).classList.remove("bad");
+  $("cl-access-team").value = doc ? doc.teamDomain : "";
+  $("cl-access-aud").value = doc ? doc.aud : "";
+  renderRootChips();
+  renderEscrow();
+  $("cl-access-log-list").hidden = true;
+}
+async function saveAccessSetup() {
+  if (!clients.access) return;
+  const next = accessPayload(clients.access);
+  next.teamDomain = $("cl-access-team").value.trim();
+  next.aud = $("cl-access-aud").value.trim();
+  const btn = $("cl-access-save");
+  btn.disabled = true;
+  for (const id of ["cl-access-team", "cl-access-aud"]) $(id).classList.remove("bad");
+  $("cl-access-msg").textContent = "Saving…";
+  try {
+    await saveAccess(next);
+    renderAccessBox();
+    $("cl-access-msg").textContent = clients.accessMeta.configured ? "Saved · email sign-in is configured" : "Saved · team name and AUD tag are both needed before the gate shows the button";
+  } catch (err) {
+    $("cl-access-msg").textContent = "Not saved: " + err.message;
+    if (err.path === "access.teamDomain") $("cl-access-team").classList.add("bad");
+    if (err.path === "access.aud") $("cl-access-aud").classList.add("bad");
+  } finally {
+    btn.disabled = !clients.access;
+  }
+}
+// MyRxCard key escrow: the vault (already decrypted in this tab) plus the master password go to
+// the worker, which seals them under ESCROW_KEY so email sign-in can release a client's password
+async function escrowNow() {
+  if (!clients.pws || !clients.access || clients.escrowing) return;
+  clients.escrowing = true;
+  renderEscrow();
+  try {
+    const out = await adminApi("pws.escrow", { passwords: clients.pws, root: adminPw() });
+    clients.accessMeta.escrow = { state: "ok", updatedAt: out.updatedAt || new Date().toISOString(), pwsUpdatedAt: clients.accessMeta.escrow.pwsUpdatedAt, count: Number(out.count) || 0 };
+  } catch (err) {
+    $("cl-status").textContent = "Email sign-in keys not updated: " + err.message;
+  } finally {
+    clients.escrowing = false;
+  }
+  renderEscrow();
+}
+async function loadAccessLog() {
+  const out = await adminApi("access.log");
+  clients.accessLog = Array.isArray(out.entries) ? out.entries.filter(isPlainObj) : [];
+  return clients.accessLog;
+}
+function renderLogList(list, entries) {
+  list.textContent = "";
+  if (!entries.length) { list.appendChild(mkEl("div", "empty", "No sign-ins yet")); return; }
+  for (const e of entries) {
+    const t = Date.parse(e.t);
+    const when = Number.isFinite(t) ? new Date(t).toLocaleString("en-US") : "—";
+    const site = e.slug === "" ? "master" : typeof e.slug === "string" && e.slug ? e.slug : "—";
+    list.appendChild(mkEl("div", "", [when, String(e.email || "—"), String(e.action || "—"), site, String(e.net || "—")].join(" · ")));
+  }
+}
+async function refreshAccessLog() {
+  const btn = $("cl-access-log-refresh"), list = $("cl-access-log-list");
+  btn.disabled = true;
+  try { renderLogList(list, await loadAccessLog()); list.hidden = false; $("cl-status").textContent = ""; }
+  catch (err) { $("cl-status").textContent = "Sign-in log unavailable: " + err.message; }
+  finally { btn.disabled = false; }
+}
+function buildAccessSec(doc) {
+  const sec = mkEl("div", "cl-access-sec");
+  sec.appendChild(mkEl("div", "kicker", "Email sign-in"));
+  if (!clients.access) { sec.appendChild(mkEl("span", "docstatus", clients.accessErr || "Email sign-in settings unavailable")); return sec; }
+  const entry = accessEntry(clients.access.clients[doc.slug]);
+  for (const kind of ["domains", "emails"]) sec.appendChild(buildChipRow(mkEl("div"), kind, entry[kind], (vals) => onAccessChipChange(doc.slug, kind, vals)));
+  const btn = mkEl("button", "iconbtn", "SIGN-IN LOG"); btn.type = "button"; btn.title = "Sign-ins, key releases and denials for this site";
+  const list = mkEl("div", "cl-access-log"); list.hidden = true;
+  btn.addEventListener("click", async () => {
+    if (!list.hidden) { list.hidden = true; return; }
+    btn.disabled = true;
+    try { renderLogList(list, (await loadAccessLog()).filter((e) => e.slug === doc.slug)); list.hidden = false; }
+    catch (err) { $("cl-status").textContent = "Sign-in log unavailable: " + err.message; }
+    finally { btn.disabled = false; }
+  });
+  sec.append(btn, list);
+  return sec;
+}
+function refreshCardAccess(slug) {
+  const doc = clients.list.find((d) => d.slug === slug);
+  const card = [...$("cl-cards").querySelectorAll(".cl-card")].find((c) => c.dataset.slug === slug);
+  const old = card && card.querySelector(".cl-access-sec");
+  if (old && doc) old.replaceWith(buildAccessSec(doc));
 }
 
 async function onGalleryClick(e) {
@@ -6453,8 +6759,90 @@ async function runDocBuild() {
   }
 }
 
+/* ---------- email sign-in (Cloudflare Access) ----------
+   The sync worker serves /login and /_auth/* on THIS hostname (Worker Routes). A signed session
+   cookie there releases the report password for a site the email is mapped to; the page then
+   unlocks exactly as with a typed password but never persists it. Every call is same-origin with
+   a short timeout, and any failure (including "not configured") leaves today's gate untouched. */
+const AUTH_TIMEOUT_MS = 1500;
+let ssoEmail = null; // set when an email session unlocked this page
+async function authFetch(path, init = {}) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), AUTH_TIMEOUT_MS);
+  try {
+    const res = await fetch(path, { credentials: "same-origin", cache: "no-store", signal: ctl.signal, ...init });
+    const out = await res.json().catch(() => null); // a non-JSON body (e.g. the static host's 404 page) is "no answer"
+    if (!res.ok) { const err = new Error((out && out.error) || `HTTP ${res.status}`); err.status = res.status; throw err; }
+    return out;
+  } finally { clearTimeout(timer); }
+}
+async function authWhoami() {
+  try { const out = await authFetch("/_auth/whoami"); return out && out.ok === true ? out : null; }
+  catch { return null; }
+}
+async function authKey(site) {
+  let out;
+  try {
+    out = await authFetch("/_auth/key", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ site }) });
+  } catch (e) {
+    throw new Error({ 401: "not-signed-in", 403: "not-authorized", 404: "no-key", 409: "not-escrowed", 429: "locked" }[e.status] || "unavailable");
+  }
+  if (!out || out.ok !== true || typeof out.pw !== "string" || !out.pw) throw new Error("unavailable");
+  return out.pw;
+}
+async function authLogout() {
+  try { await authFetch("/_auth/logout", { method: "POST" }); } catch { /* best effort: the cookie expires on its own */ }
+}
+function ssoHref() { return "/login/?to=" + encodeURIComponent(location.pathname + location.search); }
+const SSO_GATE_ERR = {
+  "not-authorized": "Your email isn't authorized for this report.",
+  "not-escrowed": "Email sign-in isn't ready for this site yet — use a password.",
+  "no-key": "Email sign-in isn't ready for this site yet — use a password.",
+  "locked": "Too many attempts — try again in a few minutes.",
+  "bad-key": "Email sign-in keys are out of date — use a password.",
+};
+const ssoGateError = (code) => SSO_GATE_ERR[code] || "Email sign-in isn't available right now — use a password.";
+// who = the whoami result (null = nothing changes): shows the button when the site is configured,
+// or the "Signed in as" strip (form hidden) for an email session
+function showSsoGate(who) {
+  if (!who) return;
+  $("gate-sso-btn").href = ssoHref();
+  $("gate-sso").hidden = !who.configured || who.signedIn;
+  if (who.signedIn) {
+    $("gate-session-email").textContent = who.email;
+    $("gate-session").hidden = false;
+    $("gate-form").hidden = true;
+  }
+  $("gate-usepw").onclick = (e) => {
+    e.preventDefault();
+    $("gate-session").hidden = true; $("gate-form").hidden = false; $("gate-sso").hidden = !who.configured;
+    $("gate-err").textContent = ""; $("gate-btn").disabled = false;
+    $("gate-pw").focus();
+  };
+  $("gate-signout").onclick = async (e) => { e.preventDefault(); await authLogout(); location.reload(); };
+}
+// auto-unlock from an email session: releases the site's password and runs `doUnlock(pw)` (which
+// must not persist it). Resolves true when the app opened; false leaves the gate up with the
+// session strip and an explanation, "Use a password instead" reveals the form.
+async function ssoUnlock(who, siteSlug, doUnlock) {
+  showSsoGate(who);
+  $("gate").hidden = false;
+  $("gate-btn").disabled = true; $("gate-err").textContent = "Signing you in…";
+  try {
+    const pw = await authKey(siteSlug);
+    try { await doUnlock(pw); } catch { throw new Error("bad-key"); }
+    ssoEmail = who.email;
+    $("gate-err").textContent = "";
+    return true;
+  } catch (e) {
+    $("gate-err").textContent = ssoGateError(e.message);
+    $("gate-btn").disabled = false;
+    return false;
+  }
+}
+
 /* ---------------- boot ---------------- */
-async function unlock(password) {
+async function unlock(password, opts = {}) {
   const blob = window.__ENC_CONFIG;
   // forgive the common phone-keyboard mangles: stray whitespace and
   // autocapitalization. Tries as-typed first, throws only if all fail.
@@ -6468,8 +6856,12 @@ async function unlock(password) {
   // keep the working passphrase for this session so the Utilization tab can
   // decrypt utilization.enc.json too (same store as the already-decrypted cfg)
   gatePw = okPw;
-  ssSet("mrx-cfg", JSON.stringify(cfg));
-  ssSet("mrx-pw", okPw);
+  // an email sign-in session (persist:false) is never remembered in sessionStorage — the
+  // worker releases the password again on the next load while the session cookie lasts
+  if (opts.persist !== false) {
+    ssSet("mrx-cfg", JSON.stringify(cfg));
+    ssSet("mrx-pw", okPw);
+  }
   enterApp("live");
   await sync();
   setInterval(sync, 5 * 60 * 1000);
@@ -6495,8 +6887,9 @@ async function boot() {
   initClientsTab();   // idem — Clients admin tab listeners
   // LOG OUT: forget every remembered passphrase for this origin (root site and
   // client sites alike) and return to the gate
-  $("logout-btn").addEventListener("click", () => {
+  $("logout-btn").addEventListener("click", async () => {
     clientsRemaskAll();
+    if (ssoEmail) await authLogout(); // an email session ends server-side too
     try { for (const k of Object.keys(sessionStorage)) if (k.startsWith("mrx-")) sessionStorage.removeItem(k); } catch { /* storage denied: nothing was remembered */ }
     location.reload();
   });
@@ -7797,6 +8190,12 @@ async function boot() {
       try { const { data, pw } = await tryPw(cached); await enterClient(data, pw); return; }
       catch { ssDel(pwKey); }
     }
+    // email sign-in: an Access session on this host opens the report without the password
+    // (never stored); previews returned above and never reach /_auth/*
+    const who = await authWhoami();
+    if (who && who.signedIn) {
+      if (await ssoUnlock(who, slug, async (pw) => { const data = await decryptConfig(clientBlob, pw); await enterClient(data, pw); })) return;
+    } else showSsoGate(who);
     $("gate").hidden = false;
     $("gate-form").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -7833,6 +8232,12 @@ async function boot() {
       setInterval(sync, 5 * 60 * 1000);
       return;
     }
+    // email sign-in: a master-mapped Access session opens the dashboard without the password
+    // (nothing written to sessionStorage; the Clients tab works off the in-memory gatePw)
+    const who = window.isSecureContext && crypto.subtle ? await authWhoami() : null;
+    if (who && who.signedIn) {
+      if (await ssoUnlock(who, "", (pw) => unlock(pw, { persist: false }))) return;
+    } else showSsoGate(who);
     $("gate").hidden = false;
     // WebCrypto only exists on secure origins — on plain http the gate can
     // never decrypt, so redirect to https (or say so) instead of blaming

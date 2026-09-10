@@ -17,6 +17,7 @@
 //   POST / { admin_pw, action: "brand.put", slug, name, brand: Brand|null }
 //   POST / { admin_pw, action: "pws.get" }          MASTER — {ok, enc, updatedAt}
 //   POST / { admin_pw, action: "pws.put", enc: {salt, iv, data} }
+//   POST / { admin_pw, action: "access.get" | "access.put" | "access.log" | "pws.escrow" }  MASTER — email sign-in (see below)
 //   admin_pw is the root dashboard's master password, proven by decrypting
 //   /config.enc.json (verifyMaster). KV keys (namespace shared with the
 //   avalon-aaps project, so every key is prefixed "myrx:"):
@@ -34,6 +35,7 @@
 //   POST / { aa_admin_pw, action: "clients.reseal", oldPw }     MASTER — re-key the vault after a REPORT_PW rotation
 //   POST / { aa_admin_pw, action: "client.put", slug, label?, pw?, regenPw?, demo?, demoBadge?, brand? }
 //   POST / { aa_admin_pw, action: "client.delete", slug, force? }
+//   POST / { aa_admin_pw, action: "access.get" | "access.put" | "access.log" }  MASTER — email sign-in mapping (see below)
 //   aa_admin_pw is REPORT_PW, the Avalon Assist master. KV keys (prefix "aa:"):
 //     aa:brand:<slug> → BrandDoc {v, slug, name, demo, demoBadge, brand|null, updatedAt, updatedFrom}
 //     aa:clients      → {v, updatedAt, enc} — the client-password vault, sealed by
@@ -44,10 +46,25 @@
 // endpoints (search by bucket_key → update or insert) — no Xano-side
 // endpoint to build or expose.
 //
+// "Sign in with company email" (Cloudflare Access; Worker Routes on the report
+// hostnames — see SSO-SETUP.md). Same-host paths, dispatched by pathname
+// before the JSON API above; a 503 "email sign-in not configured" until the
+// SESSION_SECRET (and, for MyRxCard keys, ESCROW_KEY) secrets exist:
+//   GET  /login?to=<path>        Access-authenticated → session cookie → 302 to
+//   GET  /_auth/whoami           {ok, configured, signedIn, email?, root?, slugs?}
+//   POST /_auth/key {site}       {ok, site, pw} — the site's password for a mapped email
+//   POST /_auth/logout           clears the cookie
+//   admin (both masters): access.get / access.put / access.log
+//   admin (myrx only):    pws.escrow {passwords, root} — reseal the partner vault under ESCROW_KEY
+//   KV: myrx:access, aa:access (who may open what), myrx:access-log,
+//       aa:access-log (last 500 sign-ins), myrx:pws-escrow (ESCROW_KEY-sealed copy of myrx:pws)
+//
 // Vars:    XANO_CONTENT_URL  the table's meta content base (wrangler.toml)
 // Secrets: SYNC_SECRET       shared with the Zoho Deluge function
 //          REPORT_PW         unlocks the read route (shared with the report UI)
 //          XANO_META_TOKEN   Xano Metadata API token (expires — see README)
+//          SESSION_SECRET    HMAC key for the email sign-in session cookie (SSO-SETUP.md)
+//          ESCROW_KEY        seals the MyRxCard password escrow (SSO-SETUP.md)
 // (After any `wrangler deploy`, re-run a `wrangler secret put` to re-bind.)
 //
 // AUTH SURFACE: two masters, one gate. REPORT_PW is the reports.avalonsaves.com
@@ -201,10 +218,11 @@ function ipv6Prefix64(ip) { // "2001:db8::1" -> "2001:0db8:0000:0000::/64"
   const groups = ip.includes("::") ? [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t] : h;
   return groups.slice(0, 4).map((g) => g.toLowerCase().padStart(4, "0")).join(":") + "::/64";
 }
-function netKey(req, scope) {
+function netOf(req) { // the caller's network: IPv4 address or IPv6 /64
   const ip = (req.headers.get("cf-connecting-ip") || "unknown").trim();
-  return (ip.includes(":") ? ipv6Prefix64(ip) : ip) + "|" + scope;
+  return ip.includes(":") ? ipv6Prefix64(ip) : ip;
 }
+function netKey(req, scope) { return netOf(req) + "|" + scope; }
 function lockoutSeconds(key) { // > 0 = locked, seconds remaining
   const e = authFails.get(key);
   if (!e) return 0;
@@ -440,7 +458,7 @@ const AA_PW_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"; // no 0/O/1/I/l look-a
 const AA_SEALED = "vault sealed with a different password";
 const AA_KV_FAILED = "KV read failed"; // 503: KV unreadable right now — retry, never write
 const AA_REAL_SLUG_MIN = 3; // a real client's slug is its CRM match key (clientOwns)
-const AA_ACTIONS = new Set(["ping", "clients.list", "client.reveal", "clients.seed", "clients.reseal", "client.put", "client.delete"]);
+const AA_ACTIONS = new Set(["ping", "clients.list", "client.reveal", "clients.seed", "clients.reseal", "client.put", "client.delete", "access.get", "access.put", "access.log"]);
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 let aaVault = { at: 0, pw: undefined, raw: null, state: "absent", clients: null, updatedAt: null }; // state: absent | ok | sealed | error
 
@@ -628,8 +646,497 @@ async function readJsonBody(req, max) {
   return { body };
 }
 
+// ---- "Sign in with company email" (Cloudflare Access) ----
+// Worker Routes bind reports.myrxcard.com/login* + /_auth/* (and the same on
+// reports.avalonsaves.com) to this worker, so these handlers run on the
+// report hostname itself: Access has already authenticated the visitor on the
+// /login path and hands us its identity as the Cf-Access-Jwt-Assertion
+// header; we verify that JWT against the team's JWKS, resolve which client
+// report(s) the email may open from the admin-managed access document
+// (P+"access"), and set a first-party session cookie. The pages then call
+// /_auth/key with that cookie to obtain the site's password: MyRxCard from
+// the ESCROW_KEY-sealed copy of the partner vault (myrx:pws-escrow, written
+// by the admin page through pws.escrow — the deliberate trust shift that lets
+// this worker open MyRxCard reports), Avalon from the aa:clients vault it
+// already opens. Nothing here runs unless the request arrives on one of the
+// two report hostnames AND SESSION_SECRET is bound; the JSON API on the
+// workers.dev hostname is untouched. Full operator steps: SSO-SETUP.md.
+const AUTH_SITES = { "reports.myrxcard.com": "myrx", "reports.avalonsaves.com": "aa" };
+const SESSION_COOKIE = "__Host-report_session";
+const SESSION_TTL_S = 43200; // 12 h
+const JWKS_TTL_MS = 3600000, JWKS_REFETCH_MIN_MS = 60000;
+const ACCESS_LOG_MAX = 500, ACCESS_LOG_VIEW = 100;
+const ACCESS_CACHE_MS = 60000;
+const AUTH_BODY_MAX = 10000;
+const ESCROW_KV_KEY = "myrx:pws-escrow";
+const AUTH_NOT_CONFIGURED = "email sign-in not configured";
+const PUBLIC_EMAIL_DOMAINS = new Set(["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "proton.me", "protonmail.com", "aol.com"]);
+const PUBLIC_DOMAIN_MSG = "public email providers cannot be allowed as a domain";
+const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+const EMAIL_RE = /^[a-z0-9._%+'-]{1,64}@(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+const TEAM_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
+const AUD_RE = /^[a-f0-9]{64}$/;
+const TO_RE = /^\/(?![\/\\])[\x21-\x5b\x5d-\x7e]{0,500}$/;
+const ACCESS_TOP_KEYS = ["v", "updatedAt", "teamDomain", "aud", "root", "clients"];
+const utf8 = (s) => new TextEncoder().encode(s);
+// base64url (no padding) over the existing base64 helpers; the decoder
+// refuses anything outside the alphabet so a forged cookie never reaches atob
+const b64u = (u8) => b64enc(u8).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+function b64uDec(s) {
+  if (typeof s !== "string" || !/^[A-Za-z0-9_-]*$/.test(s)) throw new Error("bad base64url");
+  s = s.replace(/-/g, "+").replace(/_/g, "/");
+  while (s.length % 4) s += "=";
+  return b64dec(s);
+}
+const escHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// /_auth/* answers: same-origin only (NO CORS headers), never cached
+const ajson = (obj, status = 200, extra) =>
+  new Response(JSON.stringify(obj), { status, headers: { "content-type": "application/json", "cache-control": "no-store", vary: "cookie", ...(extra || {}) } });
+// /login answers: a self-contained HTML page (inline CSS, no assets) with the
+// machine-readable outcome in x-auth-reason. Every user-derived string that
+// lands in a page goes through escHtml.
+function authPage(status, reason, title, inner, extra) {
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>${escHtml(title)}</title>`
+    + `<style>body{margin:0;font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f4f6f9;color:#1c2430;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box}`
+    + `main{background:#fff;border-radius:12px;padding:32px;max-width:460px;box-shadow:0 8px 30px rgba(0,0,0,.08)}h1{font-size:20px;margin:0 0 12px}p{margin:8px 0}a{color:#1c80b8}</style></head><body><main>${inner}</main></body></html>`;
+  return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-auth-reason": reason, ...(extra || {}) } });
+}
+const authSimplePage = (status, reason, h1, p) => authPage(status, reason, h1, `<h1>${escHtml(h1)}</h1>${p ? `<p>${escHtml(p)}</p>` : ""}`);
+// ---- the access document (KV P+"access"): who may open what ----
+// { v:1, teamDomain, aud, root:{domains, emails}, clients:{<slug>:{domains, emails}}, updatedAt }
+// configured := teamDomain and aud both set. Cached per isolate for
+// ACCESS_CACHE_MS (writers prime it); a KV read that THROWS is state "error" —
+// never cached, never mistaken for "absent" (which would deny everyone
+// silently and, on the admin side, invite an overwrite).
+const emptyAccess = () => ({ v: 1, teamDomain: "", aud: "", root: { domains: [], emails: [] }, clients: {}, updatedAt: null });
+const strList = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === "string") : []);
+function accessEntryOf(e) { return { domains: isPlainObject(e) ? strList(e.domains) : [], emails: isPlainObject(e) ? strList(e.emails) : [] }; }
+function accessDocOf(raw) { // a stored record -> a complete document (defaults filled; never throws)
+  const d = emptyAccess();
+  if (!isPlainObject(raw)) return d;
+  if (typeof raw.teamDomain === "string") d.teamDomain = raw.teamDomain;
+  if (typeof raw.aud === "string") d.aud = raw.aud;
+  d.root = accessEntryOf(raw.root);
+  if (isPlainObject(raw.clients)) for (const [k, e] of Object.entries(raw.clients)) if (ADMIN_SLUG_RE.test(k)) d.clients[k] = accessEntryOf(e);
+  if (typeof raw.updatedAt === "string") d.updatedAt = raw.updatedAt;
+  return d;
+}
+const accessConfigured = (doc) => doc.teamDomain !== "" && doc.aud !== "";
+const accessCache = new Map(); // site -> { at, doc }
+async function readAccess(env, site, fresh) { // -> { state: "ok" | "error", doc }
+  const c = accessCache.get(site), now = Date.now();
+  if (!fresh && c && now - c.at < ACCESS_CACHE_MS) return { state: "ok", doc: c.doc };
+  let raw = null;
+  try { raw = await env.AAPS_DATA.get(site + ":access", { type: "json" }); }
+  catch (e) { console.log(`auth: access read failed (${site}): ${e && e.name}`); return { state: "error", doc: null }; }
+  const doc = accessDocOf(raw);
+  accessCache.set(site, { at: now, doc });
+  return { state: "ok", doc };
+}
+function primeAccess(site, doc) { accessCache.set(site, { at: Date.now(), doc }); }
+// email -> { root, slugs }: an entry matches when the email's domain is in
+// domains[] or the email itself is in emails[] (exact, lowercase). root opens
+// every site; a client mapping never implies root.
+function resolveAccess(doc, email) {
+  const domain = email.slice(email.lastIndexOf("@") + 1);
+  const matches = (e) => e.domains.includes(domain) || e.emails.includes(email);
+  return { root: matches(doc.root), slugs: Object.keys(doc.clients).filter((s) => matches(doc.clients[s])).sort() };
+}
+const accessAllowed = (res, slug) => (slug === "" ? res.root : res.root || res.slugs.includes(slug));
+// ---- access.put validation: normalizes in place, first offender wins ----
+function validateAccessDoc(a) { // -> { doc } | { error: Response }
+  const fail = (path, reason) => ({ error: json({ error: `${path}: ${reason}`, path }, 422) });
+  if (!isPlainObject(a)) return fail("access", "must be an object");
+  for (const k of Object.keys(a)) if (!ACCESS_TOP_KEYS.includes(k)) return fail(`access.${k}`, "unknown key");
+  const doc = emptyAccess();
+  if (a.teamDomain !== undefined) {
+    if (typeof a.teamDomain !== "string") return fail("access.teamDomain", "team name only (the part before .cloudflareaccess.com)");
+    const team = a.teamDomain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/+$/, "").replace(/\.cloudflareaccess\.com$/, "");
+    if (team && !TEAM_RE.test(team)) return fail("access.teamDomain", "team name only (the part before .cloudflareaccess.com)");
+    doc.teamDomain = team;
+  }
+  if (a.aud !== undefined) {
+    if (typeof a.aud !== "string") return fail("access.aud", "64 hex characters (the Access application AUD tag)");
+    const aud = a.aud.trim().toLowerCase();
+    if (aud && !AUD_RE.test(aud)) return fail("access.aud", "64 hex characters (the Access application AUD tag)");
+    doc.aud = aud;
+  }
+  const entry = (e, path) => {
+    if (!isPlainObject(e)) return fail(path, "must be an object");
+    for (const k of Object.keys(e)) if (k !== "domains" && k !== "emails") return fail(`${path}.${k}`, "unknown key");
+    const out = { domains: [], emails: [] };
+    for (const [kind, max, re, bad] of [["domains", 20, DOMAIN_RE, "not a domain"], ["emails", 200, EMAIL_RE, "not an email address"]]) {
+      if (e[kind] === undefined) continue;
+      if (!Array.isArray(e[kind])) return fail(`${path}.${kind}`, "must be a list");
+      if (e[kind].length > max) return fail(`${path}.${kind}`, `at most ${max}`);
+      const seen = new Set();
+      for (let i = 0; i < e[kind].length; i++) {
+        const v = e[kind][i];
+        if (typeof v !== "string") return fail(`${path}.${kind}[${i}]`, bad);
+        const s = v.trim().toLowerCase();
+        if (!re.test(s)) return fail(`${path}.${kind}[${i}]`, bad);
+        if (kind === "domains" && PUBLIC_EMAIL_DOMAINS.has(s)) return fail(`${path}.${kind}[${i}]`, PUBLIC_DOMAIN_MSG);
+        seen.add(s);
+      }
+      out[kind] = [...seen].sort();
+    }
+    return { entry: out };
+  };
+  if (a.root !== undefined) { const r = entry(a.root, "access.root"); if (r.error) return r; doc.root = r.entry; }
+  if (a.clients !== undefined) {
+    if (!isPlainObject(a.clients)) return fail("access.clients", "must be an object");
+    const keys = Object.keys(a.clients);
+    if (keys.length > 100) return fail("access.clients", "at most 100");
+    for (const k of keys) {
+      const slug = k.toLowerCase();
+      if (!ADMIN_SLUG_RE.test(slug)) return fail(`access.clients.${k}`, "bad slug");
+      const r = entry(a.clients[k], `access.clients.${slug}`); if (r.error) return r;
+      doc.clients[slug] = r.entry;
+    }
+  }
+  return { doc };
+}
+// ---- Access JWT verification (RS256 against the team's JWKS) ----
+const jwksCache = new Map(); // teamDomain -> { at, keys }
+async function fetchJwks(team) {
+  const r = await fetch(`https://${team}.cloudflareaccess.com/cdn-cgi/access/certs`);
+  if (!r.ok) throw new Error(`jwks HTTP ${r.status}`);
+  const j = await r.json();
+  if (!isPlainObject(j) || !Array.isArray(j.keys)) throw new Error("jwks malformed");
+  return j.keys.filter((k) => isPlainObject(k) && typeof k.kid === "string" && k.kty === "RSA" && typeof k.n === "string" && typeof k.e === "string");
+}
+// the signing key for `kid`, or null; throws when the JWKS cannot be fetched
+async function jwksKey(team, kid) {
+  const now = Date.now();
+  let c = jwksCache.get(team);
+  if (!c || now - c.at > JWKS_TTL_MS) { c = { at: now, keys: await fetchJwks(team) }; jwksCache.set(team, c); }
+  let k = c.keys.find((x) => x.kid === kid);
+  if (!k && now - c.at > JWKS_REFETCH_MIN_MS) { // a rotated key: refetch once
+    c = { at: now, keys: await fetchJwks(team) }; jwksCache.set(team, c);
+    k = c.keys.find((x) => x.kid === kid);
+  }
+  return k || null;
+}
+// -> { ok:true, email } | { ok:false, reason } ; never logs the token or the email
+async function verifyAccessJwt(token, teamDomain, aud) {
+  const parts = typeof token === "string" ? token.split(".") : [];
+  if (parts.length !== 3) return { ok: false, reason: "bad-token" };
+  let header, payload;
+  try {
+    header = JSON.parse(new TextDecoder().decode(b64uDec(parts[0])));
+    payload = JSON.parse(new TextDecoder().decode(b64uDec(parts[1])));
+  } catch { return { ok: false, reason: "bad-token" }; }
+  if (!isPlainObject(header) || header.alg !== "RS256" || typeof header.kid !== "string" || !isPlainObject(payload)) return { ok: false, reason: "bad-token" };
+  let jwk;
+  try { jwk = await jwksKey(teamDomain, header.kid); }
+  catch (e) { console.log(`auth: jwks unavailable (${teamDomain}): ${e && e.message}`); return { ok: false, reason: "jwks-unavailable" }; }
+  if (!jwk) return { ok: false, reason: "bad-signature" };
+  try {
+    const key = await crypto.subtle.importKey("jwk", { kty: "RSA", n: jwk.n, e: jwk.e, alg: "RS256", ext: true }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    const good = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64uDec(parts[2]), utf8(`${parts[0]}.${parts[1]}`));
+    if (!good) return { ok: false, reason: "bad-signature" };
+  } catch { return { ok: false, reason: "bad-signature" }; }
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.iss !== `https://${teamDomain}.cloudflareaccess.com`) return { ok: false, reason: "bad-issuer" };
+  const auds = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+  if (!auds.includes(aud)) return { ok: false, reason: "bad-audience" };
+  if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp) || payload.exp <= now) return { ok: false, reason: "expired" };
+  if (payload.nbf !== undefined && !(typeof payload.nbf === "number" && payload.nbf <= now + 60)) return { ok: false, reason: "expired" };
+  if (payload.iat !== undefined && !(typeof payload.iat === "number" && payload.iat <= now + 300)) return { ok: false, reason: "expired" };
+  const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+  if (!EMAIL_RE.test(email)) return { ok: false, reason: "no-email" };
+  return { ok: true, email };
+}
+// ---- session cookie: base64url(payload JSON) "." base64url(HMAC-SHA256(SESSION_SECRET, payloadB64)) ----
+let sessionKeyCache = { secret: undefined, key: null };
+async function sessionSig(env, payloadB64) {
+  if (sessionKeyCache.secret !== env.SESSION_SECRET || !sessionKeyCache.key)
+    sessionKeyCache = { secret: env.SESSION_SECRET, key: await crypto.subtle.importKey("raw", utf8(env.SESSION_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]) };
+  return b64u(new Uint8Array(await crypto.subtle.sign("HMAC", sessionKeyCache.key, utf8(payloadB64))));
+}
+async function makeSession(env, site, email, res) {
+  const iat = Math.floor(Date.now() / 1000);
+  const nonce = [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const payloadB64 = b64u(utf8(JSON.stringify({ v: 1, site, email, root: res.root, slugs: res.slugs, iat, exp: iat + SESSION_TTL_S, nonce })));
+  return `${payloadB64}.${await sessionSig(env, payloadB64)}`;
+}
+const sessionSetCookie = (value) => `${SESSION_COOKIE}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_S}`;
+const SESSION_CLEAR_COOKIE = `${SESSION_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0`;
+function cookieValue(req, name) {
+  const h = req.headers.get("cookie");
+  if (!h) return null;
+  for (const part of h.split(";")) {
+    const p = part.trim(), i = p.indexOf("=");
+    if (i > 0 && p.slice(0, i) === name) return p.slice(i + 1);
+  }
+  return null;
+}
+// the session payload, or null for anything short of a well-formed, signed,
+// unexpired cookie issued for THIS site
+async function readSession(req, env, site) {
+  const value = cookieValue(req, SESSION_COOKIE);
+  if (!value || value.length > 4096) return null;
+  const dot = value.indexOf(".");
+  if (dot < 0) return null;
+  const payloadB64 = value.slice(0, dot), sig = value.slice(dot + 1);
+  if (!(await safeEqual(sig, await sessionSig(env, payloadB64)))) return null;
+  let p;
+  try { p = JSON.parse(new TextDecoder().decode(b64uDec(payloadB64))); } catch { return null; }
+  if (!isPlainObject(p) || p.v !== 1 || p.site !== site) return null;
+  if (typeof p.email !== "string" || !EMAIL_RE.test(p.email) || typeof p.root !== "boolean" || typeof p.nonce !== "string") return null;
+  if (!Array.isArray(p.slugs) || p.slugs.length > 100 || !p.slugs.every((s) => typeof s === "string" && ADMIN_SLUG_RE.test(s))) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (typeof p.exp !== "number" || !Number.isFinite(p.exp) || p.exp <= now) return null;
+  if (typeof p.iat !== "number" || !Number.isFinite(p.iat) || p.iat > now + 60) return null;
+  return p;
+}
+// ---- sign-in log (KV P+"access-log"): last ACCESS_LOG_MAX entries, best effort ----
+// {t, email, slug, action:"login"|"key"|"denied", net}. Never a password.
+// Read-modify-write, not atomic: two isolates appending in the same instant
+// can drop one entry (accepted for an audit trail of this size).
+async function appendAccessLog(req, env, site, entry) {
+  try {
+    const key = site + ":access-log";
+    const rec = await env.AAPS_DATA.get(key, { type: "json" });
+    const entries = isPlainObject(rec) && Array.isArray(rec.entries) ? rec.entries : [];
+    entries.push({ t: new Date().toISOString(), email: entry.email, slug: entry.slug, action: entry.action, net: netOf(req) });
+    await env.AAPS_DATA.put(key, JSON.stringify({ v: 1, entries: entries.slice(-ACCESS_LOG_MAX) }));
+  } catch (e) { console.log(`auth: log append failed (${site}): ${e && e.name}`); }
+}
+// ---- MyRxCard escrow (KV myrx:pws-escrow) ----
+// The partner vault myrx:pws is sealed under the master password, which this
+// worker cannot open. The admin page decrypts it in the browser and posts the
+// plaintext through pws.escrow; it is resealed here under ESCROW_KEY
+// (AES-GCM-256, key = SHA-256(ESCROW_KEY || salt), fresh salt + IV per seal)
+// as {v:1, updatedAt, pwsUpdatedAt, count, enc}. pwsUpdatedAt remembers which
+// myrx:pws record it mirrors, so the admin page can tell "stale" from "ok".
+// Plaintext {v:1, passwords:{slug:pw}, root:<master>} lives only in isolate
+// memory: cached by ciphertext for ACCESS_CACHE_MS, re-decrypted on change.
+async function escrowKey(secret, salt, usages) {
+  const s = utf8(secret), material = new Uint8Array(s.length + salt.length);
+  material.set(s); material.set(salt, s.length);
+  const digest = await crypto.subtle.digest("SHA-256", material);
+  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, usages);
+}
+let escrowCache = { at: 0, secret: undefined, raw: null, state: "missing", passwords: null, root: null, updatedAt: null, pwsUpdatedAt: null, count: 0 };
+async function readEscrow(env, fresh) { // -> { state:"missing"|"error"|"ok", passwords, root, updatedAt, pwsUpdatedAt, count }
+  const now = Date.now();
+  if (!fresh && escrowCache.secret === env.ESCROW_KEY && now - escrowCache.at < ACCESS_CACHE_MS) return escrowCache;
+  let raw = null;
+  try { raw = await env.AAPS_DATA.get(ESCROW_KV_KEY); }
+  catch (e) {
+    console.log(`auth: escrow read failed: ${e && e.name}`);
+    escrowCache = { at: 0, secret: env.ESCROW_KEY, raw: null, state: "error", passwords: null, root: null, updatedAt: null, pwsUpdatedAt: null, count: 0 };
+    return escrowCache;
+  }
+  if (typeof raw !== "string") { escrowCache = { at: now, secret: env.ESCROW_KEY, raw: null, state: "missing", passwords: null, root: null, updatedAt: null, pwsUpdatedAt: null, count: 0 }; return escrowCache; }
+  if (raw === escrowCache.raw && escrowCache.secret === env.ESCROW_KEY && escrowCache.state === "ok") { escrowCache.at = now; return escrowCache; }
+  try {
+    const rec = JSON.parse(raw), enc = rec && rec.enc;
+    if (!isPlainObject(enc) || [enc.salt, enc.iv, enc.data].some((v) => typeof v !== "string" || !B64_RE.test(v))) throw new Error("malformed escrow record");
+    const key = await escrowKey(String(env.ESCROW_KEY || ""), b64dec(enc.salt), ["decrypt"]);
+    const pt = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64dec(enc.iv) }, key, b64dec(enc.data))));
+    if (!isPlainObject(pt) || !isPlainObject(pt.passwords) || typeof pt.root !== "string") throw new Error("malformed escrow plaintext");
+    escrowCache = { at: now, secret: env.ESCROW_KEY, raw, state: "ok", passwords: pt.passwords, root: pt.root,
+      updatedAt: typeof rec.updatedAt === "string" ? rec.updatedAt : null, pwsUpdatedAt: typeof rec.pwsUpdatedAt === "string" ? rec.pwsUpdatedAt : null, count: Object.keys(pt.passwords).length };
+  } catch (e) {
+    console.log(`auth: escrow did not open: ${e && e.name}`); // never a value
+    escrowCache = { at: now, secret: env.ESCROW_KEY, raw, state: "missing", passwords: null, root: null, updatedAt: null, pwsUpdatedAt: null, count: 0 };
+  }
+  return escrowCache;
+}
+async function sealEscrow(env, passwords, root, pwsUpdatedAt) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await escrowKey(String(env.ESCROW_KEY || ""), salt, ["encrypt"]);
+  const data = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, utf8(JSON.stringify({ v: 1, passwords, root })));
+  const updatedAt = new Date().toISOString(), count = Object.keys(passwords).length;
+  const raw = JSON.stringify({ v: 1, updatedAt, pwsUpdatedAt, count, enc: { salt: b64enc(salt), iv: b64enc(iv), data: b64enc(new Uint8Array(data)) } });
+  await env.AAPS_DATA.put(ESCROW_KV_KEY, raw);
+  escrowCache = { at: Date.now(), secret: env.ESCROW_KEY, raw, state: "ok", passwords, root, updatedAt, pwsUpdatedAt, count };
+  return { updatedAt, count };
+}
+// myrx:pws.updatedAt (null when absent); throws when KV is unreadable
+async function pwsUpdatedAt(env) {
+  const v = await env.AAPS_DATA.get(PWS_KEY, { type: "json" });
+  return isPlainObject(v) && typeof v.updatedAt === "string" ? v.updatedAt : null;
+}
+// admin display: "missing" | "stale" (the vault changed since the seal) | "ok"; throws on an unreadable KV
+async function escrowState(env) {
+  const esc = await readEscrow(env, true);
+  if (esc.state === "error") throw new Error("escrow read failed");
+  if (esc.state === "missing") return { state: "missing", updatedAt: null, pwsUpdatedAt: null, count: 0 };
+  return { state: esc.pwsUpdatedAt === (await pwsUpdatedAt(env)) ? "ok" : "stale", updatedAt: esc.updatedAt, pwsUpdatedAt: esc.pwsUpdatedAt, count: esc.count };
+}
+// ---- admin actions shared by both master routes: access.get / access.put / access.log ----
+// (pws.escrow is myrx-only and lives in the admin_pw block). Caller has
+// already proven the site's master and checked the KV binding.
+async function accessAdmin(env, site, action, body) {
+  if (action === "access.get") {
+    const a = await readAccess(env, site, true);
+    if (a.state === "error") return json({ error: AA_KV_FAILED }, 503);
+    const out = { ok: true, access: a.doc, configured: accessConfigured(a.doc), secrets: { session: !!env.SESSION_SECRET } };
+    if (site === "myrx") {
+      out.secrets.escrow = !!env.ESCROW_KEY;
+      try { out.escrow = await escrowState(env); } catch { return json({ error: AA_KV_FAILED }, 503); }
+    }
+    return json(out);
+  }
+  if (action === "access.put") {
+    const v = validateAccessDoc(body.access);
+    if (v.error) return v.error;
+    const doc = { ...v.doc, updatedAt: new Date().toISOString() };
+    await env.AAPS_DATA.put(site + ":access", JSON.stringify(doc));
+    primeAccess(site, doc);
+    return json({ ok: true, access: doc, configured: accessConfigured(doc) });
+  }
+  if (action === "access.log") {
+    let rec = null;
+    try { rec = await env.AAPS_DATA.get(site + ":access-log", { type: "json" }); } catch { return json({ error: AA_KV_FAILED }, 503); }
+    const entries = isPlainObject(rec) && Array.isArray(rec.entries) ? rec.entries.slice(-ACCESS_LOG_VIEW).reverse() : [];
+    return json({ ok: true, entries });
+  }
+  return null;
+}
+// ---- the pathname dispatcher target: /login, /_auth/whoami, /_auth/key, /_auth/logout ----
+function sanitizeTo(s) {
+  if (typeof s !== "string" || !TO_RE.test(s) || s.startsWith("/login") || s.startsWith("/_auth")) return "/";
+  return s;
+}
+// lockout + the optional Rate Limiting binding, scope "auth:<site>" (its own
+// counter: guesses here never lock the password routes and vice versa).
+// Returns seconds to wait (> 0 = refuse) or 0.
+async function authLockWait(env, net) {
+  const wait = lockoutSeconds(net);
+  if (wait) return wait;
+  if (env.ADMIN_RL && typeof env.ADMIN_RL.limit === "function") {
+    try {
+      const { success } = await env.ADMIN_RL.limit({ key: net });
+      if (!success) { console.log(`auth: rate limited (${net})`); return 60; }
+    } catch (e) { console.log(`auth: rate limiter unavailable: ${e && e.message}`); }
+  }
+  return 0;
+}
+async function authFetch(req, env, url) {
+  const site = AUTH_SITES[url.hostname];
+  if (!site) return ajson({ error: "unknown site" }, 404);
+  const path = url.pathname, isLogin = path === "/login" || path === "/login/";
+  if (!env.SESSION_SECRET) return isLogin ? authSimplePage(503, "not-configured", "Email sign-in is not set up for this site yet.") : ajson({ error: AUTH_NOT_CONFIGURED }, 503);
+  if (!env.AAPS_DATA) return isLogin ? authSimplePage(500, "kv-failed", "Sign-in is unavailable right now", "Please try again in a moment.") : ajson({ error: "KV not bound" }, 500);
+  if (isLogin) {
+    if (req.method !== "GET") return ajson({ error: "GET only" }, 405);
+    return authLogin(req, env, url, site);
+  }
+  if (path === "/_auth/whoami") {
+    if (req.method !== "GET") return ajson({ error: "GET only" }, 405);
+    return authWhoami(req, env, site);
+  }
+  if (path === "/_auth/key") {
+    if (req.method !== "POST") return ajson({ error: "POST only" }, 405);
+    return authKey(req, env, site);
+  }
+  if (path === "/_auth/logout") {
+    if (req.method !== "POST") return ajson({ error: "POST only" }, 405);
+    return ajson({ ok: true }, 200, { "set-cookie": SESSION_CLEAR_COOKIE });
+  }
+  return ajson({ error: "not found" }, 404);
+}
+// GET /login?to=<same-host path>: Access has authenticated the visitor and
+// attached its JWT; verify it, map the email, set the session, redirect.
+async function authLogin(req, env, url, site) {
+  const net = netKey(req, "auth:" + site);
+  const wait = await authLockWait(env, net);
+  if (wait) return authSimplePage(429, "locked", `Too many attempts — try again in ${Math.max(1, Math.ceil(wait / 60))} minutes`);
+  const a = await readAccess(env, site);
+  if (a.state === "error") return authSimplePage(503, "kv-failed", "Sign-in is unavailable right now", "Please try again in a moment.");
+  const doc = a.doc;
+  if (!accessConfigured(doc)) return authSimplePage(503, "not-configured", "Email sign-in is not set up for this site yet.");
+  const token = req.headers.get("cf-access-jwt-assertion");
+  if (!token) {
+    // not a guess: every direct visit to /login looks like this until the
+    // Access app exists, and the counter is shared by the whole network
+    return authSimplePage(401, "no-token", "Sign-in required", "This page is only reachable through Cloudflare Access. If you followed a report link, go back and use the Sign in with company email button.");
+  }
+  const v = await verifyAccessJwt(token, doc.teamDomain, doc.aud);
+  if (!v.ok) {
+    if (v.reason !== "jwks-unavailable") lockoutFail(net); // an outage on our side is not the caller's guess
+    console.log(`auth: login refused (${site}): ${v.reason}`); // never the token, never the email
+    return authSimplePage(401, v.reason, "Sign-in could not be verified", "Go back to the report and try Sign in with company email again.");
+  }
+  const res = resolveAccess(doc, v.email);
+  if (!res.root && res.slugs.length === 0) {
+    await appendAccessLog(req, env, site, { action: "denied", email: v.email, slug: null });
+    lockoutFail(net);
+    const contact = typeof env.ACCESS_CONTACT === "string" && env.ACCESS_CONTACT.trim() ? env.ACCESS_CONTACT.trim() : "your report administrator";
+    return authPage(403, "unmapped", "Not authorized",
+      `<h1>This email is not authorized for a report on this site</h1>`
+      + `<p>You signed in as <b>${escHtml(v.email)}</b>.</p>`
+      + `<p>Contact ${escHtml(contact)} to request access.</p>`
+      + `<p><a href="/cdn-cgi/access/logout">Use a different email</a> · <a href="/">Back to the report</a></p>`);
+  }
+  lockoutReset(net);
+  const cookie = await makeSession(env, site, v.email, res);
+  await appendAccessLog(req, env, site, { action: "login", email: v.email, slug: null });
+  return new Response(null, { status: 302, headers: { location: sanitizeTo(url.searchParams.get("to")), "set-cookie": sessionSetCookie(cookie), "cache-control": "no-store", "x-auth-reason": "ok" } });
+}
+// GET /_auth/whoami -> { ok, configured, signedIn, email?, root?, slugs? } — re-resolved against the LIVE document
+async function authWhoami(req, env, site) {
+  const a = await readAccess(env, site);
+  if (a.state === "error") return ajson({ error: AA_KV_FAILED }, 503);
+  const configured = accessConfigured(a.doc);
+  const s = await readSession(req, env, site);
+  if (!s) return ajson({ ok: true, configured, signedIn: false });
+  const res = resolveAccess(a.doc, s.email);
+  return ajson({ ok: true, configured, signedIn: true, email: s.email, root: res.root, slugs: res.slugs });
+}
+// POST /_auth/key {site:""|"<slug>"} -> { ok, site, pw } for a site the session may open
+async function authKey(req, env, site) {
+  const parsed = await readJsonBody(req, AUTH_BODY_MAX);
+  if (parsed.error) return parsed.error;
+  const slug = String(parsed.body.site ?? "").toLowerCase();
+  if (!/^[a-z0-9-]{0,40}$/.test(slug)) return ajson({ error: "bad site" }, 400);
+  const net = netKey(req, "auth:" + site);
+  const wait = await authLockWait(env, net);
+  if (wait) return ajson({ error: "locked", retryAfter: wait }, 429);
+  const s = await readSession(req, env, site);
+  if (!s) { lockoutFail(net); return ajson({ error: "not signed in" }, 401); } // a forged / guessed cookie: the only thing an attacker can try here
+  const a = await readAccess(env, site);
+  if (a.state === "error") return ajson({ error: AA_KV_FAILED }, 503);
+  const res = resolveAccess(a.doc, s.email);
+  if (!accessAllowed(res, slug)) {
+    // logged, but never counted against the network: the cookie already proves
+    // who this is, and a client-mapped user landing on the root page asks for
+    // site "" on every load — five of those would lock a whole office NAT out
+    await appendAccessLog(req, env, site, { action: "denied", email: s.email, slug });
+    return ajson({ error: "not authorized" }, 403);
+  }
+  let pw;
+  if (site === "myrx") {
+    if (!env.ESCROW_KEY) return ajson({ error: AUTH_NOT_CONFIGURED }, 503);
+    const esc = await readEscrow(env);
+    if (esc.state === "error") return ajson({ error: AA_KV_FAILED }, 503);
+    if (esc.state === "missing") return ajson({ error: "keys not escrowed yet" }, 409);
+    pw = slug === "" ? esc.root : (own(esc.passwords, slug) ? esc.passwords[slug] : undefined);
+  } else if (slug === "") {
+    if (!env.REPORT_PW) return ajson({ error: "REPORT_PW not set" }, 500);
+    pw = env.REPORT_PW;
+  } else {
+    const v = await aaLoadVault(env);
+    if (v.state === "error") return ajson({ error: AA_KV_FAILED }, 503);
+    const clients = v.state === "ok" ? v.clients : aaSecretClients(env); // absent / sealed: the documented CLIENT_PWS degrade
+    pw = own(clients, slug) ? clients[slug].pw : undefined;
+  }
+  if (typeof pw !== "string" || !pw) return ajson({ error: "no key for this site" }, 404);
+  lockoutReset(net);
+  await appendAccessLog(req, env, site, { action: "key", email: s.email, slug });
+  return ajson({ ok: true, site: slug, pw });
+}
+
 export default {
   async fetch(req, env) {
+    // email sign-in lives on the report hostnames' /login and /_auth/* paths
+    // (Worker Routes); everything else is the JSON API below, untouched
+    const url = new URL(req.url);
+    if (url.pathname === "/login" || url.pathname.startsWith("/login/") || url.pathname.startsWith("/_auth/")) return authFetch(req, env, url);
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
     if (req.method !== "POST") return json({ error: "POST only" }, 405);
     // size cap enforced while reading: nothing legitimate here is near 1 MB
@@ -656,6 +1163,32 @@ export default {
       const action = String(body.action || "");
       if (action === "ping") return json({ ok: true, kv: !!env.AAPS_DATA });
       if (!env.AAPS_DATA) return json({ error: "KV not bound" }, 500);
+      // email sign-in: who may open what (access.*), and the escrow that lets
+      // /_auth/key hand out partner passwords — the admin page decrypts
+      // myrx:pws with the master in the browser and posts the plaintext here,
+      // where it is resealed under ESCROW_KEY. root must be the master itself.
+      const accessRes = await accessAdmin(env, "myrx", action, body);
+      if (accessRes) return accessRes;
+      if (action === "pws.escrow") {
+        if (!env.ESCROW_KEY) return json({ error: AUTH_NOT_CONFIGURED }, 503);
+        const pws = body.passwords;
+        if (!isPlainObject(pws)) return json({ error: "passwords: must be an object", path: "passwords" }, 422);
+        const keys = Object.keys(pws);
+        if (keys.length > 200) return json({ error: "passwords: at most 200", path: "passwords" }, 422);
+        const passwords = {};
+        for (const k of keys) {
+          const slug = k.toLowerCase();
+          if (!ADMIN_SLUG_RE.test(slug)) return json({ error: `passwords.${k}: bad slug`, path: `passwords.${k}` }, 422);
+          if (typeof pws[k] !== "string" || pws[k].length < 1 || pws[k].length > 200) return json({ error: `passwords.${slug}: bad password`, path: `passwords.${slug}` }, 422);
+          passwords[slug] = pws[k];
+        }
+        if (typeof body.root !== "string" || !(await safeEqual(body.root, body.admin_pw))) return json({ error: "root: must be the master password", path: "root" }, 422);
+        let mirrored;
+        try { mirrored = await pwsUpdatedAt(env); } catch { return json({ error: AA_KV_FAILED }, 503); }
+        const { updatedAt, count } = await sealEscrow(env, passwords, body.root, mirrored);
+        console.log(`auth: escrow sealed (${count} sites)`); // never a value
+        return json({ ok: true, updatedAt, count });
+      }
       if (action === "brands.list") {
         const lst = await env.AAPS_DATA.list({ prefix: BRAND_KEY_PREFIX, limit: 50 });
         const docs = await Promise.all(lst.keys.map((k) => env.AAPS_DATA.get(k.name, { type: "json" })));
@@ -750,6 +1283,9 @@ export default {
       if (!AA_ACTIONS.has(action)) return json({ error: "bad action" }, 400);
       if (action === "ping") return json({ ok: true, kv: !!env.AAPS_DATA, vault: env.AAPS_DATA ? (await aaLoadVault(env)).state : "absent" });
       if (!env.AAPS_DATA) return json({ error: "KV not bound" }, 500);
+      // email sign-in mapping (independent of the vault: works while sealed)
+      const accessRes = await accessAdmin(env, "aa", action, body);
+      if (accessRes) return accessRes;
       // Vault absent -> seal the CLIENT_PWS entries; always make sure every
       // client has a stock brand doc. Idempotent. force is ONLY the recovery
       // for a vault sealed under a password nobody has: over an open vault it

@@ -19,6 +19,17 @@
 // MASTER resets it), the whole-word client scoping key, and the failure
 // modes that must never write: an unreadable KV ("error", 503), force on an
 // open vault (409), and a roster changed in KV behind this isolate's cache.
+// Part 5 is "Sign in with company email": the /login + /_auth/* surface on the
+// two report hostnames driven with synthetic Access JWTs (an RSA key generated
+// here, its JWKS served by the stubbed fetch), the session cookie round trip
+// and its rejection cases, open-redirect attempts in `to`, the access.* admin
+// actions (public-provider domains refused), the MyRxCard escrow lifecycle
+// (missing -> ok -> stale -> ok), the Avalon vault key release with its
+// sealed/unreadable degrades, the capped sign-in logs and the "auth:<site>"
+// lockout scope that never touches the password routes and only ever counts
+// guesses (bad tokens, forged cookies, unmapped emails) — never a bare visit
+// to /login or a valid session refused a slug, since the counter is shared by
+// everyone behind one office NAT.
 
 import { validateBrand, validateBrandAA } from "../brand-validate.mjs";
 
@@ -790,6 +801,413 @@ r = await aa({ report_pw: "client-vault-pw" }); check("  vault client unlocks ag
 r = await call({ admin_pw: TEST_MASTER, action: "brands.list" }); check("myrx brands.list still lists only myrx docs", r.status === 200 && r.out.clients.map((c) => c.slug).join(",") === "zeta,aurora,uwhc", JSON.stringify(r.out.clients && r.out.clients.map((c) => c.slug)));
 r = await call({ admin_pw: TEST_MASTER, action: "pws.get" }); check("myrx pws.get still serves its own vault", r.status === 200 && r.out.enc && r.out.enc.data === vault.data);
 check("no aa:* key ever leaked a plaintext client password into KV", ![...kv.store.entries()].some(([k, v]) => k.startsWith("aa:") && (v.includes("client-vault-pw") || v.includes("client-marpai-pw") || (demoPw2 && v.includes(demoPw2)))));
+
+// ---------------------------------------------------------------- part 5
+console.log("email sign-in (Cloudflare Access): /login, /_auth/*, access.* admin actions, escrow, logs");
+// Synthetic Access: an RSA key pair signs test JWTs; the stubbed fetch serves
+// its public half as the team's JWKS. A second pair stands in for "signed by
+// someone else". No real Access team, secret or password is involved.
+const RSA = { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" };
+const kp1 = await crypto.subtle.generateKey(RSA, true, ["sign", "verify"]);
+const kp2 = await crypto.subtle.generateKey(RSA, true, ["sign", "verify"]);
+const pub1 = await crypto.subtle.exportKey("jwk", kp1.publicKey);
+const TEST_JWK = { kid: "test-kid-1", kty: "RSA", alg: "RS256", use: "sig", n: pub1.n, e: pub1.e };
+let jwksCalls = 0;
+const prevFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  const u = String(url);
+  if (u === "https://testteam.cloudflareaccess.com/cdn-cgi/access/certs") { jwksCalls++; return new Response(JSON.stringify({ keys: [TEST_JWK] }), { status: 200 }); }
+  if (u === "https://downteam.cloudflareaccess.com/cdn-cgi/access/certs") return new Response("down", { status: 503 });
+  return prevFetch(url, init);
+};
+const hex = (n) => Buffer.from(crypto.getRandomValues(new Uint8Array(n))).toString("hex");
+const b64u = (x) => Buffer.from(typeof x === "string" ? x : new Uint8Array(x)).toString("base64url");
+const TEST_AUD = hex(32), OTHER_AUD = hex(32);
+const TEST_SESSION_SECRET = hex(32), TEST_ESCROW_KEY = hex(32);
+const envS = { ...envA, SESSION_SECRET: TEST_SESSION_SECRET, ESCROW_KEY: TEST_ESCROW_KEY };
+const MYRX = "https://reports.myrxcard.com", AVALON = "https://reports.avalonsaves.com", WORKERS_DEV = "https://myrxcard-sync.example";
+const nowS = () => Math.floor(Date.now() / 1000);
+async function signJwt(claims, { kid = "test-kid-1", key = kp1.privateKey, alg = "RS256" } = {}) {
+  const h = b64u(JSON.stringify({ alg, kid, typ: "JWT" })), p = b64u(JSON.stringify(claims));
+  const sig = await crypto.subtle.sign({ name: "RSASSA-PKCS1-v1_5" }, key, new TextEncoder().encode(`${h}.${p}`));
+  return `${h}.${p}.${b64u(sig)}`;
+}
+const claims = (email, extra = {}) => ({ iss: "https://testteam.cloudflareaccess.com", aud: [TEST_AUD], exp: nowS() + 300, iat: nowS(), email, ...extra });
+const jwtFor = (email, extra, opts) => signJwt(claims(email, extra), opts);
+// one request against the auth surface: returns status, parsed JSON (or the HTML), the reason header and the cookie
+async function auth(host, path, { method, body, cookie, jwt, ip, env: e, headers: hx } = {}) {
+  const headers = { "cf-connecting-ip": ip || freshIp(), ...(hx || {}) };
+  if (cookie) headers.cookie = cookie;
+  if (jwt) headers["cf-access-jwt-assertion"] = jwt;
+  const init = { method: method || (body !== undefined ? "POST" : "GET"), headers };
+  if (body !== undefined) { headers["content-type"] = "application/json"; init.body = typeof body === "string" ? body : JSON.stringify(body); }
+  const res = await worker.fetch(new Request(host + path, init), e || envS);
+  const text = await res.text();
+  let out = null; try { out = JSON.parse(text); } catch {}
+  const setCookie = res.headers.get("set-cookie");
+  return { status: res.status, out, html: text, headers: res.headers, reason: res.headers.get("x-auth-reason"), setCookie, cookie: setCookie ? setCookie.split(";")[0] : null };
+}
+const myrxAdmin = (action, extra = {}, opts = {}) => call({ admin_pw: TEST_MASTER, action, ...extra }, { ip: freshIp(), env: envS, ...opts });
+const aaAdmin = (action, extra = {}, opts = {}) => aa({ aa_admin_pw: TEST_REPORT_PW, action, ...extra }, { env: envS, ...opts });
+const parseCookie = (c) => { const [pv, sig] = c.split("=")[1].split("."); return { payload: JSON.parse(Buffer.from(pv, "base64url").toString()), payloadB64: pv, sig }; };
+async function forgeCookie(payload, secret = TEST_SESSION_SECRET) { // the contract's cookie format, built here so a tampered/expired one can be tested
+  const pv = b64u(JSON.stringify(payload));
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  return `__Host-report_session=${pv}.${b64u(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(pv)))}`;
+}
+const SECRET_STRINGS = ["fake-partner-pw", "client-vault-pw", "client-marpai-pw", TEST_MASTER, TEST_REPORT_PW];
+const leaks = (s) => SECRET_STRINGS.some((x) => s.includes(x));
+
+// dispatcher + gating
+r = await auth(WORKERS_DEV, "/login/"); check("/login on the workers.dev host -> 404 unknown site", r.status === 404 && r.out && r.out.error === "unknown site", r.html.slice(0, 100));
+r = await auth(WORKERS_DEV, "/_auth/whoami"); check("/_auth/whoami on the workers.dev host -> 404 unknown site", r.status === 404 && r.out.error === "unknown site");
+r = await call({}, { env: { ...envS, XANO_META_TOKEN: undefined } }); check("POST / unchanged: empty body still falls to the Xano guard", r.status === 500 && /Xano/.test(r.out.error));
+r = await call({ secret: "nope", rows: [] }, { env: envS }); check("POST / unchanged: the secret route still answers on the workers.dev host", r.status === 403 && r.out.error === "bad secret");
+r = await call({ brand_get: "uwhc" }, { env: envS }); check("POST / brand_get unchanged (CORS * still on the JSON API)", r.status === 200 && r.out.found === true && r.cors === "*");
+r = await auth(MYRX, "/_auth/whoami", { env: envA }); check("no SESSION_SECRET -> 503 email sign-in not configured", r.status === 503 && r.out.error === "email sign-in not configured", r.html);
+r = await auth(MYRX, "/login/", { env: envA }); check("  /login without SESSION_SECRET -> 503 HTML, reason not-configured", r.status === 503 && r.reason === "not-configured" && r.headers.get("content-type").startsWith("text/html"));
+r = await auth(MYRX, "/_auth/key", { body: { site: "" }, env: envA }); check("  /_auth/key without SESSION_SECRET -> 503", r.status === 503 && r.out.error === "email sign-in not configured");
+r = await auth(MYRX, "/_auth/whoami", { env: { ...envS, AAPS_DATA: undefined } }); check("no KV -> 500 KV not bound", r.status === 500 && r.out.error === "KV not bound");
+{ // an unreadable access document is state "error": 503, never cached, never "not configured" (checked before any read has warmed the 60 s cache)
+  const flakyAccess = (key) => ({ ...envS, AAPS_DATA: { ...kv, get: async (k, o) => { if (k === key) throw new Error("kv down"); return kv.get(k, o); } } });
+  r = await auth(MYRX, "/_auth/whoami", { env: flakyAccess("myrx:access") }); check("KV throwing on myrx:access -> whoami 503 KV read failed", r.status === 503 && r.out.error === "KV read failed", r.html);
+  r = await auth(MYRX, "/login/", { env: flakyAccess("myrx:access") }); check("  /login -> 503 HTML kv-failed", r.status === 503 && r.reason === "kv-failed" && r.headers.get("content-type").startsWith("text/html"));
+  r = await auth(AVALON, "/_auth/whoami", { env: flakyAccess("aa:access") }); check("  aa whoami -> 503 too", r.status === 503 && r.out.error === "KV read failed");
+  r = await auth(AVALON, "/_auth/whoami"); check("  ...and the failure was not cached: the next aa whoami answers", r.status === 200 && r.out.ok === true && r.out.configured === false);
+}
+r = await auth(MYRX, "/_auth/x"); check("unknown /_auth/x -> 404 not found", r.status === 404 && r.out.error === "not found");
+r = await auth(MYRX, "/login/extra"); check("/login/extra -> 404 not found", r.status === 404 && r.out.error === "not found");
+r = await auth(MYRX, "/_auth/whoami", { method: "POST", body: {} }); check("POST /_auth/whoami -> 405 GET only", r.status === 405 && r.out.error === "GET only");
+r = await auth(MYRX, "/_auth/key"); check("GET /_auth/key -> 405 POST only", r.status === 405 && r.out.error === "POST only");
+r = await auth(MYRX, "/_auth/logout"); check("GET /_auth/logout -> 405 POST only", r.status === 405 && r.out.error === "POST only");
+r = await auth(MYRX, "/login/", { method: "POST", body: {} }); check("POST /login -> 405 GET only", r.status === 405 && r.out.error === "GET only");
+r = await auth(MYRX, "/_auth/whoami");
+check("whoami unconfigured, no cookie -> {ok, configured:false, signedIn:false}", r.status === 200 && r.out.ok === true && r.out.configured === false && r.out.signedIn === false, r.html);
+check("  /_auth/* carries no CORS header, cache-control no-store, vary cookie", r.headers.get("access-control-allow-origin") === null && r.headers.get("cache-control") === "no-store" && r.headers.get("vary") === "cookie");
+r = await auth(MYRX, "/login/"); check("/login unconfigured -> 503 HTML not-configured", r.status === 503 && r.reason === "not-configured" && r.html.includes("Email sign-in is not set up for this site yet.") && r.headers.get("cache-control") === "no-store");
+r = await auth(MYRX, "/_auth/key", { body: { site: "" } }); check("/_auth/key without a cookie -> 401 not signed in", r.status === 401 && r.out.error === "not signed in");
+r = await auth(MYRX, "/_auth/key", { body: { site: "Bad Site!" } }); check("/_auth/key bad site -> 400", r.status === 400 && r.out.error === "bad site");
+r = await auth(MYRX, "/_auth/key", { body: "{" }); check("/_auth/key unparseable body -> 400 bad json", r.status === 400 && r.out.error === "bad json");
+r = await auth(MYRX, "/_auth/key", { body: JSON.stringify({ site: "", pad: "x".repeat(10100) }) }); check("/_auth/key body > 10000 bytes -> 413", r.status === 413);
+
+// access.get / access.put (myrx)
+r = await myrxAdmin("access.get");
+check("access.get unseeded -> the empty document, configured:false, secrets flags", r.status === 200 && r.out.ok && r.out.access.v === 1 && r.out.access.teamDomain === "" && r.out.access.aud === "" && Array.isArray(r.out.access.root.domains) && r.out.access.root.emails.length === 0
+  && Object.keys(r.out.access.clients).length === 0 && r.out.access.updatedAt === null && r.out.configured === false && r.out.secrets.session === true && r.out.secrets.escrow === true, JSON.stringify(r.out));
+check("  myrx access.get carries escrow.state missing", r.out.escrow && r.out.escrow.state === "missing" && r.out.escrow.count === 0 && r.out.escrow.updatedAt === null, JSON.stringify(r.out.escrow));
+r = await myrxAdmin("access.get", {}, { env: { ...envS, SESSION_SECRET: undefined, ESCROW_KEY: undefined } }); check("  secrets flags false when the secrets are absent", r.status === 200 && r.out.secrets.session === false && r.out.secrets.escrow === false);
+r = await myrxAdmin("access.put", { access: "x" }); check("access.put non-object -> 422 access: must be an object", r.status === 422 && r.out.error === "access: must be an object" && r.out.path === "access");
+r = await myrxAdmin("access.put", { access: { teamDomain: "x", extra: 1 } }); check("access.put unknown top-level key -> 422 access.extra", r.status === 422 && r.out.error === "access.extra: unknown key" && r.out.path === "access.extra");
+r = await myrxAdmin("access.put", { access: { teamDomain: "a.b" } }); check("teamDomain 'a.b' -> 422 team name only", r.status === 422 && r.out.error === "access.teamDomain: team name only (the part before .cloudflareaccess.com)" && r.out.path === "access.teamDomain");
+r = await myrxAdmin("access.put", { access: { teamDomain: 42 } }); check("teamDomain non-string -> 422", r.status === 422 && r.out.path === "access.teamDomain");
+r = await myrxAdmin("access.put", { access: { teamDomain: "Avalon" } }); check("teamDomain 'Avalon' -> lowercased", r.status === 200 && r.out.access.teamDomain === "avalon" && r.out.configured === false);
+r = await myrxAdmin("access.put", { access: { teamDomain: "https://avalon.cloudflareaccess.com/" } }); check("teamDomain full URL -> 'avalon'", r.status === 200 && r.out.access.teamDomain === "avalon");
+r = await myrxAdmin("access.put", { access: { teamDomain: " avalon.cloudflareaccess.com " } }); check("teamDomain with the suffix and spaces -> 'avalon'", r.status === 200 && r.out.access.teamDomain === "avalon");
+r = await myrxAdmin("access.put", { access: { aud: TEST_AUD.slice(0, 63) } }); check("aud 63 hex -> 422", r.status === 422 && r.out.error === "access.aud: 64 hex characters (the Access application AUD tag)" && r.out.path === "access.aud");
+r = await myrxAdmin("access.put", { access: { aud: TEST_AUD.toUpperCase() } }); check("aud uppercase -> accepted lowercased", r.status === 200 && r.out.access.aud === TEST_AUD);
+r = await myrxAdmin("access.put", { access: { root: { domains: ["gmail.com"] } } }); check("public provider as a domain -> 422 exact sentence", r.status === 422 && r.out.error === "access.root.domains[0]: public email providers cannot be allowed as a domain" && r.out.path === "access.root.domains[0]", JSON.stringify(r.out));
+r = await myrxAdmin("access.put", { access: { clients: { uwhc: { domains: ["uwhealth.org", "Outlook.com"] } } } }); check("  ...also under a client, case-insensitively, with the index", r.status === 422 && r.out.error === "access.clients.uwhc.domains[1]: public email providers cannot be allowed as a domain");
+r = await myrxAdmin("access.put", { access: { root: { emails: ["someone@gmail.com"] } } }); check("gmail.com as a named person is fine", r.status === 200 && r.out.access.root.emails.join() === "someone@gmail.com");
+r = await myrxAdmin("access.put", { access: { root: { domains: ["not a domain"] } } }); check("bad domain -> 422 not a domain", r.status === 422 && r.out.error === "access.root.domains[0]: not a domain");
+r = await myrxAdmin("access.put", { access: { root: { domains: ["localhost"] } } }); check("single-label domain -> 422", r.status === 422 && r.out.path === "access.root.domains[0]");
+r = await myrxAdmin("access.put", { access: { root: { emails: ["nobody"] } } }); check("bad email -> 422 not an email address", r.status === 422 && r.out.error === "access.root.emails[0]: not an email address");
+r = await myrxAdmin("access.put", { access: { root: { emails: [123] } } }); check("non-string email -> 422", r.status === 422 && r.out.path === "access.root.emails[0]");
+r = await myrxAdmin("access.put", { access: { root: { domains: "uwhealth.org" } } }); check("domains not a list -> 422", r.status === 422 && r.out.path === "access.root.domains");
+r = await myrxAdmin("access.put", { access: { root: { people: [] } } }); check("unknown key inside an entry -> 422 access.root.people", r.status === 422 && r.out.error === "access.root.people: unknown key");
+r = await myrxAdmin("access.put", { access: { root: [] } }); check("root not an object -> 422", r.status === 422 && r.out.path === "access.root");
+r = await myrxAdmin("access.put", { access: { clients: { "Bad Slug": { domains: [] } } } }); check("bad client slug key -> 422 access.clients.Bad Slug: bad slug", r.status === 422 && r.out.error === "access.clients.Bad Slug: bad slug");
+r = await myrxAdmin("access.put", { access: { clients: { uwhc: { domains: [], extra: 1 } } } }); check("unknown key inside a client entry -> 422 access.clients.uwhc.extra", r.status === 422 && r.out.error === "access.clients.uwhc.extra: unknown key");
+r = await myrxAdmin("access.put", { access: { clients: [] } }); check("clients not an object -> 422", r.status === 422 && r.out.path === "access.clients");
+r = await myrxAdmin("access.put", { access: { root: { domains: Array.from({ length: 21 }, (_, i) => `d${i}.example.com`) } } }); check("> 20 domains -> 422 at most 20", r.status === 422 && r.out.error === "access.root.domains: at most 20");
+r = await myrxAdmin("access.put", { access: { root: { emails: Array.from({ length: 201 }, (_, i) => `p${i}@example.com`) } } }); check("> 200 emails -> 422 at most 200", r.status === 422 && r.out.error === "access.root.emails: at most 200");
+{ const cl = {}; for (let i = 0; i < 101; i++) cl["c" + i] = {}; r = await myrxAdmin("access.put", { access: { clients: cl } }); check("> 100 clients -> 422 at most 100", r.status === 422 && r.out.error === "access.clients: at most 100"); }
+r = await myrxAdmin("access.put", { access: { root: { domains: ["Zeta.org", " alpha.org ", "zeta.org"], emails: ["B@X.org", "a@x.org", "b@x.org"] }, clients: { UWHC: { domains: ["UWHealth.org"] } } } });
+check("dedupe + sort + lowercase (domains, emails, slug keys)", r.status === 200 && r.out.access.root.domains.join() === "alpha.org,zeta.org" && r.out.access.root.emails.join() === "a@x.org,b@x.org" && Object.keys(r.out.access.clients).join() === "uwhc" && r.out.access.clients.uwhc.domains.join() === "uwhealth.org" && r.out.access.clients.uwhc.emails.length === 0, JSON.stringify(r.out.access));
+check("  updatedAt stamped, stored under myrx:access", typeof r.out.access.updatedAt === "string" && kv.store.has("myrx:access") && JSON.parse(kv.store.get("myrx:access")).clients.uwhc.domains[0] === "uwhealth.org");
+r = await myrxAdmin("access.put", { access: { v: 1, updatedAt: "ignored", teamDomain: "", aud: "" } }); check("v / updatedAt in the body are ignored, not unknown", r.status === 200 && r.out.access.updatedAt !== "ignored");
+r = await myrxAdmin("access.put", { access: { teamDomain: "testteam", aud: TEST_AUD, root: { emails: ["boss@corp.example"] }, clients: { uwhc: { domains: ["uwhealth.org"], emails: ["contractor@gmail.com"] }, aurora: { emails: ["pm@aurora.example"] } } } });
+check("access.put full myrx document -> configured:true", r.status === 200 && r.out.configured === true && r.out.access.teamDomain === "testteam", JSON.stringify(r.out));
+r = await myrxAdmin("access.get"); check("access.get returns the normalized document + configured:true", r.status === 200 && r.out.configured === true && r.out.access.aud === TEST_AUD && r.out.access.clients.uwhc.domains[0] === "uwhealth.org" && r.out.access.root.emails[0] === "boss@corp.example");
+r = await call({ admin_pw: "wrong", action: "access.get" }, { ip: freshIp(), env: envS }); check("access.get without the master -> 403", r.status === 403);
+r = await myrxAdmin("access.get", {}, { env: { ...envS, AAPS_DATA: undefined } }); check("access.get without KV -> 500 KV not bound", r.status === 500 && r.out.error === "KV not bound");
+// aa side: same shape, no escrow
+r = await aaAdmin("access.get"); check("aa access.get unseeded -> empty document, no escrow key, secrets.session only", r.status === 200 && r.out.ok && r.out.configured === false && r.out.access.teamDomain === "" && r.out.escrow === undefined && r.out.secrets.session === true && r.out.secrets.escrow === undefined, JSON.stringify(r.out));
+r = await aaAdmin("access.put", { access: { root: { domains: ["yahoo.com"] } } }); check("aa access.put public domain -> 422", r.status === 422 && r.out.error === "access.root.domains[0]: public email providers cannot be allowed as a domain");
+r = await aaAdmin("access.put", { access: { teamDomain: "testteam", aud: TEST_AUD, root: { domains: ["avalon.example"] }, clients: { vault: { domains: ["vault.example"] }, ghost: { emails: ["g@ghost.example"] } } } });
+check("aa access.put full document -> configured:true, stored under aa:access", r.status === 200 && r.out.configured === true && kv.store.has("aa:access") && !kv.store.has("aa:access-log"), JSON.stringify(r.out));
+r = await myrxAdmin("access.get"); check("  the myrx document is untouched by the aa write", r.out.access.root.emails[0] === "boss@corp.example" && r.out.access.clients.vault === undefined);
+r = await aa({ aa_admin_pw: "wrong", action: "access.get" }, { env: envS }); check("aa access.get without the master -> 403", r.status === 403);
+
+// /login
+r = await auth(MYRX, "/login/"); check("configured, no Access header -> 401 no-token with the sign-in-required copy", r.status === 401 && r.reason === "no-token" && r.html.includes("Sign-in required") && r.html.includes("Sign in with company email"), r.reason);
+r = await auth(MYRX, "/login/?to=%2Fuwhc%2F", { jwt: await jwtFor("Nurse@UWHealth.org") });
+check("valid JWT + mapped domain -> 302 Location /uwhc/", r.status === 302 && r.headers.get("location") === "/uwhc/" && r.reason === "ok" && r.headers.get("cache-control") === "no-store", `${r.status} ${r.reason} ${r.headers.get("location")}`);
+const uwhcCookie = r.cookie;
+check("  Set-Cookie: __Host- name, Path=/, Secure, HttpOnly, SameSite=Lax, Max-Age=43200", !!r.setCookie && r.setCookie.startsWith("__Host-report_session=") && /; Path=\//.test(r.setCookie) && /; Secure/.test(r.setCookie) && /; HttpOnly/.test(r.setCookie) && /; SameSite=Lax/.test(r.setCookie) && /; Max-Age=43200/.test(r.setCookie) && !/Domain=/.test(r.setCookie), r.setCookie);
+{
+  const c = parseCookie(uwhcCookie);
+  check("  cookie payload {v:1, site, email (lowercased), root:false, slugs:[uwhc], iat, exp=iat+12h, nonce}", c.payload.v === 1 && c.payload.site === "myrx" && c.payload.email === "nurse@uwhealth.org" && c.payload.root === false && c.payload.slugs.join() === "uwhc" && c.payload.exp === c.payload.iat + 43200 && /^[0-9a-f]{32}$/.test(c.payload.nonce), JSON.stringify(c.payload));
+  check("  signature = base64url HMAC-SHA256(SESSION_SECRET, payloadB64)", (await forgeCookie(c.payload)) === uwhcCookie);
+  check("  body empty; no password in the response", r.html === "" && !leaks(r.html));
+}
+{
+  const rec = JSON.parse(kv.store.get("myrx:access-log"));
+  check("  login logged under myrx:access-log {t, email, slug:null, action:login, net}", rec && rec.v === 1 && rec.entries.length === 1 && rec.entries[0].action === "login" && rec.entries[0].email === "nurse@uwhealth.org" && rec.entries[0].slug === null && /^\d{4}-/.test(rec.entries[0].t) && /^198\.51\.100\.\d+$/.test(rec.entries[0].net), JSON.stringify(rec));
+}
+// `to` sanitization
+for (const [to, want] of [["//evil.com", "/"], ["https://x", "/"], ["/login/x", "/"], ["/_auth/key", "/"], ["", "/"], ["/a b", "/"], ["/x\\y", "/"], ["/uwhc/?period=Q", "/uwhc/?period=Q"], ["/\\evil.com", "/"], ["/x\ny", "/"], ["/" + "a".repeat(501), "/"], ["/aurora/", "/aurora/"]]) {
+  r = await auth(MYRX, "/login/?to=" + encodeURIComponent(to), { jwt: await jwtFor("nurse@uwhealth.org") });
+  if (!(r.status === 302 && r.headers.get("location") === want)) { check(`to=${JSON.stringify(to)} -> ${want}`, false, `${r.status} ${r.headers.get("location")}`); break; }
+}
+check("`to` open-redirect attempts -> /; same-host paths with a query kept", r.status === 302 && r.headers.get("location") === "/aurora/");
+r = await auth(MYRX, "/login", { jwt: await jwtFor("nurse@uwhealth.org") }); check("/login without a trailing slash or `to` -> 302 /", r.status === 302 && r.headers.get("location") === "/");
+check("JWKS fetched once across all those logins (1 h cache)", jwksCalls === 1, `${jwksCalls} calls`);
+// token failures — each with its reason, none with a cookie
+const bad = async (name, jwt, reason, ip) => { const x = await auth(MYRX, "/login/", { jwt, ip }); check(`${name} -> 401 ${reason}`, x.status === 401 && x.reason === reason && x.setCookie === null && x.html.includes("Sign-in could not be verified"), `${x.status} ${x.reason}`); return x; };
+await bad("wrong signing key", await jwtFor("nurse@uwhealth.org", {}, { key: kp2.privateKey }), "bad-signature");
+await bad("unknown kid (JWKS just fetched: no refetch)", await jwtFor("nurse@uwhealth.org", {}, { kid: "rotated-kid" }), "bad-signature");
+await bad("wrong issuer", await jwtFor("nurse@uwhealth.org", { iss: "https://evil.cloudflareaccess.com" }), "bad-issuer");
+await bad("wrong audience", await jwtFor("nurse@uwhealth.org", { aud: [OTHER_AUD] }), "bad-audience");
+await bad("aud as a string that is not ours", await jwtFor("nurse@uwhealth.org", { aud: OTHER_AUD }), "bad-audience");
+await bad("expired", await jwtFor("nurse@uwhealth.org", { exp: nowS() - 5 }), "expired");
+await bad("exp missing", await jwtFor("nurse@uwhealth.org", { exp: undefined }), "expired");
+await bad("nbf in the future", await jwtFor("nurse@uwhealth.org", { nbf: nowS() + 600 }), "expired");
+await bad("iat far in the future", await jwtFor("nurse@uwhealth.org", { iat: nowS() + 900 }), "expired");
+await bad("alg none", await jwtFor("nurse@uwhealth.org", {}, { alg: "none" }), "bad-token");
+await bad("alg HS256 header", await jwtFor("nurse@uwhealth.org", {}, { alg: "HS256" }), "bad-token");
+await bad("two segments", "abc.def", "bad-token");
+await bad("garbage segments", "!!!.@@@.###", "bad-token");
+await bad("no email claim", await jwtFor(undefined), "no-email");
+await bad("email not an address", await jwtFor("not-an-email"), "no-email");
+r = await auth(MYRX, "/login/", { jwt: await jwtFor("nurse@uwhealth.org", { aud: TEST_AUD }) }); check("aud as a plain string -> accepted", r.status === 302);
+r = await auth(MYRX, "/login/", { jwt: await jwtFor("  Nurse@UWHealth.org  ", { nbf: nowS() + 30 }) }); check("email trimmed/lowercased; nbf within 60 s skew accepted", r.status === 302 && parseCookie(r.cookie).payload.email === "nurse@uwhealth.org");
+// JWKS unavailable: an aa document pointing at the down team
+r = await aaAdmin("access.put", { access: { teamDomain: "downteam", aud: TEST_AUD, root: { domains: ["avalon.example"] } } });
+r = await auth(AVALON, "/login/", { jwt: await signJwt({ ...claims("x@avalon.example"), iss: "https://downteam.cloudflareaccess.com" }) });
+check("JWKS endpoint down -> 401 jwks-unavailable, no cookie", r.status === 401 && r.reason === "jwks-unavailable" && r.setCookie === null, r.reason);
+{
+  const ip = freshIp();
+  for (let i = 0; i < 6; i++) r = await auth(AVALON, "/login/", { ip, jwt: await signJwt({ ...claims("x@avalon.example"), iss: "https://downteam.cloudflareaccess.com" }) });
+  check("  a JWKS outage never locks the caller out (not their guess)", r.status === 401 && r.reason === "jwks-unavailable");
+}
+r = await aaAdmin("access.put", { access: { teamDomain: "testteam", aud: TEST_AUD, root: { domains: ["avalon.example"] }, clients: { vault: { domains: ["vault.example"] }, ghost: { emails: ["g@ghost.example"] } } } });
+check("  (aa document restored)", r.status === 200 && r.out.configured === true);
+// unmapped email
+r = await auth(MYRX, "/login/?to=%2Fuwhc%2F", { jwt: await jwtFor("stranger@nowhere.example") });
+check("valid JWT, unmapped email -> 403 unmapped, no Set-Cookie", r.status === 403 && r.reason === "unmapped" && r.setCookie === null, `${r.status} ${r.reason}`);
+check("  denial page: exact heading, the email (escaped), default contact line, both links", r.html.includes("<h1>This email is not authorized for a report on this site</h1>") && r.html.includes("<p>You signed in as <b>stranger@nowhere.example</b>.</p>")
+  && r.html.includes("<p>Contact your report administrator to request access.</p>") && r.html.includes('<a href="/cdn-cgi/access/logout">Use a different email</a>') && r.html.includes('<a href="/">Back to the report</a>'), r.html.slice(-400));
+r = await auth(MYRX, "/login/", { jwt: await jwtFor("stranger@nowhere.example"), env: { ...envS, ACCESS_CONTACT: "support@myrxcard.example" } }); check("  ACCESS_CONTACT var replaces the contact line", r.html.includes("<p>Contact support@myrxcard.example to request access.</p>"));
+r = await auth(MYRX, "/login/", { jwt: await jwtFor("x'y@nowhere.example"), env: { ...envS, ACCESS_CONTACT: "IT <helpdesk>" } }); check("  email and contact line are HTML-escaped on the denial page", r.status === 403 && r.html.includes("<b>x&#39;y@nowhere.example</b>") && r.html.includes("Contact IT &lt;helpdesk&gt; to request access") && !r.html.includes("<helpdesk>"), r.reason);
+{
+  const rec = JSON.parse(kv.store.get("myrx:access-log"));
+  const last = rec.entries[rec.entries.length - 1];
+  check("  denied entries logged {action:denied, slug:null}", rec.entries.filter((e) => e.action === "denied").length === 3 && last.action === "denied" && last.email === "x'y@nowhere.example" && last.slug === null, JSON.stringify(last));
+}
+// lockout: scope auth:<site>, separate from the password routes
+{
+  const ip = freshIp();
+  let last;
+  for (let i = 0; i < 5; i++) last = await auth(MYRX, "/login/", { ip, jwt: await jwtFor("nurse@uwhealth.org", {}, { key: kp2.privateKey }) });
+  check("5 bad tokens -> 401 then", last.status === 401);
+  r = await auth(MYRX, "/login/", { ip, jwt: await jwtFor("nurse@uwhealth.org") }); check("  6th /login -> 429 HTML locked even with a good token", r.status === 429 && r.reason === "locked" && /Too many attempts — try again in \d+ minutes/.test(r.html) && r.setCookie === null, `${r.status} ${r.reason}`);
+  r = await auth(MYRX, "/_auth/key", { ip, cookie: uwhcCookie, body: { site: "uwhc" } }); check("  /_auth/key from that network -> 429 JSON locked", r.status === 429 && r.out.error === "locked" && r.out.retryAfter > 0);
+  r = await auth(MYRX, "/_auth/whoami", { ip, cookie: uwhcCookie }); check("  whoami has no lockout accounting (still answers)", r.status === 200 && r.out.signedIn === true);
+  r = await call({ admin_pw: TEST_MASTER, action: "ping" }, { ip, env: envS }); check("  the 'master' scope is untouched", r.status === 200, `status ${r.status}`);
+  r = await aa({ report_pw: TEST_REPORT_PW }, { ip, env: envS }); check("  the 'aa' scope is untouched", r.status === 200, `status ${r.status}`);
+  r = await auth(AVALON, "/login/", { ip, jwt: await jwtFor("x@avalon.example") }); check("  the other site's auth scope is untouched", r.status === 302, `${r.status} ${r.reason}`);
+}
+// what is NOT a guess never feeds the shared per-network counter (an office NAT must not lock itself out)
+{
+  const ip = freshIp();
+  for (let i = 0; i < 5; i++) r = await auth(MYRX, "/login/", { ip });
+  check("5 bare visits to /login (no Access header) -> 401 no-token each, and", r.status === 401 && r.reason === "no-token", `${r.status} ${r.reason}`);
+  r = await auth(MYRX, "/login/", { ip, jwt: await jwtFor("nurse@uwhealth.org") }); check("  a good login from that network still answers 302 (no-token is not a guess)", r.status === 302, `${r.status} ${r.reason}`);
+}
+{
+  const ip = freshIp();
+  for (let i = 0; i < 5; i++) r = await auth(MYRX, "/_auth/key", { ip, cookie: "__Host-report_session=eyJ2IjoxfQ.forged", body: { site: "uwhc" } });
+  check("5 forged-cookie key requests -> 401 not signed in each, then", r.status === 401 && r.out.error === "not signed in", JSON.stringify(r.out));
+  r = await auth(MYRX, "/_auth/key", { ip, cookie: uwhcCookie, body: { site: "uwhc" } }); check("  the 6th from that network -> 429 (a forged cookie IS a guess)", r.status === 429 && r.out.error === "locked", `status ${r.status}`);
+  r = await auth(MYRX, "/login/", { ip, jwt: await jwtFor("nurse@uwhealth.org") }); check("  ...and /login from that network is locked too", r.status === 429 && r.reason === "locked", `${r.status} ${r.reason}`);
+}
+{
+  const ip = freshIp();
+  for (let i = 0; i < 4; i++) await auth(MYRX, "/login/", { ip, jwt: "a.b.c" });
+  r = await auth(MYRX, "/login/", { ip, jwt: await jwtFor("nurse@uwhealth.org") }); check("4 failures then a good login -> 302 and the counter resets", r.status === 302);
+  for (let i = 0; i < 4; i++) await auth(MYRX, "/login/", { ip, jwt: "a.b.c" });
+  r = await auth(MYRX, "/login/", { ip, jwt: await jwtFor("nurse@uwhealth.org") }); check("  reset: 4 more still not locked", r.status === 302);
+}
+{
+  const seen = [];
+  const rl = (success) => ({ limit: async ({ key }) => { seen.push(key); return { success }; } });
+  r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" }, env: { ...envS, ADMIN_RL: rl(false) } });
+  check("ADMIN_RL says no -> /_auth/key 429 locked, key is network|auth:myrx", r.status === 429 && r.out.error === "locked" && seen.length === 1 && /^[0-9.]+\|auth:myrx$/.test(seen[0]), seen[0]);
+  r = await auth(MYRX, "/login/", { jwt: await jwtFor("nurse@uwhealth.org"), env: { ...envS, ADMIN_RL: rl(false) } }); check("  ...and /login 429 locked", r.status === 429 && r.reason === "locked");
+  r = await auth(MYRX, "/login/", { jwt: await jwtFor("nurse@uwhealth.org"), env: { ...envS, ADMIN_RL: { limit: async () => { throw new Error("boom"); } } } }); check("  limiter failure never blocks a login", r.status === 302);
+}
+
+// cookie / whoami
+r = await auth(MYRX, "/_auth/whoami", { cookie: uwhcCookie });
+check("whoami with the cookie -> signedIn, email, root:false, slugs [uwhc]", r.status === 200 && r.out.ok && r.out.configured === true && r.out.signedIn === true && r.out.email === "nurse@uwhealth.org" && r.out.root === false && r.out.slugs.join() === "uwhc", JSON.stringify(r.out));
+r = await auth(MYRX, "/_auth/whoami", { cookie: "other=1; " + uwhcCookie + "; z=2" }); check("  cookie found among others", r.out.signedIn === true);
+r = await auth(MYRX, "/_auth/whoami", { cookie: uwhcCookie.slice(0, -1) + (uwhcCookie.endsWith("A") ? "B" : "A") }); check("tampered signature -> signedIn:false", r.status === 200 && r.out.signedIn === false);
+{
+  const c = parseCookie(uwhcCookie);
+  const forgedPayload = b64u(JSON.stringify({ ...c.payload, root: true }));
+  r = await auth(MYRX, "/_auth/whoami", { cookie: `__Host-report_session=${forgedPayload}.${c.sig}` }); check("tampered payload (root:true) with the old signature -> signedIn:false", r.out.signedIn === false);
+  r = await auth(MYRX, "/_auth/whoami", { cookie: await forgeCookie({ ...c.payload, root: true }, "not-the-secret") }); check("signed under another secret -> signedIn:false", r.out.signedIn === false);
+  r = await auth(MYRX, "/_auth/whoami", { cookie: await forgeCookie({ ...c.payload, exp: nowS() - 1 }) }); check("expired cookie -> signedIn:false", r.out.signedIn === false);
+  r = await auth(MYRX, "/_auth/whoami", { cookie: await forgeCookie({ ...c.payload, iat: nowS() + 600 }) }); check("iat in the future -> signedIn:false", r.out.signedIn === false);
+  r = await auth(MYRX, "/_auth/whoami", { cookie: await forgeCookie({ ...c.payload, v: 2 }) }); check("v:2 -> signedIn:false", r.out.signedIn === false);
+  r = await auth(MYRX, "/_auth/whoami", { cookie: await forgeCookie({ ...c.payload, slugs: "uwhc" }) }); check("slugs not an array -> signedIn:false", r.out.signedIn === false);
+  r = await auth(MYRX, "/_auth/whoami", { cookie: await forgeCookie({ ...c.payload, root: "yes" }) }); check("root not boolean -> signedIn:false", r.out.signedIn === false);
+  r = await auth(MYRX, "/_auth/whoami", { cookie: "__Host-report_session=" + b64u("[1]") + "." + c.sig }); check("payload not an object -> signedIn:false", r.out.signedIn === false);
+  r = await auth(MYRX, "/_auth/whoami", { cookie: "__Host-report_session=nodot" }); check("no dot -> signedIn:false", r.out.signedIn === false);
+  r = await auth(MYRX, "/_auth/whoami", { cookie: "__Host-report_session=" + "a".repeat(4100) + ".b" }); check("> 4096 chars -> signedIn:false", r.out.signedIn === false);
+  r = await auth(MYRX, "/_auth/whoami", { cookie: await forgeCookie(c.payload) }); check("a re-signed identical payload is accepted (format check)", r.out.signedIn === true);
+}
+r = await auth(AVALON, "/_auth/whoami", { cookie: uwhcCookie }); check("myrx cookie on the aa host -> signedIn:false", r.status === 200 && r.out.signedIn === false && r.out.configured === true);
+r = await auth(MYRX, "/_auth/whoami", { cookie: uwhcCookie, env: { ...envS, SESSION_SECRET: hex(32) } }); check("SESSION_SECRET rotated -> every cookie is dead", r.out.signedIn === false);
+// revocation with a still-valid cookie: whoami/key re-resolve against the live document
+r = await myrxAdmin("access.put", { access: { teamDomain: "testteam", aud: TEST_AUD, root: { emails: ["boss@corp.example"] }, clients: { uwhc: { emails: ["other@uwhealth.org"] }, aurora: { emails: ["pm@aurora.example"] } } } });
+r = await auth(MYRX, "/_auth/whoami", { cookie: uwhcCookie }); check("after access.put removed the domain: whoami signedIn:true, slugs []", r.status === 200 && r.out.signedIn === true && r.out.slugs.length === 0 && r.out.root === false, JSON.stringify(r.out));
+r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" } }); check("  /_auth/key -> 403 not authorized", r.status === 403 && r.out.error === "not authorized");
+{
+  const rec = JSON.parse(kv.store.get("myrx:access-log")), last = rec.entries[rec.entries.length - 1];
+  check("  denied key request logged with the slug", last.action === "denied" && last.slug === "uwhc" && last.email === "nurse@uwhealth.org", JSON.stringify(last));
+}
+r = await myrxAdmin("access.put", { access: { teamDomain: "testteam", aud: TEST_AUD, root: { emails: ["boss@corp.example"] }, clients: { uwhc: { domains: ["uwhealth.org"], emails: ["contractor@gmail.com"] }, aurora: { emails: ["pm@aurora.example"] } } } });
+check("  (myrx document restored)", r.status === 200);
+r = await auth(MYRX, "/_auth/whoami", { cookie: uwhcCookie }); check("  whoami sees the restored mapping immediately (writer primed the cache)", r.out.slugs.join() === "uwhc");
+
+// /_auth/key (myrx): the escrow
+r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" } }); check("myrx key before any escrow -> 409 keys not escrowed yet", r.status === 409 && r.out.error === "keys not escrowed yet", JSON.stringify(r.out));
+r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" }, env: { ...envS, ESCROW_KEY: undefined } }); check("myrx key without ESCROW_KEY -> 503 email sign-in not configured", r.status === 503 && r.out.error === "email sign-in not configured");
+r = await auth(MYRX, "/_auth/whoami", { cookie: uwhcCookie, env: { ...envS, ESCROW_KEY: undefined } }); check("  whoami still works without ESCROW_KEY", r.status === 200 && r.out.signedIn === true);
+r = await auth(MYRX, "/login/", { jwt: await jwtFor("nurse@uwhealth.org"), env: { ...envS, ESCROW_KEY: undefined } }); check("  login still works without ESCROW_KEY", r.status === 302);
+r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "" } }); check("root '' with a non-root session -> 403 not authorized", r.status === 403 && r.out.error === "not authorized");
+r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "aurora" } }); check("another client's slug -> 403", r.status === 403);
+// pws.escrow validation
+r = await myrxAdmin("pws.escrow", { passwords: { uwhc: "fake-partner-pw" }, root: TEST_MASTER }, { env: { ...envS, ESCROW_KEY: undefined } }); check("pws.escrow without ESCROW_KEY -> 503", r.status === 503 && r.out.error === "email sign-in not configured");
+r = await myrxAdmin("pws.escrow", { passwords: [], root: TEST_MASTER }); check("pws.escrow passwords not an object -> 422", r.status === 422 && r.out.error === "passwords: must be an object" && r.out.path === "passwords");
+r = await myrxAdmin("pws.escrow", { passwords: { "Bad Slug": "x" }, root: TEST_MASTER }); check("pws.escrow bad slug -> 422 passwords.Bad Slug: bad slug", r.status === 422 && r.out.error === "passwords.Bad Slug: bad slug");
+r = await myrxAdmin("pws.escrow", { passwords: { uwhc: "" }, root: TEST_MASTER }); check("pws.escrow empty password -> 422 bad password", r.status === 422 && r.out.error === "passwords.uwhc: bad password");
+r = await myrxAdmin("pws.escrow", { passwords: { uwhc: "x".repeat(201) }, root: TEST_MASTER }); check("pws.escrow 201-char password -> 422", r.status === 422 && r.out.path === "passwords.uwhc");
+r = await myrxAdmin("pws.escrow", { passwords: { uwhc: 123 }, root: TEST_MASTER }); check("pws.escrow non-string password -> 422", r.status === 422 && r.out.path === "passwords.uwhc");
+{ const many = {}; for (let i = 0; i < 201; i++) many["s" + i] = "pw"; r = await myrxAdmin("pws.escrow", { passwords: many, root: TEST_MASTER }); check("pws.escrow > 200 entries -> 422 at most 200", r.status === 422 && r.out.error === "passwords: at most 200"); }
+r = await myrxAdmin("pws.escrow", { passwords: { uwhc: "fake-partner-pw" }, root: "not-the-master" }); check("pws.escrow root mismatch -> 422 root: must be the master password", r.status === 422 && r.out.error === "root: must be the master password" && r.out.path === "root");
+r = await myrxAdmin("pws.escrow", { passwords: { uwhc: "fake-partner-pw" } }); check("pws.escrow root missing -> 422", r.status === 422 && r.out.path === "root");
+check("  nothing escrowed by the rejected calls", !kv.store.has("myrx:pws-escrow"));
+r = await call({ admin_pw: "wrong", action: "pws.escrow", passwords: {}, root: "wrong" }, { ip: freshIp(), env: envS }); check("pws.escrow without the master -> 403", r.status === 403);
+r = await myrxAdmin("pws.escrow", { passwords: { UWHC: "fake-partner-pw", aurora: "aurora-partner-pw" }, root: TEST_MASTER });
+check("pws.escrow valid -> {ok, updatedAt, count:2}", r.status === 200 && r.out.ok && typeof r.out.updatedAt === "string" && r.out.count === 2 && !leaks(JSON.stringify(r.out)), JSON.stringify(r.out));
+{
+  const raw = kv.store.get("myrx:pws-escrow"), rec = JSON.parse(raw);
+  check("  myrx:pws-escrow = {v:1, updatedAt, pwsUpdatedAt (= myrx:pws.updatedAt), count, enc:{salt 16, iv 12, data}}", rec.v === 1 && rec.count === 2 && rec.pwsUpdatedAt === JSON.parse(kv.store.get("myrx:pws")).updatedAt && Buffer.from(rec.enc.salt, "base64").length === 16 && Buffer.from(rec.enc.iv, "base64").length === 12 && typeof rec.enc.data === "string", JSON.stringify(Object.keys(rec)));
+  check("  ciphertext contains neither a partner password nor the master", !raw.includes("fake-partner-pw") && !raw.includes("aurora-partner-pw") && !raw.includes(TEST_MASTER));
+  // the record opens with the documented scheme: key = SHA-256(ESCROW_KEY || salt)
+  const material = Buffer.concat([Buffer.from(TEST_ESCROW_KEY), Buffer.from(rec.enc.salt, "base64")]);
+  const key = await crypto.subtle.importKey("raw", await crypto.subtle.digest("SHA-256", material), { name: "AES-GCM" }, false, ["decrypt"]);
+  let pt = null; try { pt = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: Buffer.from(rec.enc.iv, "base64") }, key, Buffer.from(rec.enc.data, "base64")))); } catch {}
+  check("  opens under SHA-256(ESCROW_KEY||salt) as {v:1, passwords (slugs lowercased), root}", pt && pt.v === 1 && pt.passwords.uwhc === "fake-partner-pw" && pt.passwords.aurora === "aurora-partner-pw" && pt.root === TEST_MASTER, JSON.stringify(pt && Object.keys(pt)));
+}
+r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "UWHC" } }); check("myrx key after escrow -> {ok, site:uwhc, pw}", r.status === 200 && r.out.ok === true && r.out.site === "uwhc" && r.out.pw === "fake-partner-pw", JSON.stringify(r.out));
+check("  key response: no CORS, no-store", r.headers.get("access-control-allow-origin") === null && r.headers.get("cache-control") === "no-store");
+{ // a VALID session refused a slug: logged, never counted (the root page asks for site "" on every load)
+  const ip = freshIp();
+  for (let i = 0; i < 5; i++) r = await auth(MYRX, "/_auth/key", { ip, cookie: uwhcCookie, body: { site: "" } });
+  check("5 root-page key requests from a client-only session -> 403 not authorized each, and", r.status === 403 && r.out.error === "not authorized", JSON.stringify(r.out));
+  r = await auth(MYRX, "/_auth/key", { ip, cookie: uwhcCookie, body: { site: "uwhc" } }); check("  the session's own slug from that network still serves (a 403 with a valid cookie is not a guess)", r.status === 200 && r.out.pw === "fake-partner-pw", `status ${r.status}`);
+  r = await auth(MYRX, "/login/", { ip, jwt: await jwtFor("nurse@uwhealth.org") }); check("  ...and /login from that network is not locked either", r.status === 302, `${r.status} ${r.reason}`);
+  const rec = JSON.parse(kv.store.get("myrx:access-log"));
+  check("  every refusal is still in the sign-in log as denied {slug:\"\"}", rec.entries.filter((e) => e.action === "denied" && e.slug === "" && e.email === "nurse@uwhealth.org").length >= 5);
+}
+r = await auth(MYRX, "/login/?to=%2F", { jwt: await jwtFor("boss@corp.example") });
+const rootCookie = r.cookie;
+check("root email login -> cookie root:true, slugs [] (root implies every client)", r.status === 302 && parseCookie(rootCookie).payload.root === true && parseCookie(rootCookie).payload.slugs.length === 0);
+r = await auth(MYRX, "/_auth/key", { cookie: rootCookie, body: { site: "" } }); check("root session, site '' -> the master password", r.status === 200 && r.out.site === "" && r.out.pw === TEST_MASTER);
+r = await auth(MYRX, "/_auth/key", { cookie: rootCookie, body: {} }); check("  site absent = root", r.status === 200 && r.out.pw === TEST_MASTER);
+r = await auth(MYRX, "/_auth/key", { cookie: rootCookie, body: { site: "aurora" } }); check("root session opens a client too", r.status === 200 && r.out.pw === "aurora-partner-pw");
+r = await auth(MYRX, "/_auth/key", { cookie: rootCookie, body: { site: "zeta" } }); check("root session, slug with no escrowed key -> 404 no key for this site", r.status === 404 && r.out.error === "no key for this site");
+r = await auth(MYRX, "/_auth/key", { cookie: rootCookie, body: { site: "constructor" } }); check("  'constructor' -> 404 (own-property lookup)", r.status === 404);
+r = await auth(MYRX, "/_auth/whoami", { cookie: rootCookie }); check("whoami for the root session -> root:true", r.out.signedIn === true && r.out.root === true && r.out.email === "boss@corp.example");
+r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" }, env: { ...envS, ESCROW_KEY: hex(32) } }); check("a different ESCROW_KEY cannot open the escrow -> 409 keys not escrowed yet", r.status === 409 && r.out.error === "keys not escrowed yet");
+r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" }, env: { ...envS, AAPS_DATA: { ...kv, get: async (k, o) => { if (k === "myrx:pws-escrow") throw new Error("kv down"); return kv.get(k, o); } }, ESCROW_KEY: hex(32) } }); check("KV throwing on the escrow -> 503 KV read failed", r.status === 503 && r.out.error === "KV read failed");
+r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" } }); check("  ...and the real key still serves afterwards", r.status === 200 && r.out.pw === "fake-partner-pw");
+// escrow state: ok -> stale after a vault write -> ok after a re-escrow
+r = await myrxAdmin("access.get"); check("access.get escrow.state ok after the escrow", r.status === 200 && r.out.escrow.state === "ok" && r.out.escrow.count === 2 && typeof r.out.escrow.updatedAt === "string" && r.out.escrow.pwsUpdatedAt === JSON.parse(kv.store.get("myrx:pws")).updatedAt, JSON.stringify(r.out.escrow));
+r = await myrxAdmin("pws.put", { enc: await encryptJSON({ v: 1, passwords: { uwhc: "rotated-partner-pw" } }, TEST_MASTER) }); check("  pws.put rotates the vault", r.status === 200);
+r = await myrxAdmin("access.get"); check("  -> escrow.state stale", r.out.escrow.state === "stale", JSON.stringify(r.out.escrow));
+r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" } }); check("  a stale escrow still serves the OLD password (the page must re-escrow)", r.status === 200 && r.out.pw === "fake-partner-pw");
+r = await myrxAdmin("pws.escrow", { passwords: { uwhc: "rotated-partner-pw" }, root: TEST_MASTER }); check("  pws.escrow again -> count 1", r.status === 200 && r.out.count === 1);
+r = await myrxAdmin("access.get"); check("  -> escrow.state ok", r.out.escrow.state === "ok" && r.out.escrow.count === 1);
+r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" } }); check("  key serves the rotated password (cache re-keyed on ciphertext change)", r.status === 200 && r.out.pw === "rotated-partner-pw");
+r = await auth(MYRX, "/_auth/key", { cookie: rootCookie, body: { site: "aurora" } }); check("  aurora dropped from the escrow -> 404", r.status === 404);
+kv.store.set("myrx:pws-escrow", "not json{");
+r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" }, env: { ...envS, ESCROW_KEY: TEST_ESCROW_KEY + "x" } }); check("garbage escrow record -> 409 (never a crash)", r.status === 409);
+r = await myrxAdmin("pws.escrow", { passwords: { uwhc: "rotated-partner-pw" }, root: TEST_MASTER }); check("  (escrow restored)", r.status === 200);
+
+// /_auth/key (aa): the vault the worker already opens
+r = await auth(AVALON, "/login/?to=%2Fvault%2F", { jwt: await jwtFor("cfo@vault.example") });
+const vaultCookie = r.cookie;
+check("aa login for a client domain -> 302 /vault/, cookie site:aa slugs [vault]", r.status === 302 && r.headers.get("location") === "/vault/" && parseCookie(vaultCookie).payload.site === "aa" && parseCookie(vaultCookie).payload.slugs.join() === "vault", `${r.status} ${r.reason}`);
+r = await auth(AVALON, "/_auth/key", { cookie: vaultCookie, body: { site: "vault" } }); check("aa key for a vault client -> its password", r.status === 200 && r.out.site === "vault" && r.out.pw === "client-vault-pw", JSON.stringify(r.out));
+r = await auth(AVALON, "/_auth/key", { cookie: vaultCookie, body: { site: "" } }); check("aa root '' with a client session -> 403", r.status === 403 && r.out.error === "not authorized");
+r = await auth(AVALON, "/_auth/key", { cookie: vaultCookie, body: { site: "marpai" } }); check("aa another client's slug -> 403", r.status === 403);
+{
+  const ip = freshIp();
+  for (let i = 0; i < 5; i++) r = await auth(AVALON, "/_auth/key", { ip, cookie: vaultCookie, body: { site: "" } });
+  r = await auth(AVALON, "/_auth/key", { ip, cookie: vaultCookie, body: { site: "vault" } }); check("  aa: five root-page refusals of a client session never lock the network", r.status === 200 && r.out.pw === "client-vault-pw", `status ${r.status}`);
+}
+r = await auth(MYRX, "/_auth/key", { cookie: vaultCookie, body: { site: "vault" } }); check("aa cookie on the myrx host -> 401 not signed in", r.status === 401 && r.out.error === "not signed in");
+r = await auth(AVALON, "/login/", { jwt: await jwtFor("admin@avalon.example") });
+const aaRootCookie = r.cookie;
+check("aa root domain login -> root:true", r.status === 302 && parseCookie(aaRootCookie).payload.root === true);
+r = await auth(AVALON, "/_auth/key", { cookie: aaRootCookie, body: { site: "" } }); check("aa root '' -> REPORT_PW", r.status === 200 && r.out.pw === TEST_REPORT_PW);
+r = await auth(AVALON, "/_auth/key", { cookie: aaRootCookie, body: { site: "" }, env: { ...envS, REPORT_PW: "" } }); check("aa root '' with REPORT_PW unset -> 500 REPORT_PW not set", r.status === 500 && r.out.error === "REPORT_PW not set");
+r = await auth(AVALON, "/_auth/key", { cookie: aaRootCookie, body: { site: "ghost" } }); check("aa mapped slug with no vault entry -> 404 no key for this site", r.status === 404 && r.out.error === "no key for this site");
+{
+  const OTHER = "sealed-pw-" + Math.random().toString(36).slice(2); // a different REPORT_PW: the vault reads as sealed (and the aaVault cache misses)
+  r = await auth(AVALON, "/_auth/key", { cookie: vaultCookie, body: { site: "vault" }, env: { ...envS, REPORT_PW: OTHER } }); check("aa sealed vault -> CLIENT_PWS fallback password", r.status === 200 && r.out.pw === "client-vault-pw");
+  const flaky = { ...kv, get: async (k, o) => { if (k === "aa:clients") throw new Error("kv down"); return kv.get(k, o); } };
+  r = await auth(AVALON, "/_auth/key", { cookie: vaultCookie, body: { site: "vault" }, env: { ...envS, AAPS_DATA: flaky, REPORT_PW: OTHER + "2" } }); check("aa KV throwing on the vault -> 503 KV read failed (no CLIENT_PWS fallback)", r.status === 503 && r.out.error === "KV read failed", JSON.stringify(r.out));
+  r = await auth(AVALON, "/_auth/key", { cookie: aaRootCookie, body: { site: "" }, env: { ...envS, AAPS_DATA: flaky, REPORT_PW: OTHER + "2" } }); check("  root '' never touches the vault -> 200", r.status === 200 && r.out.pw === OTHER + "2");
+}
+r = await auth(AVALON, "/_auth/whoami", { cookie: vaultCookie }); check("aa whoami -> email, root:false, slugs [vault]", r.status === 200 && r.out.signedIn === true && r.out.email === "cfo@vault.example" && r.out.root === false && r.out.slugs.join() === "vault", JSON.stringify(r.out));
+{
+  const rec = JSON.parse(kv.store.get("aa:access-log")), keys = rec.entries.filter((e) => e.action === "key");
+  const k = keys[0];
+  check("aa log: key entries {t, email, slug, action:key, net}", keys.length >= 2 && k.email === "cfo@vault.example" && k.slug === "vault" && k.action === "key" && /^\d{4}-\d\d-\d\dT/.test(k.t) && typeof k.net === "string" && Object.keys(k).sort().join() === "action,email,net,slug,t", JSON.stringify(k));
+  check("  a root key entry carries slug ''", rec.entries.some((e) => e.action === "key" && e.slug === "" && e.email === "admin@avalon.example"));
+  check("  no log entry ever contains a password value", !leaks(kv.store.get("aa:access-log")) && !leaks(kv.store.get("myrx:access-log")));
+}
+r = await aaAdmin("access.log"); check("aa access.log -> entries newest first", r.status === 200 && r.out.ok && r.out.entries.length >= 3 && r.out.entries[0].t >= r.out.entries[r.out.entries.length - 1].t && r.out.entries[0].action === "key", JSON.stringify(r.out.entries.slice(0, 2)));
+r = await myrxAdmin("access.log"); check("myrx access.log -> its own entries (login / denied / key)", r.status === 200 && r.out.entries.some((e) => e.action === "login") && r.out.entries.some((e) => e.action === "denied") && r.out.entries.every((e) => !e.email.includes("avalon")), JSON.stringify(r.out.entries.length));
+// cap: 500 in KV, 100 through the admin view
+{
+  const rec = JSON.parse(kv.store.get("myrx:access-log"));
+  const filler = Array.from({ length: 519 - rec.entries.length }, (_, i) => ({ t: new Date(1700000000000 + i * 1000).toISOString(), email: "old@uwhealth.org", slug: null, action: "login", net: "203.0.113.9" }));
+  kv.store.set("myrx:access-log", JSON.stringify({ v: 1, entries: [...filler, ...rec.entries] }));
+  r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" } });
+  const after = JSON.parse(kv.store.get("myrx:access-log"));
+  check("KV record capped at 500 after the 520th append (oldest dropped, newest kept)", r.status === 200 && after.entries.length === 500 && after.entries[499].action === "key" && after.entries[499].slug === "uwhc" && after.entries[0].email !== undefined, `${after.entries.length}`);
+  r = await myrxAdmin("access.log"); check("  access.log view -> 100 entries, newest first", r.status === 200 && r.out.entries.length === 100 && r.out.entries[0].action === "key" && r.out.entries[0].slug === "uwhc");
+  r = await myrxAdmin("access.log", {}, { env: { ...envS, AAPS_DATA: { ...kv, get: async (k, o) => { if (k === "myrx:access-log") throw new Error("kv down"); return kv.get(k, o); } } } }); check("  access.log with KV throwing -> 503", r.status === 503 && r.out.error === "KV read failed");
+  kv.store.set("myrx:access-log", "garbage{");
+  r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" } }); check("a garbage log record never fails the request (best effort)", r.status === 200 && r.out.pw === "rotated-partner-pw");
+  r = await myrxAdmin("access.log"); check("  ...and the log restarted from that entry", r.status === 200 && r.out.entries.length === 1 && r.out.entries[0].action === "key");
+  r = await auth(MYRX, "/_auth/key", { cookie: uwhcCookie, body: { site: "uwhc" }, env: { ...envS, AAPS_DATA: { ...kv, put: async (k, v) => { if (k === "myrx:access-log") throw new Error("kv down"); return kv.put(k, v); } } } }); check("a log write failure never fails the key request", r.status === 200 && r.out.pw === "rotated-partner-pw");
+}
+
+// logout
+r = await auth(MYRX, "/_auth/logout", { method: "POST", cookie: uwhcCookie }); check("logout -> {ok} with a clearing Set-Cookie (Max-Age=0)", r.status === 200 && r.out.ok === true && r.setCookie === "__Host-report_session=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=0", r.setCookie);
+r = await auth(MYRX, "/_auth/whoami", { cookie: r.cookie }); check("  whoami with the cleared cookie -> signedIn:false", r.status === 200 && r.out.signedIn === false);
+r = await auth(MYRX, "/_auth/logout", { method: "POST" }); check("logout without a session -> still 200 + clearing cookie", r.status === 200 && /Max-Age=0/.test(r.setCookie));
+check("no myrx:/aa: key ever held a partner password, client password or master in clear",
+  ![...kv.store.entries()].some(([k, v]) => (k.startsWith("myrx:") || k.startsWith("aa:")) && (v.includes("fake-partner-pw") || v.includes("rotated-partner-pw") || v.includes("client-vault-pw") || v.includes(TEST_MASTER) || v.includes(TEST_REPORT_PW))));
+r = await call({ admin_pw: TEST_MASTER, action: "brands.list" }, { env: envS }); check("the JSON API is untouched by part 5 (brands.list)", r.status === 200 && r.out.clients.map((c) => c.slug).join(",") === "zeta,aurora,uwhc");
+
 
 globalThis.fetch = realFetch;
 console.log(`\n${pass} passed, ${fail} failed`);
