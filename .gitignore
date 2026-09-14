@@ -16,3 +16,6 @@ tools/sync-worker/.clientpws
 tools/sync-worker/.wrangler/
 **/.dev.vars
 tools/sync-worker/.cftoken
+tools/dns/*.txt
+tools/dns/*.zone
+tools/sync-worker/.entra
