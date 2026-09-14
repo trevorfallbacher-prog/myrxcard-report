@@ -1563,8 +1563,8 @@
     <!-- Email sign-in (Cloudflare Access) — site-level settings; per-client allow-lists live on each card -->
     <div class="panel cl-access" id="cl-access">
       <div class="cl-access-head">
-        <span class="kicker">Email sign-in <span class="cl-badge" id="cl-access-status">not configured</span></span>
-        <span class="hint">Cloudflare Access team + application AUD tag &middot; see tools/sync-worker/SSO-SETUP.md</span>
+        <span class="kicker">Sign-in <span class="cl-badge" id="cl-access-status">not configured</span></span>
+        <span class="hint" id="cl-access-hint">Who may open reports with Sign in with Microsoft: add company domains or people below and on each client card &middot; Team name + AUD are only for the optional Cloudflare Access path (SSO-SETUP.md)</span>
       </div>
       <div class="cl-access-grid">
         <div class="cl-field"><label for="cl-access-team">Team name</label><input class="cl-input" id="cl-access-team" placeholder="team name, e.g. avalon" maxlength="80" spellcheck="false" autocomplete="off" disabled></div>
@@ -1578,7 +1578,7 @@
         <div id="cl-access-root-emails" data-kind="emails"></div>
       </div>
       <div class="cl-escrow" id="cl-escrow">
-        <span id="cl-escrow-status">Email sign-in keys: missing</span>
+        <span id="cl-escrow-status">Sign-in keys: missing</span>
         <button class="iconbtn" type="button" id="cl-escrow-update" title="Seal the current client passwords (and the master password) for the worker so email sign-in can open reports" disabled>UPDATE</button>
       </div>
       <div class="cl-access-logwrap">
@@ -5161,6 +5161,7 @@ async function loadClients(force) {
       const esc = isPlainObj(m.escrow) ? m.escrow : {};
       clients.accessMeta = {
         configured: !!m.configured,
+        microsoft: !!m.microsoft,
         secrets: { session: !!(m.secrets && m.secrets.session), escrow: !!(m.secrets && m.secrets.escrow) },
         escrow: { state: esc.state === "ok" || esc.state === "stale" ? esc.state : "missing", updatedAt: esc.updatedAt || null, pwsUpdatedAt: esc.pwsUpdatedAt || null, count: Number(esc.count) || 0 },
       };
@@ -5371,9 +5372,10 @@ function renderAccessStatus() {
   const doc = clients.access, meta = clients.accessMeta;
   const pill = $("cl-access-status");
   const secretsOk = !!(meta.secrets && meta.secrets.session && meta.secrets.escrow);
-  pill.textContent = !doc ? "unavailable" : !secretsOk ? "worker secrets missing" : meta.configured ? "configured" : "not configured";
-  pill.classList.toggle("custom", !!doc && secretsOk && meta.configured);
-  pill.title = !doc ? clients.accessErr : !secretsOk ? "SESSION_SECRET / ESCROW_KEY are not set on the worker — see tools/sync-worker/SSO-SETUP.md" : meta.configured ? "The gate shows “Sign in with company email”" : "Team name and AUD tag are both needed before the gate shows the button";
+  const on = !!doc && secretsOk && (meta.microsoft || meta.configured);
+  pill.textContent = !doc ? "unavailable" : !secretsOk ? "worker secrets missing" : meta.microsoft && meta.configured ? "Microsoft + email on" : meta.microsoft ? "Microsoft sign-in on" : meta.configured ? "email sign-in on" : "not configured";
+  pill.classList.toggle("custom", on);
+  pill.title = !doc ? clients.accessErr : !secretsOk ? "SESSION_SECRET / ESCROW_KEY are not set on the worker — see tools/sync-worker/SSO-SETUP.md" : meta.microsoft ? "The gate shows “Sign in with Microsoft” (MS_CLIENT_ID / MS_CLIENT_SECRET are set on the worker)" : meta.configured ? "The gate shows “Sign in with company email”" : "Set MS_CLIENT_ID / MS_CLIENT_SECRET on the worker (Microsoft), or a team name + AUD tag (Cloudflare Access)";
 }
 function renderRootChips() {
   const entry = accessEntry(clients.access && clients.access.root);
@@ -5385,11 +5387,11 @@ function renderRootChips() {
 }
 function renderEscrow() {
   const esc = clients.accessMeta.escrow || {};
-  $("cl-escrow-status").textContent = clients.escrowing ? "Email sign-in keys: updating…"
-    : !clients.access ? "Email sign-in keys: unavailable"
-    : esc.state === "ok" ? "Email sign-in keys: up to date · " + relTime(esc.updatedAt)
-    : esc.state === "stale" ? "Email sign-in keys: stale — the vault changed since the last update"
-    : "Email sign-in keys: missing";
+  $("cl-escrow-status").textContent = clients.escrowing ? "Sign-in keys: updating…"
+    : !clients.access ? "Sign-in keys: unavailable"
+    : esc.state === "ok" ? "Sign-in keys: up to date · " + relTime(esc.updatedAt)
+    : esc.state === "stale" ? "Sign-in keys: stale — the vault changed since the last update"
+    : "Sign-in keys: missing";
   $("cl-escrow-update").disabled = !clients.pws || !clients.access || clients.escrowing;
 }
 function renderAccessBox() {
@@ -5416,7 +5418,7 @@ async function saveAccessSetup() {
   try {
     await saveAccess(next);
     renderAccessBox();
-    $("cl-access-msg").textContent = clients.accessMeta.configured ? "Saved · email sign-in is configured" : "Saved · team name and AUD tag are both needed before the gate shows the button";
+    $("cl-access-msg").textContent = clients.accessMeta.configured ? "Saved · Cloudflare Access email sign-in is configured" : clients.accessMeta.microsoft ? "Saved · Microsoft sign-in stays on (team + AUD are only for the optional Cloudflare Access path)" : "Saved · nothing is switched on yet";
   } catch (err) {
     $("cl-access-msg").textContent = "Not saved: " + err.message;
     if (err.path === "access.teamDomain") $("cl-access-team").classList.add("bad");
@@ -5465,7 +5467,7 @@ async function refreshAccessLog() {
 }
 function buildAccessSec(doc) {
   const sec = mkEl("div", "cl-access-sec");
-  sec.appendChild(mkEl("div", "kicker", "Email sign-in"));
+  sec.appendChild(mkEl("div", "kicker", "Sign in with Microsoft — who may open this report"));
   if (!clients.access) { sec.appendChild(mkEl("span", "docstatus", clients.accessErr || "Email sign-in settings unavailable")); return sec; }
   const entry = accessEntry(clients.access.clients[doc.slug]);
   for (const kind of ["domains", "emails"]) sec.appendChild(buildChipRow(mkEl("div"), kind, entry[kind], (vals) => onAccessChipChange(doc.slug, kind, vals)));
