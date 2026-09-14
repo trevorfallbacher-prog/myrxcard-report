@@ -1270,8 +1270,12 @@ globalThis.fetch = async (url, init) => {
   const u = String(url);
   if (u === "https://login.microsoftonline.com/organizations/discovery/v2.0/keys") return new Response(JSON.stringify({ keys: [MS_JWK] }), { status: 200 });
   if (u === "https://login.microsoftonline.com/organizations/oauth2/v2.0/token") { msTokenCalls.push(Object.fromEntries(new URLSearchParams(init.body))); return new Response(JSON.stringify(msToken.body), { status: msToken.status }); }
+  if (u === "https://graph.microsoft.com/v1.0/me/photos/48x48/$value") { graphCalls.push(init && init.headers && init.headers.authorization); return graphPhoto.fn(); }
   return prevFetch7(url, init);
 };
+const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0, 16, 74, 70, 73, 70, 0, 1, 1, 0, 0, 1, 0, 1, 0, 0, 0xff, 0xd9]);
+let graphCalls = [];
+const graphPhoto = { fn: () => new Response(JPEG, { status: 200, headers: { "content-type": "image/jpeg" } }) };
 const msClaims = (email, extra = {}) => ({ aud: MS_CLIENT, iss: `https://login.microsoftonline.com/${MS_TID}/v2.0`, tid: MS_TID, exp: nowS() + 300, nbf: nowS() - 5, iat: nowS() - 5, email, preferred_username: email, name: "Test Nurse", ...extra });
 const oauthCookieOf = (r) => (r.setCookie || "").split(";")[0];
 const parseOauth = (r) => { const m = /__Host-report_oauth=([a-f0-9]{32})\.([a-f0-9]{32})\.([A-Za-z0-9_-]*)/.exec(r.setCookie || ""); return m ? { state: m[1], nonce: m[2], to: Buffer.from(m[3], "base64url").toString() } : null; };
@@ -1281,7 +1285,7 @@ r = await auth(MYRX, "/login/microsoft?to=%2Fuwhc%2F", { env: envM });
 {
   const loc = r.headers.get("location") || "", q = new URL(loc).searchParams, oc = parseOauth(r);
   check("/login/microsoft -> 302 to login.microsoftonline.com/organizations authorize", r.status === 302 && loc.startsWith("https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?"), loc.slice(0, 90));
-  check("  client_id, code flow, redirect_uri = https://reports.myrxcard.com/_auth/callback, openid email profile, select_account", q.get("client_id") === MS_CLIENT && q.get("response_type") === "code" && q.get("redirect_uri") === "https://reports.myrxcard.com/_auth/callback" && q.get("scope") === "openid email profile" && q.get("prompt") === "select_account", loc);
+  check("  client_id, code flow, redirect_uri = https://reports.myrxcard.com/_auth/callback, openid email profile, select_account", q.get("client_id") === MS_CLIENT && q.get("response_type") === "code" && q.get("redirect_uri") === "https://reports.myrxcard.com/_auth/callback" && q.get("scope") === "openid email profile User.Read" && q.get("prompt") === "select_account", loc);
   check("  state + nonce are 32 hex and ride in a __Host-report_oauth cookie (HttpOnly, Secure, Lax, 600 s) with the sanitized `to`", !!oc && q.get("state") === oc.state && q.get("nonce") === oc.nonce && oc.to === "/uwhc/" && /HttpOnly/.test(r.setCookie) && /Secure/.test(r.setCookie) && /SameSite=Lax/.test(r.setCookie) && /Max-Age=600/.test(r.setCookie), r.setCookie);
   check("  never leaks the client secret", !r.html.includes("entra-client-secret-test") && !loc.includes("entra-client-secret-test"));
 }
@@ -1312,6 +1316,31 @@ r = await auth(MYRX, "/_auth/callback?error=access_denied", { env: envM }); chec
   check("  token exchange was a confidential-client code grant to the same redirect_uri", msTokenCalls.length === 1 && msTokenCalls[0].grant_type === "authorization_code" && msTokenCalls[0].code === "CODE123" && msTokenCalls[0].client_secret === "entra-client-secret-test" && msTokenCalls[0].redirect_uri === "https://reports.myrxcard.com/_auth/callback", JSON.stringify(msTokenCalls[0]));
   r = await auth(MYRX, "/_auth/whoami", { cookie: sess.split(";")[0], env: envM }); check("  whoami with that cookie -> signedIn, slugs [uwhc], methods include microsoft", r.status === 200 && r.out.signedIn === true && r.out.slugs.join() === "uwhc" && r.out.methods.includes("microsoft"), JSON.stringify(r.out));
   r = await auth(MYRX, "/_auth/key", { cookie: sess.split(";")[0], body: { site: "uwhc" }, env: envM }); check("  /_auth/key releases the uwhc password", r.status === 200 && r.out.site === "uwhc" && typeof r.out.pw === "string" && r.out.pw.length > 0);
+  // profile: name from the token, photo from Graph with the access token we were just given
+  const prof = JSON.parse(kv.store.get("myrx:profiles") || "{}");
+  const pu = prof.users && prof.users["nurse@uwhealth.org"];
+  check("  myrx:profiles holds {name, photo (data:image/jpeg), lastLogin} for the signed-in email", !!pu && pu.name === "Test Nurse" && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(pu.photo) && typeof pu.lastLogin === "string", JSON.stringify(pu && { ...pu, photo: (pu.photo || "").slice(0, 30) }));
+  check("  Graph was asked with the token endpoint's access_token", graphCalls.length >= 1 && graphCalls[graphCalls.length - 1] === "Bearer x", JSON.stringify(graphCalls));
+  r = await auth(MYRX, "/_auth/whoami", { cookie: sess.split(";")[0], env: envM }); check("  whoami carries name + photo", r.out.name === "Test Nurse" && r.out.photo === pu.photo, JSON.stringify({ name: r.out.name, photo: (r.out.photo || "").slice(0, 30) }));
+  r = await myrxAdmin("access.get", {}, { env: envM }); check("  access.get lists the profile (People panel)", r.status === 200 && r.out.profiles && r.out.profiles["nurse@uwhealth.org"] && r.out.profiles["nurse@uwhealth.org"].name === "Test Nurse" && r.out.profiles["nurse@uwhealth.org"].photo === pu.photo, JSON.stringify(Object.keys(r.out.profiles || {})));
+}
+{ // photo problems never fail a sign-in
+  graphPhoto.fn = () => new Response("nope", { status: 401 });
+  let st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org", { name: "Renamed Nurse" })); check("Graph 401 -> sign-in still 302; name updated, previous photo kept", r.status === 302 && JSON.parse(kv.store.get("myrx:profiles")).users["nurse@uwhealth.org"].name === "Renamed Nurse" && /^data:image\/jpeg/.test(JSON.parse(kv.store.get("myrx:profiles")).users["nurse@uwhealth.org"].photo), `${r.status}`);
+  graphPhoto.fn = () => new Response(new Uint8Array(70000), { status: 200, headers: { "content-type": "image/jpeg" } });
+  st = await msStart(); r = await msFinish(st, msClaims("big@uwhealth.org")); check("oversized photo -> ignored (empty), sign-in ok", r.status === 302 && JSON.parse(kv.store.get("myrx:profiles")).users["big@uwhealth.org"].photo === "");
+  graphPhoto.fn = () => new Response("<svg onload=alert(1)>", { status: 200, headers: { "content-type": "image/svg+xml" } });
+  st = await msStart(); r = await msFinish(st, msClaims("svg@uwhealth.org")); check("svg photo -> ignored (only jpeg/png/gif/webp become data URLs)", r.status === 302 && JSON.parse(kv.store.get("myrx:profiles")).users["svg@uwhealth.org"].photo === "");
+  graphPhoto.fn = () => { throw new Error("network"); };
+  st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org")); check("Graph throwing -> sign-in ok", r.status === 302);
+  graphPhoto.fn = () => new Response(JPEG, { status: 200, headers: { "content-type": "image/jpeg" } });
+  const many = JSON.parse(kv.store.get("myrx:profiles")); for (let i = 0; i < 520; i++) many.users[`p${i}@uwhealth.org`] = { name: "P" + i, photo: "", lastLogin: `2020-01-01T00:00:${String(i % 60).padStart(2, "0")}.000Z` };
+  kv.store.set("myrx:profiles", JSON.stringify(many));
+  st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org")); const after = JSON.parse(kv.store.get("myrx:profiles")).users;
+  check("profiles capped at 500 (oldest sign-ins evicted, the fresh one kept)", r.status === 302 && Object.keys(after).length === 500 && !!after["nurse@uwhealth.org"], String(Object.keys(after).length));
+  r = await myrxAdmin("profile.delete", { email: "big@uwhealth.org" }, { env: envM }); check("profile.delete -> ok and gone", r.status === 200 && r.out.ok === true && !JSON.parse(kv.store.get("myrx:profiles")).users["big@uwhealth.org"]);
+  r = await myrxAdmin("profile.delete", { email: "not an email" }, { env: envM }); check("profile.delete bad email -> 422", r.status === 422 && r.out.path === "email");
+  r = await aaAdmin("profile.delete", { email: "nobody@vault.example" }); check("aa profile.delete (absent) -> ok", r.status === 200 && r.out.ok === true, JSON.stringify(r.out));
 }
 { const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org"), { key: kp2.privateKey }); check("id_token signed by someone else -> 401 bad-signature", r.status === 401 && r.reason === "bad-signature"); }
 { const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org"), { kid: "unknown-kid" }); check("unknown kid -> 401 bad-signature", r.status === 401 && r.reason === "bad-signature"); }

@@ -144,6 +144,37 @@
   .gate-ms-btn .gate-ms-logo { flex: none; }
   .gate-ms-btn + .gate-sso-btn { margin-top: 10px; }
   .gate-ms-btn[hidden], .gate-sso-btn[hidden] { display: none; }
+  /* account chip (header): the person signed in with Microsoft — photo or initials, menu with Sign out */
+  .acct { position: relative; display: none; }
+  .acct.on { display: block; }
+  .acct-btn { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--hair); padding: 0; cursor: pointer; overflow: hidden; display: inline-flex; align-items: center; justify-content: center; font: inherit; font-weight: 700; font-size: 12px; color: #fff; background: var(--secondary); }
+  .acct-btn img, .acct-av img, .cl-person-av img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .acct-menu { position: absolute; top: 42px; right: 0; min-width: 240px; background: var(--card); border: 1px solid var(--hair); border-radius: 12px; box-shadow: 0 12px 36px rgba(10, 30, 45, 0.24); padding: 8px; z-index: 60; }
+  .acct-menu[hidden] { display: none; }
+  .acct-head { display: flex; align-items: center; gap: 11px; padding: 8px 10px 12px; border-bottom: 1px solid var(--hair); margin-bottom: 6px; }
+  .acct-av { width: 40px; height: 40px; border-radius: 50%; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: #fff; background: var(--secondary); overflow: hidden; }
+  .acct-name { font-weight: 700; color: var(--ink); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acct-email { font-size: 11.5px; color: var(--ink-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acct-role { font-size: 9px; font-weight: 700; color: var(--secondary); border: 1px solid var(--secondary); border-radius: 4px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
+  .acct-item { display: block; width: 100%; text-align: left; padding: 9px 11px; border-radius: 8px; border: 0; background: none; color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+  .acct-item:hover { background: var(--card-solid); }
+  .acct-item.danger { color: var(--danger); }
+  /* People panel (Clients tab): everyone who may sign in, with the name + photo Microsoft gave us */
+  .cl-people-list { display: flex; flex-direction: column; }
+  .cl-person { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--hair); flex-wrap: wrap; font-size: 13px; }
+  .cl-person-av { width: 30px; height: 30px; border-radius: 50%; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; font-size: 11px; color: #fff; background: var(--secondary); overflow: hidden; }
+  .cl-person-who { min-width: 0; }
+  .cl-person-name { font-weight: 600; color: var(--ink); }
+  .cl-person-email { font-family: var(--mono); font-size: 11.5px; color: var(--ink-mute); }
+  .cl-person-role { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; color: var(--secondary); border: 1px solid var(--secondary); border-radius: 5px; padding: 0 6px; white-space: nowrap; }
+  .cl-person-role.client { color: var(--ink-soft); border-color: var(--hair-bright, var(--hair)); }
+  .cl-person-last { font-size: 11.5px; color: var(--ink-mute); white-space: nowrap; }
+  .cl-person-acts { margin-left: auto; display: flex; gap: 6px; }
+  .cl-person-acts .iconbtn { font-size: 11px; padding: 3px 9px; }
+  .cl-person-acts .iconbtn.danger { color: var(--danger); }
+  .cl-people-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+  .cl-people-add .cl-input { flex: 1; min-width: 200px; max-width: 320px; }
+  .cl-people-empty { color: var(--ink-mute); font-size: 13px; }
   .gate-session { margin-top: 14px; font-size: 13px; color: var(--ink-soft); line-height: 1.6; overflow-wrap: anywhere; }
   .gate-session b { color: var(--ink); font-weight: 600; }
   .gate-session a { color: var(--secondary); text-decoration: none; white-space: nowrap; }
@@ -1222,6 +1253,13 @@
       </span>
       <button class="iconbtn" id="pdf-btn" type="button">EXPORT PDF</button>
       <button class="iconbtn" id="theme-btn" type="button" aria-label="Toggle dark mode"></button>
+      <div class="acct" id="acct">
+        <button class="acct-btn" id="acct-btn" type="button" title="Account" aria-haspopup="menu" aria-expanded="false"></button>
+        <div class="acct-menu" id="acct-menu" hidden role="menu">
+          <div class="acct-head"><span class="acct-av" id="acct-av"></span><div style="min-width:0"><div class="acct-name" id="acct-name"></div><div class="acct-email" id="acct-email"></div></div></div>
+          <button class="acct-item danger" type="button" id="acct-signout" role="menuitem">Sign out</button>
+        </div>
+      </div>
     </div>
     </div>
   </header>
@@ -1576,6 +1614,17 @@
         <div class="kicker">Master access (opens the full dashboard) &mdash; company domains and named people only</div>
         <div id="cl-access-root-domains" data-kind="domains"></div>
         <div id="cl-access-root-emails" data-kind="emails"></div>
+      </div>
+      <div class="cl-access-sec" id="cl-people">
+        <div class="kicker">People &middot; everyone who can sign in with Microsoft</div>
+        <div class="cl-people-list" id="cl-people-list"></div>
+        <form class="cl-people-add" id="cl-people-add">
+          <input class="cl-input" id="cl-people-email" type="email" placeholder="person@company.com" maxlength="254" spellcheck="false" autocomplete="off" aria-label="Email address">
+          <select class="periodsel" id="cl-people-scope" aria-label="What they may open"><option value="">Full dashboard (admin)</option></select>
+          <button class="iconbtn cl-primary" type="submit" id="cl-people-addbtn">ADD PERSON</button>
+        </form>
+        <div class="cl-err" id="cl-people-err"></div>
+        <div class="hint">Named people are exact addresses. Anyone at a company domain (above, or on a client card) can sign in without being named; they appear here after their first sign-in. REMOVE takes a person off every report on this site.</div>
       </div>
       <div class="cl-escrow" id="cl-escrow">
         <span id="cl-escrow-status">Sign-in keys: missing</span>
@@ -5078,6 +5127,7 @@ function initClientsTab() {
   $("cl-access-save").addEventListener("click", saveAccessSetup);
   for (const id of ["cl-access-team", "cl-access-aud"]) $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); saveAccessSetup(); } });
   $("cl-escrow-update").addEventListener("click", escrowNow);
+  $("cl-people-add").addEventListener("submit", addPerson);
   $("cl-access-log-refresh").addEventListener("click", refreshAccessLog);
   window.addEventListener("resize", fitLiveFrames);
   // editor
@@ -5158,6 +5208,7 @@ async function loadClients(force) {
     } else {
       const m = access.v;
       clients.access = accessPayload(isPlainObj(m.access) ? m.access : {});
+      clients.profiles = isPlainObj(m.profiles) ? m.profiles : {};
       const esc = isPlainObj(m.escrow) ? m.escrow : {};
       clients.accessMeta = {
         configured: !!m.configured,
@@ -5367,6 +5418,7 @@ async function onAccessChipChange(scope, kind, values) {
   catch (err) { $("cl-status").textContent = "Email sign-in not saved: " + err.message; }
   if (scope === "root") { renderRootChips(); renderAccessStatus(); }
   else refreshCardAccess(scope);
+  renderPeople();
 }
 function renderAccessStatus() {
   const doc = clients.access, meta = clients.accessMeta;
@@ -5403,8 +5455,88 @@ function renderAccessBox() {
   $("cl-access-team").value = doc ? doc.teamDomain : "";
   $("cl-access-aud").value = doc ? doc.aud : "";
   renderRootChips();
+  renderPeople();
   renderEscrow();
   $("cl-access-log-list").hidden = true;
+}
+/* ---- People panel: every named person (root + clients) plus anyone who signed in through a domain rule ---- */
+function peopleRows() {
+  const a = clients.access; if (!a) return [];
+  const profiles = isPlainObj(clients.profiles) ? clients.profiles : {};
+  const rows = new Map();
+  const add = (email) => { if (!rows.has(email)) rows.set(email, { email, admin: false, slugs: [], viaDomain: false, profile: isPlainObj(profiles[email]) ? profiles[email] : null }); return rows.get(email); };
+  for (const e of a.root.emails) add(e).admin = true;
+  for (const [slug, ent] of Object.entries(a.clients)) for (const e of ent.emails) add(e).slugs.push(slug);
+  for (const email of Object.keys(profiles)) {
+    if (rows.has(email)) continue;
+    const dom = email.split("@")[1] || "";
+    const viaRoot = a.root.domains.includes(dom);
+    const viaClients = Object.entries(a.clients).filter(([, ent]) => ent.domains.includes(dom)).map(([slug]) => slug);
+    if (viaRoot || viaClients.length) { const r = add(email); r.viaDomain = true; r.admin = viaRoot; r.slugs = viaClients; }
+  }
+  const label = (r) => (r.profile && r.profile.name) || r.email;
+  return [...rows.values()].sort((x, y) => label(x).localeCompare(label(y)));
+}
+const clientLabel = (slug) => { const d = clients.list.find((c) => c.slug === slug); return d ? d.name : slug; };
+function renderPeople() {
+  const host = $("cl-people-list"); if (!host) return;
+  host.textContent = "";
+  if (!clients.access) { host.appendChild(mkEl("span", "cl-people-empty", clients.accessErr || "Sign-in settings unavailable")); return; }
+  const rows = peopleRows();
+  if (!rows.length) host.appendChild(mkEl("span", "cl-people-empty", "Nobody yet — add a person below, or a company domain above."));
+  for (const p of rows) {
+    const row = mkEl("div", "cl-person");
+    const av = mkEl("span", "cl-person-av"); setAvatar(av, { name: p.profile && p.profile.name, email: p.email, photo: p.profile && p.profile.photo }); row.appendChild(av);
+    const who = mkEl("div", "cl-person-who");
+    who.appendChild(mkEl("div", "cl-person-name", (p.profile && p.profile.name) || p.email.split("@")[0]));
+    who.appendChild(mkEl("div", "cl-person-email", p.email));
+    row.appendChild(who);
+    if (p.admin) row.appendChild(mkEl("span", "cl-person-role", "ADMIN · FULL DASHBOARD"));
+    for (const slug of p.slugs) row.appendChild(mkEl("span", "cl-person-role client", clientLabel(slug)));
+    if (p.viaDomain) row.appendChild(mkEl("span", "cl-person-last", "via company domain"));
+    if (p.profile && p.profile.lastLogin) row.appendChild(mkEl("span", "cl-person-last", "signed in " + relTime(p.profile.lastLogin)));
+    const acts = mkEl("div", "cl-person-acts");
+    if (!p.viaDomain) { const adm = mkEl("button", "iconbtn", p.admin ? "REVOKE ADMIN" : "MAKE ADMIN"); adm.type = "button"; adm.title = p.admin ? "Take away the full dashboard (client reports they are named on stay)" : "Let this person open the full dashboard"; adm.addEventListener("click", () => setPersonAdmin(p.email, !p.admin)); acts.appendChild(adm); }
+    const rm = mkEl("button", "iconbtn danger", p.viaDomain ? "FORGET" : "REMOVE"); rm.type = "button";
+    rm.title = p.viaDomain ? "Forget this person's name and photo (their company domain still allows sign-in)" : "Remove this person from every report on this site";
+    rm.addEventListener("click", () => removePerson(p)); acts.appendChild(rm);
+    row.appendChild(acts); host.appendChild(row);
+  }
+  const sel = $("cl-people-scope"), cur = sel.value; sel.textContent = "";
+  sel.appendChild(new Option("Full dashboard (admin)", ""));
+  for (const d of clients.list) sel.appendChild(new Option(d.name, d.slug));
+  sel.value = [...sel.options].some((o) => o.value === cur) ? cur : "";
+}
+async function savePeople(next) {
+  const btn = $("cl-people-addbtn"); btn.disabled = true; $("cl-people-err").textContent = "";
+  try { await saveAccess(next); $("cl-status").textContent = ""; renderRootChips(); renderAccessStatus(); renderPeople(); for (const d of clients.list) refreshCardAccess(d.slug); return true; }
+  catch (err) { $("cl-people-err").textContent = "Not saved: " + err.message; return false; }
+  finally { btn.disabled = false; }
+}
+async function setPersonAdmin(email, admin) {
+  const next = accessPayload(clients.access);
+  next.root.emails = admin ? [...new Set([...next.root.emails, email])].sort() : next.root.emails.filter((e) => e !== email);
+  await savePeople(next);
+}
+async function removePerson(p) {
+  if (!confirm(p.viaDomain ? `Forget ${p.email}'s name and photo? Their company domain still lets them sign in.` : `Remove ${p.email} from every report on this site?`)) return;
+  const next = accessPayload(clients.access);
+  next.root.emails = next.root.emails.filter((e) => e !== p.email);
+  for (const ent of Object.values(next.clients)) ent.emails = ent.emails.filter((e) => e !== p.email);
+  try { await adminApi("profile.delete", { email: p.email }); if (isPlainObj(clients.profiles)) delete clients.profiles[p.email]; }
+  catch (err) { $("cl-people-err").textContent = "Could not forget the profile: " + err.message; }
+  await savePeople(next);
+}
+async function addPerson(e) {
+  e.preventDefault();
+  const inp = $("cl-people-email"), err = $("cl-people-err"); err.textContent = "";
+  if (!clients.access) { err.textContent = "Sign-in settings unavailable"; return; }
+  let email; try { email = checkAccessValue("emails", inp.value); } catch (ex) { err.textContent = ex.message; return; }
+  const scope = $("cl-people-scope").value;
+  const next = accessPayload(clients.access);
+  if (!scope) next.root.emails = [...new Set([...next.root.emails, email])].sort();
+  else { next.clients[scope] = next.clients[scope] || { domains: [], emails: [] }; next.clients[scope].emails = [...new Set([...next.clients[scope].emails, email])].sort(); }
+  if (await savePeople(next)) inp.value = "";
 }
 async function saveAccessSetup() {
   if (!clients.access) return;
@@ -6808,6 +6940,30 @@ async function authLogout() {
 }
 const ssoTo = () => encodeURIComponent(location.pathname + location.search);
 function ssoHref() { return "/login/?to=" + ssoTo(); }
+/* account chip: photo (a data: image URL the worker fetched from Microsoft Graph) or initials */
+const initialsOf = (n) => { const p = String(n || "").trim().split(/\s+/); return ((((p[0] || "")[0] || "") + ((p.length > 1 ? p[p.length - 1] : "")[0] || "")).toUpperCase()) || "?"; };
+const PHOTO_OK = /^data:image\/(?:jpeg|png|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
+function setAvatar(el, who) {
+  el.textContent = "";
+  if (who && typeof who.photo === "string" && PHOTO_OK.test(who.photo)) { const img = document.createElement("img"); img.alt = ""; img.src = who.photo; el.appendChild(img); }
+  else el.textContent = initialsOf((who && who.name) || (who && who.email && who.email.split("@")[0]));
+}
+function renderAcct(who) {
+  const box = $("acct"); if (!box) return;
+  if (!who || !who.signedIn) { box.classList.remove("on"); return; }
+  setAvatar($("acct-btn"), who); setAvatar($("acct-av"), who);
+  const nm = $("acct-name"); nm.textContent = who.name || who.email;
+  if (who.root) { const b = document.createElement("span"); b.className = "acct-role"; b.textContent = "ADMIN"; nm.appendChild(b); }
+  $("acct-email").textContent = who.email;
+  box.classList.add("on");
+}
+(function wireAcct() {
+  const btn = $("acct-btn"), menu = $("acct-menu"), box = $("acct"); if (!btn) return;
+  btn.addEventListener("click", (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; btn.setAttribute("aria-expanded", String(!menu.hidden)); });
+  document.addEventListener("click", (e) => { if (!box.contains(e.target)) menu.hidden = true; });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") menu.hidden = true; });
+  $("acct-signout").addEventListener("click", () => { menu.hidden = true; $("logout-btn").click(); }); // same path as LOG OUT: ends the email session, forgets passphrases, reloads
+})();
 function msHref() { return "/login/microsoft?to=" + ssoTo(); }
 // which buttons to offer: the worker's whoami lists "microsoft" (first-party Entra flow) and/or
 // "email" (Cloudflare Access); an older worker only says `configured`, which meant "email"
@@ -8214,7 +8370,7 @@ async function boot() {
     // (never stored); previews returned above and never reach /_auth/*
     const who = await authWhoami();
     if (who && who.signedIn) {
-      if (await ssoUnlock(who, slug, async (pw) => { const data = await decryptConfig(clientBlob, pw); await enterClient(data, pw); })) return;
+      if (await ssoUnlock(who, slug, async (pw) => { const data = await decryptConfig(clientBlob, pw); await enterClient(data, pw); })) { renderAcct(who); return; }
     } else showSsoGate(who);
     $("gate").hidden = false;
     $("gate-form").addEventListener("submit", async (e) => {
@@ -8256,7 +8412,7 @@ async function boot() {
     // (nothing written to sessionStorage; the Clients tab works off the in-memory gatePw)
     const who = window.isSecureContext && crypto.subtle ? await authWhoami() : null;
     if (who && who.signedIn) {
-      if (await ssoUnlock(who, "", (pw) => unlock(pw, { persist: false }))) return;
+      if (await ssoUnlock(who, "", (pw) => unlock(pw, { persist: false }))) { renderAcct(who); return; }
     } else showSsoGate(who);
     $("gate").hidden = false;
     // WebCrypto only exists on secure origins — on plain http the gate can

@@ -56,7 +56,8 @@
 //   GET  /_auth/whoami           {ok, configured, signedIn, email?, root?, slugs?}
 //   POST /_auth/key {site}       {ok, site, pw} — the site's password for a mapped email
 //   POST /_auth/logout           clears the cookie
-//   admin (both masters): access.get / access.put / access.log
+//   admin (both masters): access.get / access.put / access.log / profile.delete
+//   KV <site>:profiles — name + Microsoft photo per signed-in email (People panel, account chip)
 //   admin (myrx only):    pws.escrow {passwords, root} — reseal the partner vault under ESCROW_KEY
 //   KV: myrx:access, aa:access (who may open what), myrx:access-log,
 //       aa:access-log (last 500 sign-ins), myrx:pws-escrow (ESCROW_KEY-sealed copy of myrx:pws)
@@ -479,7 +480,7 @@ const AA_PW_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"; // no 0/O/1/I/l look-a
 const AA_SEALED = "vault sealed with a different password";
 const AA_KV_FAILED = "KV read failed"; // 503: KV unreadable right now — retry, never write
 const AA_REAL_SLUG_MIN = 3; // a real client's slug is its CRM match key (clientOwns)
-const AA_ACTIONS = new Set(["ping", "clients.list", "client.reveal", "clients.seed", "clients.reseal", "client.put", "client.delete", "access.get", "access.put", "access.log"]);
+const AA_ACTIONS = new Set(["ping", "clients.list", "client.reveal", "clients.seed", "clients.reseal", "client.put", "client.delete", "access.get", "access.put", "access.log", "profile.delete"]);
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 let aaVault = { at: 0, pw: undefined, raw: null, state: "absent", clients: null, updatedAt: null }; // state: absent | ok | sealed | error
 
@@ -891,7 +892,58 @@ async function verifyAccessJwt(token, teamDomain, aud) {
 // company's Microsoft login. Personal Microsoft accounts are refused by Entra
 // for a multi-tenant-organizations app.
 const MS_TENANT_DEFAULT = "organizations";
-const MS_SCOPE = "openid email profile";
+const MS_SCOPE = "openid email profile User.Read"; // User.Read: the 48px profile photo from Graph (best effort)
+// ---- profiles (KV <site>:profiles): the signed-in person's display name and Microsoft photo ----
+// {v:1, users:{<email>:{name, photo, lastLogin, updatedAt}}}, at most PROFILES_MAX
+// people (oldest lastLogin evicted). photo is a data: URL of at most
+// PHOTO_MAX bytes (image/jpeg|png|gif|webp), written only from Graph's answer to
+// a token we just minted — never from a client-supplied value. Best effort
+// throughout: a failed photo fetch or KV write never fails the sign-in.
+const PROFILES_MAX = 500, PHOTO_MAX = 60000, NAME_MAX = 80;
+const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+const PHOTO_URL_RE = /^data:image\/(?:jpeg|png|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
+const profileCache = new Map(); // site -> { at, users }
+async function readProfiles(env, site, fresh) {
+  const c = profileCache.get(site), now = Date.now();
+  if (!fresh && c && now - c.at < ACCESS_CACHE_MS) return c.users;
+  let users = {};
+  try {
+    const rec = await env.AAPS_DATA.get(site + ":profiles", { type: "json" });
+    if (isPlainObject(rec) && isPlainObject(rec.users)) users = rec.users;
+  } catch (e) { console.log(`auth: profiles read failed (${site}): ${e && e.name}`); return c ? c.users : {}; }
+  profileCache.set(site, { at: now, users });
+  return users;
+}
+const publicProfile = (p) => (isPlainObject(p) ? { name: typeof p.name === "string" ? p.name : "", photo: typeof p.photo === "string" && PHOTO_URL_RE.test(p.photo) ? p.photo : "", lastLogin: typeof p.lastLogin === "string" ? p.lastLogin : null } : null);
+async function graphPhoto(accessToken) {
+  if (typeof accessToken !== "string" || !accessToken) return "";
+  try {
+    const r = await fetch("https://graph.microsoft.com/v1.0/me/photos/48x48/$value", { headers: { authorization: `Bearer ${accessToken}` } });
+    if (!r.ok) return "";
+    const type = String(r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
+    if (!PHOTO_TYPES.has(type)) return "";
+    const buf = new Uint8Array(await r.arrayBuffer());
+    if (!buf.length || buf.length > PHOTO_MAX) return "";
+    const url = `data:${type};base64,${b64enc(buf)}`;
+    return PHOTO_URL_RE.test(url) ? url : "";
+  } catch { return ""; }
+}
+async function saveProfile(env, site, email, name, photo) {
+  try {
+    const users = await readProfiles(env, site, true);
+    const prev = isPlainObject(users[email]) ? users[email] : {};
+    const now = new Date().toISOString();
+    const cleanName = typeof name === "string" ? name.trim().replace(/\s+/g, " ").slice(0, NAME_MAX) : "";
+    users[email] = { name: cleanName || (typeof prev.name === "string" ? prev.name : ""), photo: photo || (typeof prev.photo === "string" && PHOTO_URL_RE.test(prev.photo) ? prev.photo : ""), lastLogin: now, updatedAt: prev.updatedAt && !photo && !cleanName ? prev.updatedAt : now };
+    const keys = Object.keys(users);
+    if (keys.length > PROFILES_MAX) {
+      keys.sort((a, b) => String(users[a].lastLogin || "").localeCompare(String(users[b].lastLogin || "")));
+      for (const k of keys.slice(0, keys.length - PROFILES_MAX)) delete users[k];
+    }
+    await env.AAPS_DATA.put(site + ":profiles", JSON.stringify({ v: 1, users }));
+    profileCache.set(site, { at: Date.now(), users });
+  } catch (e) { console.log(`auth: profile save failed (${site}): ${e && e.name}`); }
+}
 const OAUTH_COOKIE = "__Host-report_oauth";
 const OAUTH_TTL_S = 600;
 const TENANT_ID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -937,7 +989,8 @@ async function verifyMsIdToken(idToken, env, nonce) {
   let email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
   if (!email && EMAIL_RE.test(upn)) email = upn;
   if (!EMAIL_RE.test(email)) return { ok: false, reason: "no-email" };
-  return { ok: true, email };
+  const name = typeof payload.name === "string" ? payload.name.trim().replace(/\s+/g, " ").slice(0, NAME_MAX) : "";
+  return { ok: true, email, name };
 }
 // GET /_auth/callback?code&state
 async function authMsCallback(req, env, url, site) {
@@ -968,6 +1021,7 @@ async function authMsCallback(req, env, url, site) {
     console.log(`auth: microsoft login refused (${site}): ${v.reason}`); // never the token, never the email
     return fail(401, v.reason, "Sign-in could not be verified", "Go back to the report and try Sign in with Microsoft again.");
   }
+  await saveProfile(env, site, v.email, v.name, await graphPhoto(tok.access_token));
   return finishLogin(req, env, site, net, v.email, to, "microsoft", { "set-cookie": OAUTH_CLEAR_COOKIE });
 }
 // ---- session cookie: base64url(payload JSON) "." base64url(HMAC-SHA256(SESSION_SECRET, payloadB64)) ----
@@ -1102,7 +1156,8 @@ async function accessAdmin(env, site, action, body) {
   if (action === "access.get") {
     const a = await readAccess(env, site, true);
     if (a.state === "error") return json({ error: AA_KV_FAILED }, 503);
-    const out = { ok: true, access: a.doc, configured: accessConfigured(a.doc), microsoft: msConfigured(env), secrets: { session: !!env.SESSION_SECRET } };
+    const out = { ok: true, access: a.doc, configured: accessConfigured(a.doc), microsoft: msConfigured(env), secrets: { session: !!env.SESSION_SECRET }, profiles: {} };
+    for (const [email, p] of Object.entries(await readProfiles(env, site, true))) { const pub = publicProfile(p); if (pub && EMAIL_RE.test(email)) out.profiles[email] = pub; }
     if (site === "myrx") {
       out.secrets.escrow = !!env.ESCROW_KEY;
       try { out.escrow = await escrowState(env); } catch { return json({ error: AA_KV_FAILED }, 503); }
@@ -1116,6 +1171,15 @@ async function accessAdmin(env, site, action, body) {
     await env.AAPS_DATA.put(site + ":access", JSON.stringify(doc));
     primeAccess(site, doc);
     return json({ ok: true, access: doc, configured: accessConfigured(doc) });
+  }
+  if (action === "profile.delete") { // forget a person's name/photo (their access entries are edited through access.put)
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    if (!EMAIL_RE.test(email)) return json({ error: "email: not a valid address", path: "email" }, 422);
+    try {
+      const users = await readProfiles(env, site, true);
+      if (users[email] !== undefined) { delete users[email]; await env.AAPS_DATA.put(site + ":profiles", JSON.stringify({ v: 1, users })); profileCache.set(site, { at: Date.now(), users }); }
+    } catch { return json({ error: AA_KV_FAILED }, 503); }
+    return json({ ok: true });
   }
   if (action === "access.log") {
     let rec = null;
@@ -1234,7 +1298,8 @@ async function authWhoami(req, env, site) {
   const s = await readSession(req, env, site);
   if (!s) return ajson({ ok: true, configured, methods, signedIn: false });
   const res = resolveAccess(a.doc, s.email);
-  return ajson({ ok: true, configured, methods, signedIn: true, email: s.email, root: res.root, slugs: res.slugs });
+  const prof = publicProfile((await readProfiles(env, site, false))[s.email]) || { name: "", photo: "", lastLogin: null };
+  return ajson({ ok: true, configured, methods, signedIn: true, email: s.email, root: res.root, slugs: res.slugs, name: prof.name, photo: prof.photo });
 }
 // POST /_auth/key {site:""|"<slug>"} -> { ok, site, pw } for a site the session may open
 async function authKey(req, env, site) {
