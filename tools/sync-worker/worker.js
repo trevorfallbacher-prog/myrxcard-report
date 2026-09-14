@@ -899,7 +899,8 @@ const MS_SCOPE = "openid email profile User.Read"; // User.Read: the 48px profil
 // PHOTO_MAX bytes (image/jpeg|png|gif|webp), written only from Graph's answer to
 // a token we just minted — never from a client-supplied value. Best effort
 // throughout: a failed photo fetch or KV write never fails the sign-in.
-const PROFILES_MAX = 500, PHOTO_MAX = 60000, NAME_MAX = 80;
+// 500 x (20 KB photo + name) stays far under the 25 MB KV value limit; Graph's 48px photo is ~2-6 KB
+const PROFILES_MAX = 500, PHOTO_MAX = 20000, NAME_MAX = 80;
 const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const PHOTO_URL_RE = /^data:image\/(?:jpeg|png|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
 const profileCache = new Map(); // site -> { at, users }
