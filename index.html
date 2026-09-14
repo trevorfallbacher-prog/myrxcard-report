@@ -125,7 +125,7 @@
   /* email sign-in (Cloudflare Access via the worker's same-host /login route). Everything
      stays hidden until the site's access settings are configured, so the stock gate is unchanged. */
   .gate-panel form[hidden], .gate-sso[hidden], .gate-session[hidden] { display: none; }
-  .gate-or { display: flex; align-items: center; gap: 10px; margin: 14px 0 12px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-mute); }
+  .gate-or { display: flex; align-items: center; gap: 12px; margin: 18px 0 14px; font: inherit; font-size: 13px; color: var(--ink-mute); }
   .gate-or::before, .gate-or::after { content: ""; flex: 1; height: 1px; background: var(--hair); }
   .gate-sso-btn {
     display: block; text-align: center; background: transparent; color: var(--secondary); border: 1px solid var(--secondary);
@@ -133,6 +133,17 @@
     transition: background 150ms ease-out, color 150ms ease-out;
   }
   .gate-sso-btn:hover { background: var(--secondary); color: #F2F8FF; }
+  .gate-ms-btn {
+    display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; box-sizing: border-box;
+    background: var(--card, #fff); color: var(--ink); border: 1px solid var(--hair-bright, var(--hair));
+    border-radius: 10px; padding: 12px 18px; font: inherit; font-size: 16px; font-weight: 700; text-decoration: none; cursor: pointer;
+    transition: border-color 150ms ease-out, box-shadow 150ms ease-out;
+  }
+  .gate-ms-btn:hover { border-color: var(--secondary); box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06); }
+  .gate-ms-btn:focus-visible { outline: 2px solid var(--secondary); outline-offset: 2px; }
+  .gate-ms-btn .gate-ms-logo { flex: none; }
+  .gate-ms-btn + .gate-sso-btn { margin-top: 10px; }
+  .gate-ms-btn[hidden], .gate-sso-btn[hidden] { display: none; }
   .gate-session { margin-top: 14px; font-size: 13px; color: var(--ink-soft); line-height: 1.6; overflow-wrap: anywhere; }
   .gate-session b { color: var(--ink); font-weight: 600; }
   .gate-session a { color: var(--secondary); text-decoration: none; white-space: nowrap; }
@@ -1054,7 +1065,8 @@
     <div class="gate-error" id="gate-err"></div>
     <div class="gate-sso" id="gate-sso" hidden>
       <div class="gate-or">or</div>
-      <a class="gate-sso-btn" id="gate-sso-btn" href="/login/">Sign in with company email</a>
+      <a class="gate-ms-btn" id="gate-ms-btn" href="/login/microsoft" hidden><svg class="gate-ms-logo" viewBox="0 0 21 21" width="20" height="20" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#F25022"/><rect x="11" y="1" width="9" height="9" fill="#7FBA00"/><rect x="1" y="11" width="9" height="9" fill="#00A4EF"/><rect x="11" y="11" width="9" height="9" fill="#FFB900"/></svg><span>Sign in with Microsoft</span></a>
+      <a class="gate-sso-btn" id="gate-sso-btn" href="/login/" hidden>Sign in with company email</a>
     </div>
     <div class="gate-session" id="gate-session" hidden>
       Signed in as <b id="gate-session-email"></b> &middot;
@@ -6792,7 +6804,12 @@ async function authKey(site) {
 async function authLogout() {
   try { await authFetch("/_auth/logout", { method: "POST" }); } catch { /* best effort: the cookie expires on its own */ }
 }
-function ssoHref() { return "/login/?to=" + encodeURIComponent(location.pathname + location.search); }
+const ssoTo = () => encodeURIComponent(location.pathname + location.search);
+function ssoHref() { return "/login/?to=" + ssoTo(); }
+function msHref() { return "/login/microsoft?to=" + ssoTo(); }
+// which buttons to offer: the worker's whoami lists "microsoft" (first-party Entra flow) and/or
+// "email" (Cloudflare Access); an older worker only says `configured`, which meant "email"
+const ssoMethods = (who) => Array.isArray(who.methods) ? who.methods : (who.configured ? ["email"] : []);
 const SSO_GATE_ERR = {
   "not-authorized": "Your email isn't authorized for this report.",
   "not-escrowed": "Email sign-in isn't ready for this site yet — use a password.",
@@ -6805,8 +6822,10 @@ const ssoGateError = (code) => SSO_GATE_ERR[code] || "Email sign-in isn't availa
 // or the "Signed in as" strip (form hidden) for an email session
 function showSsoGate(who) {
   if (!who) return;
-  $("gate-sso-btn").href = ssoHref();
-  $("gate-sso").hidden = !who.configured || who.signedIn;
+  const methods = ssoMethods(who);
+  $("gate-ms-btn").href = msHref(); $("gate-ms-btn").hidden = !methods.includes("microsoft");
+  $("gate-sso-btn").href = ssoHref(); $("gate-sso-btn").hidden = !methods.includes("email");
+  $("gate-sso").hidden = methods.length === 0 || who.signedIn;
   if (who.signedIn) {
     $("gate-session-email").textContent = who.email;
     $("gate-session").hidden = false;
@@ -6814,7 +6833,7 @@ function showSsoGate(who) {
   }
   $("gate-usepw").onclick = (e) => {
     e.preventDefault();
-    $("gate-session").hidden = true; $("gate-form").hidden = false; $("gate-sso").hidden = !who.configured;
+    $("gate-session").hidden = true; $("gate-form").hidden = false; $("gate-sso").hidden = methods.length === 0;
     $("gate-err").textContent = ""; $("gate-btn").disabled = false;
     $("gate-pw").focus();
   };

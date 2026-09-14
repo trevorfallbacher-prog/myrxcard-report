@@ -1256,6 +1256,90 @@ check("no myrx:/aa: key holds an escrowed password or the master in clear (part 
   ![...kv.store.entries()].some(([k, v]) => (k.startsWith("myrx:") || k.startsWith("aa:")) && (v.includes("escrow-uwhc-pw") || v.includes("escrow-zeta-pw") || v.includes(TEST_MASTER))));
 globalThis.fetch = prevFetch6;
 
+// ---------------------------------------------------------------- part 7
+console.log("Sign in with Microsoft: /login/microsoft -> Entra -> /_auth/callback (worker-run code flow)");
+// A stand-in Entra: the part-5 RSA pair signs id_tokens under kid ms-kid-1, the
+// stubbed fetch serves that key as Microsoft's JWKS and answers the token
+// endpoint with whatever `msToken` holds. No real tenant or secret involved.
+const MS_JWK = { ...TEST_JWK, kid: "ms-kid-1" };
+const MS_CLIENT = "11111111-2222-3333-4444-555555555555", MS_TID = "e73d5930-41c6-4d9d-9b82-03363b857810";
+const envM = { ...envS, MS_CLIENT_ID: MS_CLIENT, MS_CLIENT_SECRET: "entra-client-secret-test" };
+let msToken = { status: 200, body: {} }, msTokenCalls = [];
+const prevFetch7 = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  const u = String(url);
+  if (u === "https://login.microsoftonline.com/organizations/discovery/v2.0/keys") return new Response(JSON.stringify({ keys: [MS_JWK] }), { status: 200 });
+  if (u === "https://login.microsoftonline.com/organizations/oauth2/v2.0/token") { msTokenCalls.push(Object.fromEntries(new URLSearchParams(init.body))); return new Response(JSON.stringify(msToken.body), { status: msToken.status }); }
+  return prevFetch7(url, init);
+};
+const msClaims = (email, extra = {}) => ({ aud: MS_CLIENT, iss: `https://login.microsoftonline.com/${MS_TID}/v2.0`, tid: MS_TID, exp: nowS() + 300, nbf: nowS() - 5, iat: nowS() - 5, email, preferred_username: email, name: "Test Nurse", ...extra });
+const oauthCookieOf = (r) => (r.setCookie || "").split(";")[0];
+const parseOauth = (r) => { const m = /__Host-report_oauth=([a-f0-9]{32})\.([a-f0-9]{32})\.([A-Za-z0-9_-]*)/.exec(r.setCookie || ""); return m ? { state: m[1], nonce: m[2], to: Buffer.from(m[3], "base64url").toString() } : null; };
+// start
+r = await auth(MYRX, "/login/microsoft?to=%2Fuwhc%2F", { env: envS }); check("/login/microsoft without MS secrets -> 503 not-configured page", r.status === 503 && r.reason === "not-configured");
+r = await auth(MYRX, "/login/microsoft?to=%2Fuwhc%2F", { env: envM });
+{
+  const loc = r.headers.get("location") || "", q = new URL(loc).searchParams, oc = parseOauth(r);
+  check("/login/microsoft -> 302 to login.microsoftonline.com/organizations authorize", r.status === 302 && loc.startsWith("https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?"), loc.slice(0, 90));
+  check("  client_id, code flow, redirect_uri = https://reports.myrxcard.com/_auth/callback, openid email profile, select_account", q.get("client_id") === MS_CLIENT && q.get("response_type") === "code" && q.get("redirect_uri") === "https://reports.myrxcard.com/_auth/callback" && q.get("scope") === "openid email profile" && q.get("prompt") === "select_account", loc);
+  check("  state + nonce are 32 hex and ride in a __Host-report_oauth cookie (HttpOnly, Secure, Lax, 600 s) with the sanitized `to`", !!oc && q.get("state") === oc.state && q.get("nonce") === oc.nonce && oc.to === "/uwhc/" && /HttpOnly/.test(r.setCookie) && /Secure/.test(r.setCookie) && /SameSite=Lax/.test(r.setCookie) && /Max-Age=600/.test(r.setCookie), r.setCookie);
+  check("  never leaks the client secret", !r.html.includes("entra-client-secret-test") && !loc.includes("entra-client-secret-test"));
+}
+r = await auth(MYRX, "/login/microsoft?to=https%3A%2F%2Fevil.example%2F", { env: envM }); check("  an off-site `to` is replaced by /", parseOauth(r).to === "/");
+r = await auth(MYRX, "/login/microsoft?to=%2F_auth%2Fkey", { env: envM }); check("  `to` into /_auth is replaced by /", parseOauth(r).to === "/");
+r = await auth(MYRX, "/login/microsoft", { method: "POST", body: {}, env: envM }); check("  POST -> 405", r.status === 405);
+r = await auth(WORKERS_DEV, "/login/microsoft", { env: envM }); check("  on the workers.dev host -> 404 unknown site", r.status === 404);
+// callback
+async function msStart(to = "/uwhc/") { const s0 = await auth(MYRX, "/login/microsoft?to=" + encodeURIComponent(to), { env: envM }); return { cookie: oauthCookieOf(s0), ...parseOauth(s0) }; }
+async function msFinish(st, claims, { key, kid = "ms-kid-1", state, ip, tokenStatus = 200, noIdToken = false } = {}) {
+  const c = claims.nonce === undefined ? { ...claims, nonce: st.nonce } : claims;
+  msToken = noIdToken ? { status: tokenStatus, body: { access_token: "x" } } : { status: tokenStatus, body: { id_token: await signJwt(c, { kid, key }), access_token: "x" } };
+  return auth(MYRX, `/_auth/callback?code=CODE123&state=${state || st.state}`, { cookie: st.cookie, env: envM, ip });
+}
+r = await auth(MYRX, "/_auth/callback?code=x&state=y", { env: envM }); check("callback without the oauth cookie -> 400 bad-state", r.status === 400 && r.reason === "bad-state");
+{ const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org"), { state: "f".repeat(32) }); check("callback with a state that does not match the cookie -> 400 bad-state (no token exchange)", r.status === 400 && r.reason === "bad-state" && msTokenCalls.length === 0); }
+r = await auth(MYRX, "/_auth/callback?error=access_denied", { env: envM }); check("callback carrying an error from Microsoft -> 400 ms-error, cookie cleared", r.status === 400 && r.reason === "ms-error" && /__Host-report_oauth=;.*Max-Age=0/.test(r.setCookie));
+{
+  const st = await msStart("/uwhc/");
+  msTokenCalls = [];
+  r = await msFinish(st, msClaims("nurse@uwhealth.org"));
+  check("happy path -> 302 to /uwhc/ with a session cookie", r.status === 302 && r.headers.get("location") === "/uwhc/" && r.reason === "ok" && /__Host-report_session=/.test(r.setCookie), `${r.status} ${r.reason} ${r.headers.get("location")}`);
+  const sc = (r.headers.get("set-cookie") || "").split(/,(?=\s*__Host-)/);
+  check("  the oauth cookie is cleared alongside", sc.some((c) => /__Host-report_oauth=;/.test(c) && /Max-Age=0/.test(c)), r.headers.get("set-cookie"));
+  const sess = sc.find((c) => /__Host-report_session=/.test(c));
+  const payload = parseCookie(sess.split(";")[0]).payload;
+  check("  session is for myrx, email nurse@uwhealth.org, slugs [uwhc]", payload.site === "myrx" && payload.email === "nurse@uwhealth.org" && payload.slugs.join() === "uwhc" && payload.root === false, JSON.stringify(payload));
+  check("  token exchange was a confidential-client code grant to the same redirect_uri", msTokenCalls.length === 1 && msTokenCalls[0].grant_type === "authorization_code" && msTokenCalls[0].code === "CODE123" && msTokenCalls[0].client_secret === "entra-client-secret-test" && msTokenCalls[0].redirect_uri === "https://reports.myrxcard.com/_auth/callback", JSON.stringify(msTokenCalls[0]));
+  r = await auth(MYRX, "/_auth/whoami", { cookie: sess.split(";")[0], env: envM }); check("  whoami with that cookie -> signedIn, slugs [uwhc], methods include microsoft", r.status === 200 && r.out.signedIn === true && r.out.slugs.join() === "uwhc" && r.out.methods.includes("microsoft"), JSON.stringify(r.out));
+  r = await auth(MYRX, "/_auth/key", { cookie: sess.split(";")[0], body: { site: "uwhc" }, env: envM }); check("  /_auth/key releases the uwhc password", r.status === 200 && r.out.site === "uwhc" && typeof r.out.pw === "string" && r.out.pw.length > 0);
+}
+{ const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org"), { key: kp2.privateKey }); check("id_token signed by someone else -> 401 bad-signature", r.status === 401 && r.reason === "bad-signature"); }
+{ const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org"), { kid: "unknown-kid" }); check("unknown kid -> 401 bad-signature", r.status === 401 && r.reason === "bad-signature"); }
+{ const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org", { aud: "someone-elses-app" })); check("wrong audience -> 401 bad-audience", r.status === 401 && r.reason === "bad-audience"); }
+{ const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org", { iss: "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000000/v2.0" })); check("issuer not matching the token's own tid -> 401 bad-issuer", r.status === 401 && r.reason === "bad-issuer"); }
+{ const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org", { tid: "not-a-tenant" })); check("malformed tid -> 401 bad-issuer", r.status === 401 && r.reason === "bad-issuer"); }
+{ const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org", { exp: nowS() - 10 })); check("expired id_token -> 401 expired", r.status === 401 && r.reason === "expired"); }
+{ const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org", { nonce: "0".repeat(32) })); check("wrong nonce -> 401 bad-nonce", r.status === 401 && r.reason === "bad-nonce"); }
+{ const st = await msStart(); r = await msFinish(st, { ...msClaims("nurse@uwhealth.org"), nonce: st.nonce, preferred_username: "nurse_uwhealth.org#EXT#@othertenant.onmicrosoft.com" }); check("guest (#EXT#) account -> 401 guest-account", r.status === 401 && r.reason === "guest-account"); }
+{ const st = await msStart(); r = await msFinish(st, { ...msClaims("", { nonce: st.nonce }), email: undefined, preferred_username: "not an email" }); check("no usable email -> 401 no-email", r.status === 401 && r.reason === "no-email"); }
+{ const st = await msStart(); const c = { ...msClaims("Nurse@UWHealth.org"), nonce: st.nonce, email: undefined }; r = await msFinish(st, c); check("no email claim but an email-shaped UPN -> accepted, lowercased", r.status === 302 && parseCookie((r.headers.get("set-cookie") || "").split(/,(?=\s*__Host-)/).find((x) => /report_session=/.test(x)).split(";")[0]).payload.email === "nurse@uwhealth.org"); }
+{ const st = await msStart(); r = await msFinish(st, { ...msClaims("stranger@nowhere.example"), nonce: st.nonce }); check("verified but unmapped email -> 403 unmapped page offering another account via /login/microsoft", r.status === 403 && r.reason === "unmapped" && r.html.includes("stranger@nowhere.example") && r.html.includes("/login/microsoft?to=%2Fuwhc%2F"), r.html.slice(0, 200)); }
+{ const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org"), { tokenStatus: 400 }); check("token endpoint 400 -> 502 ms-token", r.status === 502 && r.reason === "ms-token"); }
+{ const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org"), { noIdToken: true }); check("token endpoint without id_token -> 502 ms-token", r.status === 502 && r.reason === "ms-token"); }
+{ // happy path claims are signed under the start's nonce: helper fills it in
+}
+{ const ip = freshIp(); let last; for (let i = 0; i < 5; i++) { const st = await msStart(); last = await msFinish(st, msClaims("nurse@uwhealth.org", { nonce: "1".repeat(32) }), { ip }); }
+  const st = await msStart(); r = await msFinish(st, { ...msClaims("nurse@uwhealth.org"), nonce: st.nonce }, { ip }); check("5 refused tokens from one network -> 429 locked even for a good one", r.status === 429 && r.reason === "locked", `${r.status} ${r.reason}`); }
+r = await auth(MYRX, "/_auth/whoami", { env: envS }); check("whoami without MS secrets: methods = [email] (Access configured), configured true", r.out.methods.join() === "email" && r.out.configured === true, JSON.stringify(r.out));
+r = await auth(MYRX, "/_auth/whoami", { env: envM }); check("whoami with MS secrets: methods = [microsoft, email]", r.out.methods.join() === "microsoft,email", JSON.stringify(r.out));
+{ kv.store.set("myrx:access", JSON.stringify({ v: 1, root: { domains: [], emails: [] }, clients: { uwhc: { domains: ["uwhealth.org"], emails: [] } } }));
+  r = await myrxAdmin("access.get", {}, { env: envM }); check("  (access doc without team/AUD reloaded)", r.status === 200 && r.out.configured === false && r.out.microsoft === true);
+  r = await auth(MYRX, "/_auth/whoami", { env: envM }); check("whoami with MS secrets but no Access team/AUD: configured true, methods = [microsoft]", r.out.configured === true && r.out.methods.join() === "microsoft", JSON.stringify(r.out));
+  const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org")); check("  Microsoft sign-in works without any Access configuration", r.status === 302 && r.headers.get("location") === "/uwhc/", `${r.status} ${r.reason}`);
+  r = await auth(MYRX, "/login/", { jwt: await jwtFor("nurse@uwhealth.org"), env: envM }); check("  the Access path stays 503 not-configured", r.status === 503 && r.reason === "not-configured"); }
+check("no myrx:/aa: key ever held the Microsoft client secret", ![...kv.store.values()].some((v) => v.includes("entra-client-secret-test")));
+globalThis.fetch = prevFetch7;
+
 globalThis.fetch = realFetch;
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -50,6 +50,8 @@
 // hostnames — see SSO-SETUP.md). Same-host paths, dispatched by pathname
 // before the JSON API above; a 503 "email sign-in not configured" until the
 // SESSION_SECRET (and, for MyRxCard keys, ESCROW_KEY) secrets exist:
+//   GET  /login/microsoft?to=<path>  302 to Microsoft Entra (worker-run OAuth code flow)
+//   GET  /_auth/callback?code&state  Microsoft's answer → id_token verified → session cookie → 302
 //   GET  /login?to=<path>        Access-authenticated → session cookie → 302 to
 //   GET  /_auth/whoami           {ok, configured, signedIn, email?, root?, slugs?}
 //   POST /_auth/key {site}       {ok, site, pw} — the site's password for a mapped email
@@ -720,7 +722,7 @@ function authPage(status, reason, title, inner, extra) {
     + `main{background:#fff;border-radius:12px;padding:32px;max-width:460px;box-shadow:0 8px 30px rgba(0,0,0,.08)}h1{font-size:20px;margin:0 0 12px}p{margin:8px 0}a{color:#1c80b8}</style></head><body><main>${inner}</main></body></html>`;
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "x-auth-reason": reason, ...(extra || {}) } });
 }
-const authSimplePage = (status, reason, h1, p) => authPage(status, reason, h1, `<h1>${escHtml(h1)}</h1>${p ? `<p>${escHtml(p)}</p>` : ""}`);
+const authSimplePage = (status, reason, h1, p, extra) => authPage(status, reason, h1, `<h1>${escHtml(h1)}</h1>${p ? `<p>${escHtml(p)}</p>` : ""}`, extra);
 // ---- the access document (KV P+"access"): who may open what ----
 // { v:1, teamDomain, aud, root:{domains, emails}, clients:{<slug>:{domains, emails}}, updatedAt }
 // configured := teamDomain and aud both set. Cached per isolate for
@@ -816,25 +818,34 @@ function validateAccessDoc(a) { // -> { doc } | { error: Response }
   return { doc };
 }
 // ---- Access JWT verification (RS256 against the team's JWKS) ----
-const jwksCache = new Map(); // teamDomain -> { at, keys }
-async function fetchJwks(team) {
-  const r = await fetch(`https://${team}.cloudflareaccess.com/cdn-cgi/access/certs`);
+const jwksCache = new Map(); // cache key (teamDomain or "ms:<tenant>") -> { at, keys }
+async function fetchJwks(url) {
+  const r = await fetch(url);
   if (!r.ok) throw new Error(`jwks HTTP ${r.status}`);
   const j = await r.json();
   if (!isPlainObject(j) || !Array.isArray(j.keys)) throw new Error("jwks malformed");
   return j.keys.filter((k) => isPlainObject(k) && typeof k.kid === "string" && k.kty === "RSA" && typeof k.n === "string" && typeof k.e === "string");
 }
-// the signing key for `kid`, or null; throws when the JWKS cannot be fetched
-async function jwksKey(team, kid) {
+// the signing key for `kid` from the JWKS at `url` (cached under `cacheKey`), or
+// null; throws when the JWKS cannot be fetched
+async function jwksKeyFrom(cacheKey, url, kid) {
   const now = Date.now();
-  let c = jwksCache.get(team);
-  if (!c || now - c.at > JWKS_TTL_MS) { c = { at: now, keys: await fetchJwks(team) }; jwksCache.set(team, c); }
+  let c = jwksCache.get(cacheKey);
+  if (!c || now - c.at > JWKS_TTL_MS) { c = { at: now, keys: await fetchJwks(url) }; jwksCache.set(cacheKey, c); }
   let k = c.keys.find((x) => x.kid === kid);
   if (!k && now - c.at > JWKS_REFETCH_MIN_MS) { // a rotated key: refetch once
-    c = { at: now, keys: await fetchJwks(team) }; jwksCache.set(team, c);
+    c = { at: now, keys: await fetchJwks(url) }; jwksCache.set(cacheKey, c);
     k = c.keys.find((x) => x.kid === kid);
   }
   return k || null;
+}
+const jwksKey = (team, kid) => jwksKeyFrom(team, `https://${team}.cloudflareaccess.com/cdn-cgi/access/certs`, kid);
+// RS256 signature check shared by the Access and Microsoft verifiers
+async function rs256Valid(jwk, parts) {
+  try {
+    const key = await crypto.subtle.importKey("jwk", { kty: "RSA", n: jwk.n, e: jwk.e, alg: "RS256", ext: true }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    return await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64uDec(parts[2]), utf8(`${parts[0]}.${parts[1]}`));
+  } catch { return false; }
 }
 // -> { ok:true, email } | { ok:false, reason } ; never logs the token or the email
 async function verifyAccessJwt(token, teamDomain, aud) {
@@ -849,12 +860,7 @@ async function verifyAccessJwt(token, teamDomain, aud) {
   let jwk;
   try { jwk = await jwksKey(teamDomain, header.kid); }
   catch (e) { console.log(`auth: jwks unavailable (${teamDomain}): ${e && e.message}`); return { ok: false, reason: "jwks-unavailable" }; }
-  if (!jwk) return { ok: false, reason: "bad-signature" };
-  try {
-    const key = await crypto.subtle.importKey("jwk", { kty: "RSA", n: jwk.n, e: jwk.e, alg: "RS256", ext: true }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
-    const good = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64uDec(parts[2]), utf8(`${parts[0]}.${parts[1]}`));
-    if (!good) return { ok: false, reason: "bad-signature" };
-  } catch { return { ok: false, reason: "bad-signature" }; }
+  if (!jwk || !(await rs256Valid(jwk, parts))) return { ok: false, reason: "bad-signature" };
   const now = Math.floor(Date.now() / 1000);
   if (payload.iss !== `https://${teamDomain}.cloudflareaccess.com`) return { ok: false, reason: "bad-issuer" };
   const auds = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
@@ -865,6 +871,104 @@ async function verifyAccessJwt(token, teamDomain, aud) {
   const email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
   if (!EMAIL_RE.test(email)) return { ok: false, reason: "no-email" };
   return { ok: true, email };
+}
+// ---- "Sign in with Microsoft": the authorization-code flow run by this worker ----
+// The report gate links straight to /login/microsoft; nobody sees a Cloudflare
+// page. Same shape as avalon-aaps' functions/api/oauth/{login,callback}.js:
+//   GET /login/microsoft?to=<path>  302 to Microsoft; state + nonce + to ride in
+//                                   a 10-minute __Host cookie (HttpOnly, Lax)
+//   GET /_auth/callback?code&state  exchanges the code as a confidential client,
+//                                   verifies the id_token against Microsoft's
+//                                   JWKS (RS256/kid) plus aud = MS_CLIENT_ID,
+//                                   iss = https://login.microsoftonline.com/<tid>/v2.0,
+//                                   exp/nbf, the nonce, refuses guest (#EXT#)
+//                                   accounts, then maps the email and sets the
+//                                   session exactly like the Access path.
+// Config: MS_CLIENT_ID + MS_CLIENT_SECRET (the Entra app registration "Avalon
+// report sign-in", multi-tenant, redirect https://<report host>/_auth/callback).
+// MS_TENANT (optional) pins one directory; default "organizations" = any work
+// or school account, which is what lets a client sign in with their own
+// company's Microsoft login. Personal Microsoft accounts are refused by Entra
+// for a multi-tenant-organizations app.
+const MS_TENANT_DEFAULT = "organizations";
+const MS_SCOPE = "openid email profile";
+const OAUTH_COOKIE = "__Host-report_oauth";
+const OAUTH_TTL_S = 600;
+const TENANT_ID_RE = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+const msConfigured = (env) => typeof env.MS_CLIENT_ID === "string" && env.MS_CLIENT_ID !== "" && typeof env.MS_CLIENT_SECRET === "string" && env.MS_CLIENT_SECRET !== "";
+const msTenant = (env) => (typeof env.MS_TENANT === "string" && /^[A-Za-z0-9.-]{1,64}$/.test(env.MS_TENANT) ? env.MS_TENANT.toLowerCase() : MS_TENANT_DEFAULT);
+const msBase = (env) => `https://login.microsoftonline.com/${msTenant(env)}`;
+const hexRand = (n) => [...crypto.getRandomValues(new Uint8Array(n))].map((b) => b.toString(16).padStart(2, "0")).join("");
+const oauthCookie = (value, maxAge) => `${OAUTH_COOKIE}=${value}; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`;
+const OAUTH_CLEAR_COOKIE = oauthCookie("", 0);
+const msCallbackUrl = (url) => `${url.origin}/_auth/callback`;
+// GET /login/microsoft?to=…
+function authMsStart(env, url) {
+  const state = hexRand(16), nonce = hexRand(16), to = sanitizeTo(url.searchParams.get("to"));
+  const p = new URLSearchParams({ client_id: env.MS_CLIENT_ID, response_type: "code", redirect_uri: msCallbackUrl(url), response_mode: "query", scope: MS_SCOPE, state, nonce, prompt: "select_account" });
+  return new Response(null, { status: 302, headers: { location: `${msBase(env)}/oauth2/v2.0/authorize?${p}`, "set-cookie": oauthCookie(`${state}.${nonce}.${b64u(utf8(to))}`, OAUTH_TTL_S), "cache-control": "no-store", "x-auth-reason": "ms-start" } });
+}
+// -> { ok:true, email } | { ok:false, reason } ; never logs the token or the email
+async function verifyMsIdToken(idToken, env, nonce) {
+  const parts = typeof idToken === "string" ? idToken.split(".") : [];
+  if (parts.length !== 3) return { ok: false, reason: "bad-token" };
+  let header, payload;
+  try {
+    header = JSON.parse(new TextDecoder().decode(b64uDec(parts[0])));
+    payload = JSON.parse(new TextDecoder().decode(b64uDec(parts[1])));
+  } catch { return { ok: false, reason: "bad-token" }; }
+  if (!isPlainObject(header) || header.alg !== "RS256" || typeof header.kid !== "string" || !isPlainObject(payload)) return { ok: false, reason: "bad-token" };
+  let jwk;
+  try { jwk = await jwksKeyFrom("ms:" + msTenant(env), `${msBase(env)}/discovery/v2.0/keys`, header.kid); }
+  catch (e) { console.log(`auth: microsoft jwks unavailable: ${e && e.message}`); return { ok: false, reason: "jwks-unavailable" }; }
+  if (!jwk || !(await rs256Valid(jwk, parts))) return { ok: false, reason: "bad-signature" };
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.aud !== env.MS_CLIENT_ID) return { ok: false, reason: "bad-audience" };
+  if (typeof payload.tid !== "string" || !TENANT_ID_RE.test(payload.tid)) return { ok: false, reason: "bad-issuer" };
+  if (payload.iss !== `https://login.microsoftonline.com/${payload.tid}/v2.0`) return { ok: false, reason: "bad-issuer" };
+  const pinned = msTenant(env);
+  if (pinned !== "organizations" && pinned !== "common" && payload.tid !== pinned) return { ok: false, reason: "wrong-tenant" };
+  if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp) || payload.exp <= now) return { ok: false, reason: "expired" };
+  if (payload.nbf !== undefined && !(typeof payload.nbf === "number" && payload.nbf <= now + 300)) return { ok: false, reason: "expired" };
+  if (typeof payload.nonce !== "string" || !(await safeEqual(payload.nonce, nonce))) return { ok: false, reason: "bad-nonce" };
+  // a guest in some directory carries #EXT# in its UPN and may show any email it likes
+  const upn = typeof payload.preferred_username === "string" ? payload.preferred_username.trim().toLowerCase() : "";
+  if (upn.includes("#ext#")) return { ok: false, reason: "guest-account" };
+  let email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+  if (!email && EMAIL_RE.test(upn)) email = upn;
+  if (!EMAIL_RE.test(email)) return { ok: false, reason: "no-email" };
+  return { ok: true, email };
+}
+// GET /_auth/callback?code&state
+async function authMsCallback(req, env, url, site) {
+  const net = netKey(req, "auth:" + site);
+  const wait = await authLockWait(env, net);
+  if (wait) return authSimplePage(429, "locked", `Too many attempts — try again in ${Math.max(1, Math.ceil(wait / 60))} minutes`);
+  const fail = (status, reason, h1, p) => authSimplePage(status, reason, h1, p, { "set-cookie": OAUTH_CLEAR_COOKIE });
+  if (url.searchParams.get("error")) return fail(400, "ms-error", "Microsoft sign-in was cancelled or failed", "Go back to the report and try again.");
+  const code = url.searchParams.get("code"), state = url.searchParams.get("state");
+  const c = cookieValue(req, OAUTH_COOKIE);
+  const m = typeof c === "string" ? /^([a-f0-9]{32})\.([a-f0-9]{32})\.([A-Za-z0-9_-]{0,700})$/.exec(c) : null;
+  if (!code || typeof code !== "string" || code.length > 4096 || !state || !m || !(await safeEqual(m[1], state)))
+    return fail(400, "bad-state", "Sign-in session expired", "Go back to the report and try Sign in with Microsoft again.");
+  const nonce = m[2];
+  let to = "/";
+  try { to = sanitizeTo(new TextDecoder().decode(b64uDec(m[3]))); } catch { to = "/"; }
+  let tok;
+  try {
+    const tr = await fetch(`${msBase(env)}/oauth2/v2.0/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ client_id: env.MS_CLIENT_ID, client_secret: env.MS_CLIENT_SECRET, grant_type: "authorization_code", code, redirect_uri: msCallbackUrl(url), scope: MS_SCOPE }) });
+    if (!tr.ok) { console.log(`auth: microsoft token exchange HTTP ${tr.status}`); return fail(502, "ms-token", "Could not complete Microsoft sign-in", "Please try again."); }
+    tok = await tr.json();
+  } catch (e) { console.log(`auth: microsoft token exchange failed: ${e && e.message}`); return fail(502, "ms-token", "Could not complete Microsoft sign-in", "Please try again."); }
+  if (!isPlainObject(tok) || typeof tok.id_token !== "string") return fail(502, "ms-token", "Microsoft returned no identity", "Please try again.");
+  const v = await verifyMsIdToken(tok.id_token, env, nonce);
+  if (!v.ok) {
+    if (v.reason !== "jwks-unavailable") lockoutFail(net);
+    console.log(`auth: microsoft login refused (${site}): ${v.reason}`); // never the token, never the email
+    return fail(401, v.reason, "Sign-in could not be verified", "Go back to the report and try Sign in with Microsoft again.");
+  }
+  return finishLogin(req, env, site, net, v.email, to, "microsoft", { "set-cookie": OAUTH_CLEAR_COOKIE });
 }
 // ---- session cookie: base64url(payload JSON) "." base64url(HMAC-SHA256(SESSION_SECRET, payloadB64)) ----
 let sessionKeyCache = { secret: undefined, key: null };
@@ -998,7 +1102,7 @@ async function accessAdmin(env, site, action, body) {
   if (action === "access.get") {
     const a = await readAccess(env, site, true);
     if (a.state === "error") return json({ error: AA_KV_FAILED }, 503);
-    const out = { ok: true, access: a.doc, configured: accessConfigured(a.doc), secrets: { session: !!env.SESSION_SECRET } };
+    const out = { ok: true, access: a.doc, configured: accessConfigured(a.doc), microsoft: msConfigured(env), secrets: { session: !!env.SESSION_SECRET } };
     if (site === "myrx") {
       out.secrets.escrow = !!env.ESCROW_KEY;
       try { out.escrow = await escrowState(env); } catch { return json({ error: AA_KV_FAILED }, 503); }
@@ -1044,11 +1148,18 @@ async function authFetch(req, env, url) {
   const site = AUTH_SITES[url.hostname];
   if (!site) return ajson({ error: "unknown site" }, 404);
   const path = url.pathname, isLogin = path === "/login" || path === "/login/";
-  if (!env.SESSION_SECRET) return isLogin ? authSimplePage(503, "not-configured", "Email sign-in is not set up for this site yet.") : ajson({ error: AUTH_NOT_CONFIGURED }, 503);
-  if (!env.AAPS_DATA) return isLogin ? authSimplePage(500, "kv-failed", "Sign-in is unavailable right now", "Please try again in a moment.") : ajson({ error: "KV not bound" }, 500);
+  const isMs = path === "/login/microsoft" || path === "/login/microsoft/", isCallback = path === "/_auth/callback";
+  const isPage = isLogin || isMs || isCallback;
+  if (!env.SESSION_SECRET) return isPage ? authSimplePage(503, "not-configured", "Sign-in is not set up for this site yet.") : ajson({ error: AUTH_NOT_CONFIGURED }, 503);
+  if (!env.AAPS_DATA) return isPage ? authSimplePage(500, "kv-failed", "Sign-in is unavailable right now", "Please try again in a moment.") : ajson({ error: "KV not bound" }, 500);
   if (isLogin) {
     if (req.method !== "GET") return ajson({ error: "GET only" }, 405);
     return authLogin(req, env, url, site);
+  }
+  if (isMs || isCallback) {
+    if (req.method !== "GET") return ajson({ error: "GET only" }, 405);
+    if (!msConfigured(env)) return authSimplePage(503, "not-configured", "Microsoft sign-in is not set up for this site yet.");
+    return isMs ? authMsStart(env, url) : authMsCallback(req, env, url, site);
   }
   if (path === "/_auth/whoami") {
     if (req.method !== "GET") return ajson({ error: "GET only" }, 405);
@@ -1086,31 +1197,44 @@ async function authLogin(req, env, url, site) {
     console.log(`auth: login refused (${site}): ${v.reason}`); // never the token, never the email
     return authSimplePage(401, v.reason, "Sign-in could not be verified", "Go back to the report and try Sign in with company email again.");
   }
-  const res = resolveAccess(doc, v.email);
+  return finishLogin(req, env, site, net, v.email, sanitizeTo(url.searchParams.get("to")), "access");
+}
+// a verified email -> mapping, session cookie, redirect (or the "not authorized" page)
+async function finishLogin(req, env, site, net, email, to, method, extraHeaders) {
+  const a = await readAccess(env, site);
+  if (a.state === "error") return authSimplePage(503, "kv-failed", "Sign-in is unavailable right now", "Please try again in a moment.", extraHeaders);
+  const res = resolveAccess(a.doc, email);
   if (!res.root && res.slugs.length === 0) {
-    await appendAccessLog(req, env, site, { action: "denied", email: v.email, slug: null });
+    await appendAccessLog(req, env, site, { action: "denied", email, slug: null });
     lockoutFail(net);
     const contact = typeof env.ACCESS_CONTACT === "string" && env.ACCESS_CONTACT.trim() ? env.ACCESS_CONTACT.trim() : "your report administrator";
+    const other = method === "microsoft" ? `/login/microsoft?to=${encodeURIComponent(to)}` : "/cdn-cgi/access/logout";
     return authPage(403, "unmapped", "Not authorized",
       `<h1>This email is not authorized for a report on this site</h1>`
-      + `<p>You signed in as <b>${escHtml(v.email)}</b>.</p>`
+      + `<p>You signed in as <b>${escHtml(email)}</b>.</p>`
       + `<p>Contact ${escHtml(contact)} to request access.</p>`
-      + `<p><a href="/cdn-cgi/access/logout">Use a different email</a> · <a href="/">Back to the report</a></p>`);
+      + `<p><a href="${escHtml(other)}">Use a different email</a> · <a href="/">Back to the report</a></p>`, extraHeaders);
   }
   lockoutReset(net);
-  const cookie = await makeSession(env, site, v.email, res);
-  await appendAccessLog(req, env, site, { action: "login", email: v.email, slug: null });
-  return new Response(null, { status: 302, headers: { location: sanitizeTo(url.searchParams.get("to")), "set-cookie": sessionSetCookie(cookie), "cache-control": "no-store", "x-auth-reason": "ok" } });
+  const cookie = await makeSession(env, site, email, res);
+  await appendAccessLog(req, env, site, { action: "login", email, slug: null });
+  const h = new Headers({ location: to, "cache-control": "no-store", "x-auth-reason": "ok" });
+  for (const [k, v] of Object.entries(extraHeaders || {})) h.append(k, v);
+  h.append("set-cookie", sessionSetCookie(cookie));
+  return new Response(null, { status: 302, headers: h });
 }
 // GET /_auth/whoami -> { ok, configured, signedIn, email?, root?, slugs? } — re-resolved against the LIVE document
 async function authWhoami(req, env, site) {
   const a = await readAccess(env, site);
   if (a.state === "error") return ajson({ error: AA_KV_FAILED }, 503);
-  const configured = accessConfigured(a.doc);
+  // methods: which sign-in buttons the gate may show. "microsoft" needs only the
+  // worker secrets; "email" is the Cloudflare Access path and needs team + AUD.
+  const methods = [...(msConfigured(env) ? ["microsoft"] : []), ...(accessConfigured(a.doc) ? ["email"] : [])];
+  const configured = methods.length > 0;
   const s = await readSession(req, env, site);
-  if (!s) return ajson({ ok: true, configured, signedIn: false });
+  if (!s) return ajson({ ok: true, configured, methods, signedIn: false });
   const res = resolveAccess(a.doc, s.email);
-  return ajson({ ok: true, configured, signedIn: true, email: s.email, root: res.root, slugs: res.slugs });
+  return ajson({ ok: true, configured, methods, signedIn: true, email: s.email, root: res.root, slugs: res.slugs });
 }
 // POST /_auth/key {site:""|"<slug>"} -> { ok, site, pw } for a site the session may open
 async function authKey(req, env, site) {
