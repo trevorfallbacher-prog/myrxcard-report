@@ -19,3 +19,4 @@ tools/sync-worker/.cftoken
 tools/dns/*.txt
 tools/dns/*.zone
 tools/sync-worker/.entra
+tools/sync-worker/.escrowkey

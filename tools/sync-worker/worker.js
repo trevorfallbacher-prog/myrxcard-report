@@ -164,10 +164,29 @@ const b64enc = (u8) => { let bin = ""; for (let i = 0; i < u8.length; i++) bin +
 const FEED_SITE = "https://reports.myrxcard.com";
 const verifiedFeedPw = new Map(); // `${slug}|${pw}` -> expiry ms
 let feedTableId = null; // search_events table id, resolved by name once per isolate
-async function verifyReportPassword(slug, pw) {
+async function verifyReportPassword(env, slug, pw) {
   if (!pw || pw.length > 200) return false;
   const key = slug + "|" + pw, now = Date.now();
   if ((verifiedFeedPw.get(key) || 0) > now) return true;
+  // Fast path: the ESCROW_KEY-sealed copy of the partner vault (myrx:pws-escrow,
+  // see the escrow section) holds every partner password and the master in
+  // isolate memory, so a password it knows is settled by one constant-time
+  // compare. On the Workers Free plan this is the ONLY path that works: the
+  // JS PBKDF2 below costs ~150 ms of CPU against a 10 ms limit and Cloudflare
+  // kills the request (error 1102) before it finishes. A password the escrow
+  // does not know (a site sealed after the last escrow, or no escrow at all)
+  // falls through to the gate-file check so nothing that used to pass is refused.
+  if (env && env.ESCROW_KEY) {
+    const esc = await readEscrow(env, false);
+    if (esc.state === "ok") {
+      const expected = slug ? (Object.prototype.hasOwnProperty.call(esc.passwords, slug) ? esc.passwords[slug] : undefined) : esc.root;
+      if (typeof expected === "string" && expected) {
+        if (!(await safeEqual(pw, expected))) return false;
+        verifiedFeedPw.set(key, now + 15 * 60 * 1000);
+        return true;
+      }
+    }
+  }
   // Partner sites: verify against the tiny /<slug>/gate.enc.json (a few bytes
   // sealed with the same password by build-clients.mjs) — decrypting the
   // multi-MB utilization.enc.json just to check a password cost ~1.1 s CPU on
@@ -197,9 +216,9 @@ async function verifyReportPassword(slug, pw) {
 // slug is hard-coded to "" so a partner password (which decrypts its own
 // /<slug>/utilization.enc.json) can never pass as master. The 15-minute
 // success cache in verifyReportPassword applies here too.
-async function verifyMaster(pw) { return verifyReportPassword("", pw); }
+async function verifyMaster(env, pw) { return verifyReportPassword(env, "", pw); }
 // ---- brute-force lockout, shared by every password-proving route ----
-// Checked BEFORE the ~190 ms PBKDF2 (or the secret compare): 5 failures within
+// Checked BEFORE the escrow compare / PBKDF2 (or the secret compare): 5 failures within
 // 10 minutes lock the caller out for 10 minutes; a MASTER success clears the
 // counter (a client password proving itself under "aa" never does).
 // Keyed by NETWORK + scope, not bare IP: an IPv6 caller is collapsed to its
@@ -906,12 +925,17 @@ async function appendAccessLog(req, env, site, entry) {
 // ---- MyRxCard escrow (KV myrx:pws-escrow) ----
 // The partner vault myrx:pws is sealed under the master password, which this
 // worker cannot open. The admin page decrypts it in the browser and posts the
-// plaintext through pws.escrow; it is resealed here under ESCROW_KEY
+// plaintext through pws.escrow (or `sync-admin-kv.mjs escrow` writes the
+// record straight to KV with the same scheme); it is resealed here under ESCROW_KEY
 // (AES-GCM-256, key = SHA-256(ESCROW_KEY || salt), fresh salt + IV per seal)
 // as {v:1, updatedAt, pwsUpdatedAt, count, enc}. pwsUpdatedAt remembers which
 // myrx:pws record it mirrors, so the admin page can tell "stale" from "ok".
 // Plaintext {v:1, passwords:{slug:pw}, root:<master>} lives only in isolate
 // memory: cached by ciphertext for ACCESS_CACHE_MS, re-decrypted on change.
+// Besides releasing keys to signed-in emails, the escrow is what lets
+// verifyReportPassword() check admin_pw / feed_pw within the Free-plan CPU
+// limit (a compare instead of a 310k-iteration PBKDF2) — so a missing or
+// stale escrow means "master and partner passwords cost a PBKDF2 again".
 async function escrowKey(secret, salt, usages) {
   const s = utf8(secret), material = new Uint8Array(s.length + salt.length);
   material.set(s); material.set(salt, s.length);
@@ -1158,7 +1182,7 @@ export default {
       return json({ ok: true, found: true, doc });
     }
     if (body.admin_pw !== undefined) {
-      const denied = await checkPassword(req, env, "master", async () => (await verifyMaster(String(body.admin_pw || ""))) ? "master" : false);
+      const denied = await checkPassword(req, env, "master", async () => (await verifyMaster(env, String(body.admin_pw || ""))) ? "master" : false);
       if (denied) return denied;
       const action = String(body.action || "");
       if (action === "ping") return json({ ok: true, kv: !!env.AAPS_DATA });
@@ -1429,7 +1453,7 @@ export default {
       // site "" proves the MASTER (same check as admin_pw) — same lockout counter.
       // Either way the password proven here is its scope's own credential
       // (the partner's under "site:<slug>"), so a success clears that counter.
-      const denied = await checkPassword(req, env, slug ? "site:" + slug : "master", async () => (await verifyReportPassword(slug, String(body.feed_pw || ""))) ? "master" : false);
+      const denied = await checkPassword(req, env, slug ? "site:" + slug : "master", async () => (await verifyReportPassword(env, slug, String(body.feed_pw || ""))) ? "master" : false);
       if (denied) return denied;
       // Find the search_events table by NAME through the Metadata API. Never
       // by id: XANO_EVENTS_URL pointed at the Avalon process-events table, and

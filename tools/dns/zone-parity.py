@@ -20,10 +20,14 @@ ACCOUNT = "b8a5fbaaa1c68973ff2775f3cf39cbc0"
 def parse_zone(path):
     """Minimal BIND parser good enough for registrar exports: handles $ORIGIN, $TTL,
     @, relative names, quoted TXT (multi-string), SOA/NS lines (skipped)."""
-    origin = None; ttl = 3600; recs = []
+    origin = None; ttl = 3600; recs = []; in_paren = False
     for raw in open(path, encoding="utf-8", errors="replace"):
         line = raw.split(";")[0].rstrip() if not '"' in raw else raw.rstrip()
         if not line.strip(): continue
+        if in_paren:  # continuation lines of a multi-line (SOA) record
+            if ")" in line: in_paren = False
+            continue
+        if "(" in line and ")" not in line: in_paren = True
         if line.startswith("$ORIGIN"): origin = line.split()[1].rstrip("."); continue
         if line.startswith("$TTL"): ttl = int(re.sub(r"\D", "", line.split()[1]) or 3600); continue
         parts = re.findall(r'"[^"]*"|\S+', line)

@@ -1209,6 +1209,53 @@ check("no myrx:/aa: key ever held a partner password, client password or master 
 r = await call({ admin_pw: TEST_MASTER, action: "brands.list" }, { env: envS }); check("the JSON API is untouched by part 5 (brands.list)", r.status === 200 && r.out.clients.map((c) => c.slug).join(",") === "zeta,aurora,uwhc");
 
 
+// ---------------------------------------------------------------- part 6
+console.log("passwords checked against the escrow (Workers Free CPU limit): a password the escrow knows never fetches a gate file");
+// The gate-file path (JS PBKDF2, ~150 ms CPU) exceeds the Free plan's 10 ms
+// limit, so admin_pw / feed_pw must be settled by the escrow compare whenever
+// the escrow knows the password. Counting fetches of *.enc.json is the proof.
+let gateFetches = 0;
+const prevFetch6 = globalThis.fetch;
+globalThis.fetch = async (url, init) => { if (/^https:\/\/reports\.myrxcard\.com\/.*\.enc\.json$/.test(String(url))) gateFetches++; return prevFetch6(url, init); };
+async function sealTestEscrow(passwords, root) { // the worker's scheme, written straight to KV (what `sync-admin-kv.mjs escrow` does)
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const digest = await crypto.subtle.digest("SHA-256", Buffer.concat([Buffer.from(TEST_ESCROW_KEY), Buffer.from(salt)]));
+  const key = await crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt"]);
+  const data = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(JSON.stringify({ v: 1, passwords, root })));
+  kv.store.set("myrx:pws-escrow", JSON.stringify({ v: 1, updatedAt: new Date().toISOString(), pwsUpdatedAt: null, count: Object.keys(passwords).length,
+    enc: { salt: Buffer.from(salt).toString("base64"), iv: Buffer.from(iv).toString("base64"), data: Buffer.from(data).toString("base64") } }));
+}
+// fresh passwords: the 15-minute success cache from earlier parts must not be what answers
+r = await myrxAdmin("pws.escrow", { passwords: { uwhc: "escrow-uwhc-pw", zeta: "escrow-zeta-pw" }, root: TEST_MASTER }); check("escrow sealed with two partner passwords", r.status === 200 && r.out.count === 2);
+gateFetches = 0;
+r = await call({ feed_pw: "escrow-zeta-pw", site: "zeta" }, { ip: freshIp(), env: { ...envS, ESCROW_KEY: undefined } }); check("without ESCROW_KEY the gate-file path still runs (fetch attempted)", gateFetches >= 1, `${r.status} fetches=${gateFetches}`);
+gateFetches = 0;
+r = await call({ feed_pw: "escrow-zeta-pw", site: "zeta" }, { ip: freshIp(), env: envS }); check("feed_pw with an escrowed partner password -> 200 and NO gate-file fetch", r.status === 200 && gateFetches === 0, `${r.status} fetches=${gateFetches}`);
+r = await call({ feed_pw: "escrow-uwhc-pw", site: "uwhc" }, { ip: freshIp(), env: envS }); check("  second partner likewise", r.status === 200 && gateFetches === 0, `${r.status} fetches=${gateFetches}`);
+r = await call({ feed_pw: "not-the-zeta-pw", site: "zeta" }, { ip: freshIp(), env: envS }); check("  wrong partner password -> 403 bad password, no fetch (a guess the escrow can refuse never costs a PBKDF2)", r.status === 403 && r.out.error === "bad password" && gateFetches === 0, `${r.status} fetches=${gateFetches}`);
+r = await call({ feed_pw: "ESCROW-ZETA-PW", site: "zeta" }, { ip: freshIp(), env: envS }); check("  case matters -> 403", r.status === 403 && gateFetches === 0);
+r = await call({ admin_pw: "not-the-master-" + hex(4), action: "ping" }, { ip: freshIp(), env: envS }); check("admin_pw wrong with an escrow present -> 403, no fetch", r.status === 403 && gateFetches === 0, `${r.status} fetches=${gateFetches}`);
+r = await call({ feed_pw: "whatever", site: "nova" }, { ip: freshIp(), env: envS }); check("a slug the escrow does not hold falls through to the gate-file path (fetch attempted)", gateFetches >= 1, `${r.status} fetches=${gateFetches}`);
+{ // the escrow's root is authoritative for the master: a rotated master must be re-escrowed (sync-admin-kv.mjs escrow) before admin_pw accepts it
+  const freshMaster = "fresh-master-" + hex(6);
+  await sealTestEscrow({ uwhc: "escrow-uwhc-pw" }, freshMaster);
+  r = await myrxAdmin("access.get"); check("  (escrow re-read from KV via access.get)", r.status === 200 && r.out.escrow.count === 1, JSON.stringify(r.out.escrow));
+  gateFetches = 0;
+  r = await call({ admin_pw: freshMaster, action: "ping" }, { ip: freshIp(), env: envS }); check("admin_pw = the escrow's root -> 200 without a gate-file fetch", r.status === 200 && r.out.ok === true && gateFetches === 0, `${r.status} fetches=${gateFetches}`);
+  r = await call({ feed_pw: freshMaster, site: "" }, { ip: freshIp(), env: envS }); check("  feed_pw site '' with that master -> 200, no fetch", r.status === 200 && gateFetches === 0, `${r.status} fetches=${gateFetches}`);
+  await sealTestEscrow({ uwhc: "escrow-uwhc-pw", zeta: "escrow-zeta-pw" }, TEST_MASTER);
+  r = await myrxAdmin("access.get"); check("  (escrow restored: root = test master)", r.status === 200 && r.out.escrow.count === 2);
+}
+{ // the lockout wraps the fast path exactly as it wrapped the PBKDF2 path
+  const ip = freshIp();
+  for (let i = 0; i < 5; i++) r = await call({ feed_pw: "guess-" + i, site: "zeta" }, { ip, env: envS });
+  r = await call({ feed_pw: "escrow-zeta-pw", site: "zeta" }, { ip, env: envS }); check("5 wrong guesses on a partner site -> 429 locked even for the right password", r.status === 429 && r.out.error === "locked", `${r.status}`);
+  r = await call({ feed_pw: "escrow-zeta-pw", site: "zeta" }, { ip: freshIp(), env: envS }); check("  another network is unaffected", r.status === 200);
+}
+check("no myrx:/aa: key holds an escrowed password or the master in clear (part 6)",
+  ![...kv.store.entries()].some(([k, v]) => (k.startsWith("myrx:") || k.startsWith("aa:")) && (v.includes("escrow-uwhc-pw") || v.includes("escrow-zeta-pw") || v.includes(TEST_MASTER))));
+globalThis.fetch = prevFetch6;
+
 globalThis.fetch = realFetch;
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

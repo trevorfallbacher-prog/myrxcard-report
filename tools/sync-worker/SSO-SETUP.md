@@ -54,6 +54,12 @@ present.
 
 ## 2. DNS
 
+Status: `myrxcard.com` moved 2026-09-14 (zone `ce364cf777b5cbfbeaad751cbfb0317a`,
+nameservers dara/malcolm.ns.cloudflare.com; the registration stays at GoDaddy).
+`avalonsaves.com` still at GoDaddy — it carries Microsoft 365 mail, so import
+its GoDaddy zone export with `tools/dns/zone-parity.py` and prove parity
+before touching nameservers.
+
 Move both zones (myrxcard.com, avalonsaves.com) to Cloudflare. For each:
 
 - CNAME `reports` → the GitHub Pages target (`<org>.github.io`), proxied
@@ -66,6 +72,8 @@ Check: the reports still load, `https://reports.myrxcard.com/_auth/whoami`
 returns the GitHub Pages 404 page (no route yet) — that is expected.
 
 ## 3. Worker Routes
+
+Status: the two `reports.myrxcard.com` routes exist (2026-09-14).
 
 Workers & Pages → `myrxcard-sync` → Settings → Domains & Routes → Add → Route.
 Add four routes (zone = the matching zone, failure mode "Fail closed"):
@@ -95,6 +103,11 @@ Zero Trust dashboard (one.dash.cloudflare.com):
   worker change: the worker only ever sees the verified email.
 
 ## 5. Access applications (one per site)
+
+Status: `MyRxCard reports sign-in` exists (app `c67c1ba3-dc4c-4648-b8e1-a0c7320f9c76`,
+domain `reports.myrxcard.com/login`, One-time PIN + Google, policy Everyone) and
+its AUD + team name are stored in `myrx:access` (2026-09-14). Avalon's app waits
+for its zone.
 
 Access → Applications → Add an application → **Self-hosted**:
 
@@ -135,6 +148,27 @@ Open each report's Clients tab (master password) → the **Email sign-in** box:
    passwords to signed-in emails. Later vault changes (rotate / seed) are
    re-escrowed automatically when the Clients tab is opened; the status line
    shows "up to date" / "stale" / "missing".
+
+   The escrow also carries the MyRxCard password checks themselves. This
+   account is on the Workers Free plan (10 ms CPU per request); the report
+   files use a 310k-iteration PBKDF2 that costs ~150 ms in the worker, so
+   `admin_pw` / `feed_pw` died with Cloudflare error 1102 whenever the
+   worker had to derive a key. With the escrow present the worker answers
+   both with a constant-time compare against the escrowed plaintext and
+   only falls back to the PBKDF2 path for a site the escrow does not hold.
+   Consequences:
+   - the escrow's `root` is authoritative for the master: after rotating
+     the master password run `node tools/sync-admin-kv.mjs escrow` FIRST
+     (it writes `myrx:pws-escrow` straight to KV through the Cloudflare API
+     using `tools/sync-worker/.escrowkey` + `.cftoken`, no worker route in
+     the loop), otherwise the new master is refused and the Clients tab
+     cannot re-escrow itself;
+   - `seal-passwords` re-seals the escrow automatically when those two
+     files exist; a "stale" escrow means new partner passwords still fall
+     back to the slow path (and fail with 1102 on the Free plan).
+   - `.escrowkey` holds the exact value bound as the ESCROW_KEY secret
+     (64 hex). Rotating one without the other makes the escrow unreadable
+     ("keys not escrowed yet") until both match again and `escrow` is re-run.
 
 Behind the scenes these are the admin actions `access.get`, `access.put`,
 `access.log` (both sites) and `pws.escrow` (MyRxCard), all master-only.

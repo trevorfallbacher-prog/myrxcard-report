@@ -32,8 +32,20 @@ const SECRETS_PATH = join(__dirname, "clients.secrets.json");
 const CONFIG_ENC = join(REPO_ROOT, "config.enc.json");
 const SYNC_API = process.env.SYNC_API || "https://myrxcard-sync.trevorfallbacher.workers.dev";
 const TIMEOUT_MS = 15000;
+// escrow: written straight to KV through the Cloudflare API (no worker route
+// in the loop, so it also recovers a locked-out master). Same account + KV
+// namespace as sync-worker/wrangler.toml; the key file must hold the exact
+// value bound as the ESCROW_KEY secret.
+const ESCROW_KEY_FILE = join(__dirname, "sync-worker", ".escrowkey");
+const CF_TOKEN_FILE = join(__dirname, "sync-worker", ".cftoken");
+const CF_ACCOUNT = "b8a5fbaaa1c68973ff2775f3cf39cbc0", KV_NAMESPACE = "dadeb13cc98d45a59ccc1cf032b725a6";
 
-const USAGE = `Usage: node sync-admin-kv.mjs <seed-brands [--force] | seal-passwords | verify> [--pw-stdin]
+const USAGE = `Usage: node sync-admin-kv.mjs <seed-brands [--force] | seal-passwords | escrow | verify> [--pw-stdin]
+  escrow          re-seal the worker's escrow copy of the vault (myrx:pws-escrow) straight into KV.
+                  Needed after rotating the master password (the worker checks admin_pw against the
+                  escrow's root, so a new master is refused until the escrow is re-sealed) and whenever
+                  the Clients tab shows the escrow as "stale"/"missing". seal-passwords runs it too.
+                  Requires sync-worker/.escrowkey (= the ESCROW_KEY worker secret) and sync-worker/.cftoken.
   The master password is asked for at a muted prompt. Alternatives:
     --pw-stdin            read it as one line from a piped stdin
     REPORT_PW (env)       read and consumed on start — set it with \`read -rs REPORT_PW; export REPORT_PW\`,
@@ -182,6 +194,8 @@ async function sealPasswords(master) {
   const enc = await encryptJSON({ v: 1, updatedAt, passwords }, master);
   const out = await adminCall(master, "pws.put", { enc });
   console.log(`\nVault sealed: ${Object.keys(passwords).length} password(s), stored at ${out.updatedAt || updatedAt}.`);
+  if (existsSync(ESCROW_KEY_FILE) && existsSync(CF_TOKEN_FILE)) await escrowSeal(master);
+  else console.warn(`! escrow not refreshed (${ESCROW_KEY_FILE} or ${CF_TOKEN_FILE} missing) — the worker keeps serving the OLD passwords to admin_pw/feed_pw/email sign-in until you run: node sync-admin-kv.mjs escrow`);
 }
 
 async function verify(master) {
@@ -210,11 +224,44 @@ async function verify(master) {
   if (missing.length) console.log(`  ! missing: ${missing.join(", ")} — re-run seal-passwords after building those sites`);
 }
 
+// ---- escrow: mirror myrx:pws into myrx:pws-escrow under ESCROW_KEY (the worker's exact scheme) ----
+async function kvValue(method, key, body) {
+  if (!existsSync(CF_TOKEN_FILE)) fail(`${CF_TOKEN_FILE} not found (Cloudflare API token with Workers KV Storage Write).`);
+  const tok = readFileSync(CF_TOKEN_FILE, "utf8").trim();
+  const url = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT}/storage/kv/namespaces/${KV_NAMESPACE}/values/${encodeURIComponent(key)}`;
+  const res = await fetch(url, { method, headers: { authorization: `Bearer ${tok}`, ...(body !== undefined ? { "content-type": "text/plain" } : {}) }, body, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  if (method === "GET" && res.status === 404) return null;
+  if (!res.ok) fail(`KV ${method} ${key} -> HTTP ${res.status}`);
+  return method === "GET" ? res.text() : true;
+}
+async function escrowSeal(master) {
+  if (!existsSync(ESCROW_KEY_FILE)) fail(`${ESCROW_KEY_FILE} not found. Create it and bind the SAME value as the worker secret:\n  (cd sync-worker && openssl rand -hex 32 | tr -d '\\n' > .escrowkey && chmod 600 .escrowkey && npx wrangler secret put ESCROW_KEY < .escrowkey)`);
+  const escrowKey = readFileSync(ESCROW_KEY_FILE, "utf8").trim();
+  if (!/^[0-9a-f]{64}$/.test(escrowKey)) fail(`${ESCROW_KEY_FILE}: expected 64 hex characters.`);
+  const raw = await kvValue("GET", "myrx:pws");
+  if (raw === null) fail("myrx:pws is not in KV yet — run seal-passwords first.");
+  let vault; try { vault = JSON.parse(raw); } catch { fail("myrx:pws is not JSON."); }
+  let plain = null;
+  try { plain = await decryptJSON(vault.enc, master); } catch { /* sealed under another master */ }
+  if (!plain || !plain.passwords) fail("myrx:pws does not decrypt with this master — re-run seal-passwords (it re-seals the vault, then the escrow).");
+  const passwords = plain.passwords;
+  // identical to the worker's sealEscrow(): key = SHA-256(ESCROW_KEY || salt), AES-GCM-256, {v:1, passwords, root}
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const digest = await crypto.subtle.digest("SHA-256", Buffer.concat([Buffer.from(escrowKey), Buffer.from(salt)]));
+  const key = await crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt"]);
+  const data = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(JSON.stringify({ v: 1, passwords, root: master })));
+  const b64 = (buf) => Buffer.from(buf).toString("base64");
+  const rec = { v: 1, updatedAt: new Date().toISOString(), pwsUpdatedAt: typeof vault.updatedAt === "string" ? vault.updatedAt : null, count: Object.keys(passwords).length,
+    enc: { salt: b64(salt), iv: b64(iv), data: b64(data) } };
+  await kvValue("PUT", "myrx:pws-escrow", JSON.stringify(rec));
+  console.log(`Escrow sealed (myrx:pws-escrow): ${rec.count} partner password(s) + the master; mirrors the vault sealed ${rec.pwsUpdatedAt || "?"}. Live within a minute (per-isolate cache).`);
+}
+
 // ---- main ----
 const args = process.argv.slice(2);
 const cmd = args.find((a) => !a.startsWith("--"));
 const flags = new Set(args.filter((a) => a.startsWith("--")));
-const KNOWN = { "seed-brands": ["--force", "--pw-stdin"], "seal-passwords": ["--pw-stdin"], "verify": ["--pw-stdin"] };
+const KNOWN = { "seed-brands": ["--force", "--pw-stdin"], "seal-passwords": ["--pw-stdin"], "escrow": ["--pw-stdin"], "verify": ["--pw-stdin"] };
 if (!cmd || !(cmd in KNOWN)) fail(USAGE, 2);
 for (const f of flags) if (!KNOWN[cmd].includes(f)) fail(`Unknown flag ${f} for ${cmd}\n${USAGE}`, 2);
 
@@ -223,6 +270,7 @@ try {
   const master = await getMaster(flags.has("--pw-stdin"));
   if (cmd === "seed-brands") await seedBrands(master, flags.has("--force"));
   else if (cmd === "seal-passwords") await sealPasswords(master);
+  else if (cmd === "escrow") await escrowSeal(master);
   else await verify(master);
 } catch (e) {
   fail(e && e.message ? e.message : String(e));
