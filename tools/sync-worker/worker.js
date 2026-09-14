@@ -904,6 +904,8 @@ const PROFILES_MAX = 500, PHOTO_MAX = 20000, NAME_MAX = 80;
 const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 const PHOTO_URL_RE = /^data:image\/(?:jpeg|png|gif|webp);base64,[A-Za-z0-9+/]+=*$/;
 const profileCache = new Map(); // site -> { at, users }
+// -> users, or NULL when KV threw (never cached, never mistaken for "empty": a
+// writer that treated it as empty would put one entry back over everyone's)
 async function readProfiles(env, site, fresh) {
   const c = profileCache.get(site), now = Date.now();
   if (!fresh && c && now - c.at < ACCESS_CACHE_MS) return c.users;
@@ -911,7 +913,7 @@ async function readProfiles(env, site, fresh) {
   try {
     const rec = await env.AAPS_DATA.get(site + ":profiles", { type: "json" });
     if (isPlainObject(rec) && isPlainObject(rec.users)) users = rec.users;
-  } catch (e) { console.log(`auth: profiles read failed (${site}): ${e && e.name}`); return c ? c.users : {}; }
+  } catch (e) { console.log(`auth: profiles read failed (${site}): ${e && e.name}`); return null; }
   profileCache.set(site, { at: now, users });
   return users;
 }
@@ -919,7 +921,7 @@ const publicProfile = (p) => (isPlainObject(p) ? { name: typeof p.name === "stri
 async function graphPhoto(accessToken) {
   if (typeof accessToken !== "string" || !accessToken) return "";
   try {
-    const r = await fetch("https://graph.microsoft.com/v1.0/me/photos/48x48/$value", { headers: { authorization: `Bearer ${accessToken}` } });
+    const r = await fetch("https://graph.microsoft.com/v1.0/me/photos/48x48/$value", { headers: { authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(2500) });
     if (!r.ok) return "";
     const type = String(r.headers.get("content-type") || "").split(";")[0].trim().toLowerCase();
     if (!PHOTO_TYPES.has(type)) return "";
@@ -932,6 +934,7 @@ async function graphPhoto(accessToken) {
 async function saveProfile(env, site, email, name, photo) {
   try {
     const users = await readProfiles(env, site, true);
+    if (!users) { console.log(`auth: profile save skipped (${site}): profiles unreadable`); return; }
     const prev = isPlainObject(users[email]) ? users[email] : {};
     const now = new Date().toISOString();
     const cleanName = typeof name === "string" ? name.trim().replace(/\s+/g, " ").slice(0, NAME_MAX) : "";
@@ -984,11 +987,17 @@ async function verifyMsIdToken(idToken, env, nonce) {
   if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp) || payload.exp <= now) return { ok: false, reason: "expired" };
   if (payload.nbf !== undefined && !(typeof payload.nbf === "number" && payload.nbf <= now + 300)) return { ok: false, reason: "expired" };
   if (typeof payload.nonce !== "string" || !(await safeEqual(payload.nonce, nonce))) return { ok: false, reason: "bad-nonce" };
-  // a guest in some directory carries #EXT# in its UPN and may show any email it likes
+  // Identity = the UPN (preferred_username): its domain is one the home tenant
+  // has proven to Microsoft. The `email` claim is whatever a tenant admin typed
+  // into the mail attribute — any tenant could set it to a mapped address — so
+  // it only counts when Entra says the domain is verified (xms_edov, an
+  // optional claim on the app registration). A guest in some directory carries
+  // #EXT# in its UPN and is refused outright.
   const upn = typeof payload.preferred_username === "string" ? payload.preferred_username.trim().toLowerCase() : "";
   if (upn.includes("#ext#")) return { ok: false, reason: "guest-account" };
-  let email = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
-  if (!email && EMAIL_RE.test(upn)) email = upn;
+  let email = EMAIL_RE.test(upn) ? upn : "";
+  const claimed = typeof payload.email === "string" ? payload.email.trim().toLowerCase() : "";
+  if (payload.xms_edov === true && EMAIL_RE.test(claimed)) email = claimed;
   if (!EMAIL_RE.test(email)) return { ok: false, reason: "no-email" };
   const name = typeof payload.name === "string" ? payload.name.trim().replace(/\s+/g, " ").slice(0, NAME_MAX) : "";
   return { ok: true, email, name };
@@ -1012,7 +1021,14 @@ async function authMsCallback(req, env, url, site) {
   try {
     const tr = await fetch(`${msBase(env)}/oauth2/v2.0/token`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ client_id: env.MS_CLIENT_ID, client_secret: env.MS_CLIENT_SECRET, grant_type: "authorization_code", code, redirect_uri: msCallbackUrl(url), scope: MS_SCOPE }) });
-    if (!tr.ok) { console.log(`auth: microsoft token exchange HTTP ${tr.status}`); return fail(502, "ms-token", "Could not complete Microsoft sign-in", "Please try again."); }
+    if (!tr.ok) {
+      let code = "", codes = "";
+      try { const b = await tr.json(); if (isPlainObject(b)) { code = typeof b.error === "string" ? b.error.slice(0, 40) : ""; codes = Array.isArray(b.error_codes) ? b.error_codes.slice(0, 5).join(",") : ""; } } catch { /* not JSON */ }
+      console.log(`auth: microsoft token exchange HTTP ${tr.status} ${code} [${codes}]`); // Entra's error label, never the code or secret
+      if (tr.status === 401 || code === "invalid_client" || code === "unauthorized_client")
+        return fail(502, "ms-secret", "Microsoft sign-in needs attention", "The report administrator must renew the Microsoft client secret (Entra app 'Avalon report sign-in'). Use a password for now.");
+      return fail(502, "ms-token", "Could not complete Microsoft sign-in", "Please try again.");
+    }
     tok = await tr.json();
   } catch (e) { console.log(`auth: microsoft token exchange failed: ${e && e.message}`); return fail(502, "ms-token", "Could not complete Microsoft sign-in", "Please try again."); }
   if (!isPlainObject(tok) || typeof tok.id_token !== "string") return fail(502, "ms-token", "Microsoft returned no identity", "Please try again.");
@@ -1022,8 +1038,11 @@ async function authMsCallback(req, env, url, site) {
     console.log(`auth: microsoft login refused (${site}): ${v.reason}`); // never the token, never the email
     return fail(401, v.reason, "Sign-in could not be verified", "Go back to the report and try Sign in with Microsoft again.");
   }
-  await saveProfile(env, site, v.email, v.name, await graphPhoto(tok.access_token));
-  return finishLogin(req, env, site, net, v.email, to, "microsoft", { "set-cookie": OAUTH_CLEAR_COOKIE });
+  // the profile (name, Graph photo) is stored only once the allow-list admits
+  // this identity — a stranger's sign-in must leave nothing behind
+  const accessToken = tok.access_token;
+  return finishLogin(req, env, site, net, v.email, to, "microsoft", { "set-cookie": OAUTH_CLEAR_COOKIE },
+    async () => saveProfile(env, site, v.email, v.name, await graphPhoto(accessToken)));
 }
 // ---- session cookie: base64url(payload JSON) "." base64url(HMAC-SHA256(SESSION_SECRET, payloadB64)) ----
 let sessionKeyCache = { secret: undefined, key: null };
@@ -1158,7 +1177,9 @@ async function accessAdmin(env, site, action, body) {
     const a = await readAccess(env, site, true);
     if (a.state === "error") return json({ error: AA_KV_FAILED }, 503);
     const out = { ok: true, access: a.doc, configured: accessConfigured(a.doc), microsoft: msConfigured(env), secrets: { session: !!env.SESSION_SECRET }, profiles: {} };
-    for (const [email, p] of Object.entries(await readProfiles(env, site, true))) { const pub = publicProfile(p); if (pub && EMAIL_RE.test(email)) out.profiles[email] = pub; }
+    const allProfiles = await readProfiles(env, site, true);
+    if (!allProfiles) return json({ error: AA_KV_FAILED }, 503);
+    for (const [email, p] of Object.entries(allProfiles)) { const pub = publicProfile(p); if (pub && EMAIL_RE.test(email)) out.profiles[email] = pub; }
     if (site === "myrx") {
       out.secrets.escrow = !!env.ESCROW_KEY;
       try { out.escrow = await escrowState(env); } catch { return json({ error: AA_KV_FAILED }, 503); }
@@ -1178,6 +1199,7 @@ async function accessAdmin(env, site, action, body) {
     if (!EMAIL_RE.test(email)) return json({ error: "email: not a valid address", path: "email" }, 422);
     try {
       const users = await readProfiles(env, site, true);
+      if (!users) return json({ error: AA_KV_FAILED }, 503);
       if (users[email] !== undefined) { delete users[email]; await env.AAPS_DATA.put(site + ":profiles", JSON.stringify({ v: 1, users })); profileCache.set(site, { at: Date.now(), users }); }
     } catch { return json({ error: AA_KV_FAILED }, 503); }
     return json({ ok: true });
@@ -1265,7 +1287,7 @@ async function authLogin(req, env, url, site) {
   return finishLogin(req, env, site, net, v.email, sanitizeTo(url.searchParams.get("to")), "access");
 }
 // a verified email -> mapping, session cookie, redirect (or the "not authorized" page)
-async function finishLogin(req, env, site, net, email, to, method, extraHeaders) {
+async function finishLogin(req, env, site, net, email, to, method, extraHeaders, onMapped) {
   const a = await readAccess(env, site);
   if (a.state === "error") return authSimplePage(503, "kv-failed", "Sign-in is unavailable right now", "Please try again in a moment.", extraHeaders);
   const res = resolveAccess(a.doc, email);
@@ -1281,6 +1303,7 @@ async function finishLogin(req, env, site, net, email, to, method, extraHeaders)
       + `<p><a href="${escHtml(other)}">Use a different email</a> · <a href="/">Back to the report</a></p>`, extraHeaders);
   }
   lockoutReset(net);
+  if (onMapped) { try { await onMapped(); } catch (e) { console.log(`auth: post-map step failed (${site}): ${e && e.name}`); } } // best effort, never fails the sign-in
   const cookie = await makeSession(env, site, email, res);
   await appendAccessLog(req, env, site, { action: "login", email, slug: null });
   const h = new Headers({ location: to, "cache-control": "no-store", "x-auth-reason": "ok" });
@@ -1299,7 +1322,7 @@ async function authWhoami(req, env, site) {
   const s = await readSession(req, env, site);
   if (!s) return ajson({ ok: true, configured, methods, signedIn: false });
   const res = resolveAccess(a.doc, s.email);
-  const prof = publicProfile((await readProfiles(env, site, false))[s.email]) || { name: "", photo: "", lastLogin: null };
+  const prof = publicProfile(((await readProfiles(env, site, true)) || {})[s.email]) || { name: "", photo: "", lastLogin: null }; // fresh: the chip must show the photo captured seconds ago, on any isolate
   return ajson({ ok: true, configured, methods, signedIn: true, email: s.email, root: res.root, slugs: res.slugs, name: prof.name, photo: prof.photo });
 }
 // POST /_auth/key {site:""|"<slug>"} -> { ok, site, pw } for a site the session may open

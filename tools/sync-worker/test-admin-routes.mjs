@@ -1295,9 +1295,9 @@ r = await auth(MYRX, "/login/microsoft", { method: "POST", body: {}, env: envM }
 r = await auth(WORKERS_DEV, "/login/microsoft", { env: envM }); check("  on the workers.dev host -> 404 unknown site", r.status === 404);
 // callback
 async function msStart(to = "/uwhc/") { const s0 = await auth(MYRX, "/login/microsoft?to=" + encodeURIComponent(to), { env: envM }); return { cookie: oauthCookieOf(s0), ...parseOauth(s0) }; }
-async function msFinish(st, claims, { key, kid = "ms-kid-1", state, ip, tokenStatus = 200, noIdToken = false } = {}) {
+async function msFinish(st, claims, { key, kid = "ms-kid-1", state, ip, tokenStatus = 200, noIdToken = false, tokenBody } = {}) {
   const c = claims.nonce === undefined ? { ...claims, nonce: st.nonce } : claims;
-  msToken = noIdToken ? { status: tokenStatus, body: { access_token: "x" } } : { status: tokenStatus, body: { id_token: await signJwt(c, { kid, key }), access_token: "x" } };
+  msToken = tokenBody ? { status: tokenStatus, body: tokenBody } : noIdToken ? { status: tokenStatus, body: { access_token: "x" } } : { status: tokenStatus, body: { id_token: await signJwt(c, { kid, key }), access_token: "x" } };
   return auth(MYRX, `/_auth/callback?code=CODE123&state=${state || st.state}`, { cookie: st.cookie, env: envM, ip });
 }
 r = await auth(MYRX, "/_auth/callback?code=x&state=y", { env: envM }); check("callback without the oauth cookie -> 400 bad-state", r.status === 400 && r.reason === "bad-state");
@@ -1339,6 +1339,26 @@ r = await auth(MYRX, "/_auth/callback?error=access_denied", { env: envM }); chec
   st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org")); const after = JSON.parse(kv.store.get("myrx:profiles")).users;
   check("profiles capped at 500 (oldest sign-ins evicted, the fresh one kept)", r.status === 302 && Object.keys(after).length === 500 && !!after["nurse@uwhealth.org"], String(Object.keys(after).length));
   r = await myrxAdmin("profile.delete", { email: "big@uwhealth.org" }, { env: envM }); check("profile.delete -> ok and gone", r.status === 200 && r.out.ok === true && !JSON.parse(kv.store.get("myrx:profiles")).users["big@uwhealth.org"]);
+  { // KV unreadable during a sign-in: the sign-in still succeeds and NOBODY's profile is overwritten
+    const snapshot = kv.store.get("myrx:profiles");
+    const envBroken = { ...envM, AAPS_DATA: { ...kv, get: async (k, o) => { if (k === "myrx:profiles") throw new Error("kv down"); return kv.get(k, o); } } };
+    const s0 = await auth(MYRX, "/login/microsoft?to=%2Fuwhc%2F", { env: envBroken }); const st2 = { cookie: oauthCookieOf(s0), ...parseOauth(s0) };
+    msToken = { status: 200, body: { id_token: await signJwt({ ...msClaims("nurse@uwhealth.org"), nonce: st2.nonce }, { kid: "ms-kid-1" }), access_token: "x" } };
+    r = await auth(MYRX, `/_auth/callback?code=CODE123&state=${st2.state}`, { cookie: st2.cookie, env: envBroken });
+    check("profiles KV read throwing -> sign-in still 302, profiles doc untouched (no one-entry overwrite)", r.status === 302 && kv.store.get("myrx:profiles") === snapshot, `${r.status}`);
+    r = await myrxAdmin("access.get", {}, { env: envBroken }); check("  access.get with profiles unreadable -> 503 (never an empty People list)", r.status === 503, `${r.status}`);
+    r = await myrxAdmin("profile.delete", { email: "nurse@uwhealth.org" }, { env: envBroken }); check("  profile.delete with profiles unreadable -> 503, nothing written", r.status === 503 && kv.store.get("myrx:profiles") === snapshot);
+  }
+  { // an expired/rotated client secret is reported as its own reason
+    const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org"), { tokenStatus: 401, tokenBody: { error: "invalid_client", error_description: "AADSTS7000222: The provided client secret keys are expired", error_codes: [7000222] } });
+    check("token endpoint invalid_client -> 502 ms-secret (admin must renew the secret)", r.status === 502 && r.reason === "ms-secret" && r.html.includes("client secret"), `${r.status} ${r.reason}`);
+    check("  the page never echoes the code or secret", !r.html.includes("CODE123") && !r.html.includes("entra-client-secret-test"));
+  }
+  { // whoami reads profiles fresh: a photo written by another isolate shows on the very next call
+    const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org", { name: "Fresh Name" })); const sess = (r.headers.get("set-cookie") || "").split(/,(?=\s*__Host-)/).find((x) => /report_session=/.test(x)).split(";")[0];
+    const doc = JSON.parse(kv.store.get("myrx:profiles")); doc.users["nurse@uwhealth.org"].name = "Edited Elsewhere"; kv.store.set("myrx:profiles", JSON.stringify(doc));
+    r = await auth(MYRX, "/_auth/whoami", { cookie: sess, env: envM }); check("whoami shows a profile changed in KV by another isolate (fresh read, no 60 s lag)", r.out.name === "Edited Elsewhere", r.out.name);
+  }
   r = await myrxAdmin("profile.delete", { email: "not an email" }, { env: envM }); check("profile.delete bad email -> 422", r.status === 422 && r.out.path === "email");
   r = await aaAdmin("profile.delete", { email: "nobody@vault.example" }); check("aa profile.delete (absent) -> ok", r.status === 200 && r.out.ok === true, JSON.stringify(r.out));
 }
@@ -1352,7 +1372,16 @@ r = await auth(MYRX, "/_auth/callback?error=access_denied", { env: envM }); chec
 { const st = await msStart(); r = await msFinish(st, { ...msClaims("nurse@uwhealth.org"), nonce: st.nonce, preferred_username: "nurse_uwhealth.org#EXT#@othertenant.onmicrosoft.com" }); check("guest (#EXT#) account -> 401 guest-account", r.status === 401 && r.reason === "guest-account"); }
 { const st = await msStart(); r = await msFinish(st, { ...msClaims("", { nonce: st.nonce }), email: undefined, preferred_username: "not an email" }); check("no usable email -> 401 no-email", r.status === 401 && r.reason === "no-email"); }
 { const st = await msStart(); const c = { ...msClaims("Nurse@UWHealth.org"), nonce: st.nonce, email: undefined }; r = await msFinish(st, c); check("no email claim but an email-shaped UPN -> accepted, lowercased", r.status === 302 && parseCookie((r.headers.get("set-cookie") || "").split(/,(?=\s*__Host-)/).find((x) => /report_session=/.test(x)).split(";")[0]).payload.email === "nurse@uwhealth.org"); }
-{ const st = await msStart(); r = await msFinish(st, { ...msClaims("stranger@nowhere.example"), nonce: st.nonce }); check("verified but unmapped email -> 403 unmapped page offering another account via /login/microsoft", r.status === 403 && r.reason === "unmapped" && r.html.includes("stranger@nowhere.example") && r.html.includes("/login/microsoft?to=%2Fuwhc%2F"), r.html.slice(0, 200)); }
+{ const st = await msStart(); graphCalls = []; const before = kv.store.get("myrx:profiles") || null;
+  r = await msFinish(st, { ...msClaims("stranger@nowhere.example"), nonce: st.nonce }); check("verified but unmapped email -> 403 unmapped page offering another account via /login/microsoft", r.status === 403 && r.reason === "unmapped" && r.html.includes("stranger@nowhere.example") && r.html.includes("/login/microsoft?to=%2Fuwhc%2F"), r.html.slice(0, 200));
+  check("  a refused stranger leaves NO profile behind and Graph is never asked", (kv.store.get("myrx:profiles") || null) === before && graphCalls.length === 0 && !(before && JSON.parse(before).users["stranger@nowhere.example"]), `graph=${graphCalls.length}`); }
+{ // identity comes from the tenant-verified UPN, never from the free-text email claim
+  let st = await msStart(); r = await msFinish(st, { ...msClaims("nurse@uwhealth.org"), nonce: st.nonce, preferred_username: "intruder@evil.example" });
+  check("email claim = a mapped address but UPN elsewhere -> treated as the UPN -> 403 unmapped", r.status === 403 && r.reason === "unmapped" && r.html.includes("intruder@evil.example") && !r.html.includes("nurse@uwhealth.org"), `${r.status} ${r.reason}`);
+  st = await msStart(); r = await msFinish(st, { ...msClaims("nurse@uwhealth.org"), nonce: st.nonce, preferred_username: "nurse@uwhealth.onmicrosoft.com", xms_edov: true });
+  check("  ...unless Entra vouches for the email's domain (xms_edov) -> 302 as the email", r.status === 302 && r.headers.get("location") === "/uwhc/", `${r.status} ${r.reason}`);
+  st = await msStart(); r = await msFinish(st, { ...msClaims("nurse@uwhealth.org"), nonce: st.nonce, preferred_username: "nurse@uwhealth.onmicrosoft.com", xms_edov: "true" });
+  check("  xms_edov must be boolean true (a string is ignored) -> UPN wins -> 403", r.status === 403 && r.reason === "unmapped", `${r.status} ${r.reason}`); }
 { const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org"), { tokenStatus: 400 }); check("token endpoint 400 -> 502 ms-token", r.status === 502 && r.reason === "ms-token"); }
 { const st = await msStart(); r = await msFinish(st, msClaims("nurse@uwhealth.org"), { noIdToken: true }); check("token endpoint without id_token -> 502 ms-token", r.status === 502 && r.reason === "ms-token"); }
 { // happy path claims are signed under the start's nonce: helper fills it in

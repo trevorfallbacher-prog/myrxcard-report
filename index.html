@@ -5464,16 +5464,20 @@ function peopleRows() {
   const a = clients.access; if (!a) return [];
   const profiles = isPlainObj(clients.profiles) ? clients.profiles : {};
   const rows = new Map();
-  const add = (email) => { if (!rows.has(email)) rows.set(email, { email, admin: false, slugs: [], viaDomain: false, profile: isPlainObj(profiles[email]) ? profiles[email] : null }); return rows.get(email); };
-  for (const e of a.root.emails) add(e).admin = true;
-  for (const [slug, ent] of Object.entries(a.clients)) for (const e of ent.emails) add(e).slugs.push(slug);
-  for (const email of Object.keys(profiles)) {
-    if (rows.has(email)) continue;
-    const dom = email.split("@")[1] || "";
-    const viaRoot = a.root.domains.includes(dom);
-    const viaClients = Object.entries(a.clients).filter(([, ent]) => ent.domains.includes(dom)).map(([slug]) => slug);
-    if (viaRoot || viaClients.length) { const r = add(email); r.viaDomain = true; r.admin = viaRoot; r.slugs = viaClients; }
-  }
+  // named: what this exact address is granted; domainAdmin/domainSlugs: what a company-domain rule grants
+  // regardless of naming (REMOVE cannot take that away; the domain chip can)
+  const add = (email) => {
+    if (!rows.has(email)) {
+      const dom = email.split("@")[1] || "";
+      rows.set(email, { email, admin: false, slugs: [], named: false, domainAdmin: a.root.domains.includes(dom),
+        domainSlugs: Object.entries(a.clients).filter(([, ent]) => ent.domains.includes(dom)).map(([slug]) => slug),
+        profile: isPlainObj(profiles[email]) ? profiles[email] : null });
+    }
+    return rows.get(email);
+  };
+  for (const e of a.root.emails) { const r = add(e); r.admin = true; r.named = true; }
+  for (const [slug, ent] of Object.entries(a.clients)) for (const e of ent.emails) { const r = add(e); r.slugs.push(slug); r.named = true; }
+  for (const email of Object.keys(profiles)) { if (!rows.has(email)) { const r = add(email); if (!r.domainAdmin && !r.domainSlugs.length) rows.delete(email); } }
   const label = (r) => (r.profile && r.profile.name) || r.email;
   return [...rows.values()].sort((x, y) => label(x).localeCompare(label(y)));
 }
@@ -5491,14 +5495,15 @@ function renderPeople() {
     who.appendChild(mkEl("div", "cl-person-name", (p.profile && p.profile.name) || p.email.split("@")[0]));
     who.appendChild(mkEl("div", "cl-person-email", p.email));
     row.appendChild(who);
-    if (p.admin) row.appendChild(mkEl("span", "cl-person-role", "ADMIN · FULL DASHBOARD"));
-    for (const slug of p.slugs) row.appendChild(mkEl("span", "cl-person-role client", clientLabel(slug)));
-    if (p.viaDomain) row.appendChild(mkEl("span", "cl-person-last", "via company domain"));
+    const isAdmin = p.admin || p.domainAdmin;
+    if (isAdmin) row.appendChild(mkEl("span", "cl-person-role", p.admin ? "ADMIN · FULL DASHBOARD" : "ADMIN · VIA COMPANY DOMAIN"));
+    for (const slug of [...new Set([...p.slugs, ...p.domainSlugs])]) row.appendChild(mkEl("span", "cl-person-role client", clientLabel(slug) + (p.slugs.includes(slug) ? "" : " · via domain")));
     if (p.profile && p.profile.lastLogin) row.appendChild(mkEl("span", "cl-person-last", "signed in " + relTime(p.profile.lastLogin)));
     const acts = mkEl("div", "cl-person-acts");
-    if (!p.viaDomain) { const adm = mkEl("button", "iconbtn", p.admin ? "REVOKE ADMIN" : "MAKE ADMIN"); adm.type = "button"; adm.title = p.admin ? "Take away the full dashboard (client reports they are named on stay)" : "Let this person open the full dashboard"; adm.addEventListener("click", () => setPersonAdmin(p.email, !p.admin)); acts.appendChild(adm); }
-    const rm = mkEl("button", "iconbtn danger", p.viaDomain ? "FORGET" : "REMOVE"); rm.type = "button";
-    rm.title = p.viaDomain ? "Forget this person's name and photo (their company domain still allows sign-in)" : "Remove this person from every report on this site";
+    if (!p.domainAdmin) { const adm = mkEl("button", "iconbtn", p.admin ? "REVOKE ADMIN" : "MAKE ADMIN"); adm.type = "button"; adm.title = p.admin ? "Take away the full dashboard (client reports they are named on stay)" : "Let this person open the full dashboard"; adm.addEventListener("click", () => setPersonAdmin(p.email, !p.admin)); acts.appendChild(adm); }
+    const rm = mkEl("button", "iconbtn danger", p.named ? "REMOVE" : "FORGET"); rm.type = "button";
+    rm.title = p.named ? (p.domainAdmin || p.domainSlugs.length ? "Remove this person's named grants and forget their name/photo (a company-domain rule still lets them sign in)" : "Remove this person from every report on this site")
+      : "Forget this person's name and photo (their company-domain rule still lets them sign in)";
     rm.addEventListener("click", () => removePerson(p)); acts.appendChild(rm);
     row.appendChild(acts); host.appendChild(row);
   }
@@ -5507,25 +5512,37 @@ function renderPeople() {
   for (const d of clients.list) sel.appendChild(new Option(d.name, d.slug));
   sel.value = [...sel.options].some((o) => o.value === cur) ? cur : "";
 }
-async function savePeople(next) {
+let peopleQueue = Promise.resolve(); // one writer at a time for the access document
+function withPeopleLock(fn) { const run = peopleQueue.then(fn, fn); peopleQueue = run.catch(() => {}); return run; }
+// mutate(next) edits a payload built from the CURRENT document (after any earlier save settled)
+async function savePeople(mutate, afterSave) {
   const btn = $("cl-people-addbtn"); btn.disabled = true; $("cl-people-err").textContent = "";
-  try { await saveAccess(next); $("cl-status").textContent = ""; renderRootChips(); renderAccessStatus(); renderPeople(); for (const d of clients.list) refreshCardAccess(d.slug); return true; }
-  catch (err) { $("cl-people-err").textContent = "Not saved: " + err.message; return false; }
+  for (const b of $("cl-people-list").querySelectorAll("button")) b.disabled = true;
+  try {
+    await withPeopleLock(async () => { const next = accessPayload(clients.access); mutate(next); await saveAccess(next); });
+    let note = ""; if (afterSave) { try { note = (await afterSave()) || ""; } catch (err) { note = err.message; } }
+    $("cl-status").textContent = ""; renderRootChips(); renderAccessStatus(); renderPeople(); for (const d of clients.list) refreshCardAccess(d.slug);
+    if (note) $("cl-people-err").textContent = note;
+    return true;
+  } catch (err) { $("cl-people-err").textContent = "Not saved: " + err.message; renderPeople(); return false; }
   finally { btn.disabled = false; }
 }
 async function setPersonAdmin(email, admin) {
-  const next = accessPayload(clients.access);
-  next.root.emails = admin ? [...new Set([...next.root.emails, email])].sort() : next.root.emails.filter((e) => e !== email);
-  await savePeople(next);
+  await savePeople((next) => { next.root.emails = admin ? [...new Set([...next.root.emails, email])].sort() : next.root.emails.filter((e) => e !== email); });
 }
 async function removePerson(p) {
-  if (!confirm(p.viaDomain ? `Forget ${p.email}'s name and photo? Their company domain still lets them sign in.` : `Remove ${p.email} from every report on this site?`)) return;
-  const next = accessPayload(clients.access);
-  next.root.emails = next.root.emails.filter((e) => e !== p.email);
-  for (const ent of Object.values(next.clients)) ent.emails = ent.emails.filter((e) => e !== p.email);
-  try { await adminApi("profile.delete", { email: p.email }); if (isPlainObj(clients.profiles)) delete clients.profiles[p.email]; }
-  catch (err) { $("cl-people-err").textContent = "Could not forget the profile: " + err.message; }
-  await savePeople(next);
+  const stillViaDomain = p.domainAdmin || p.domainSlugs.length > 0;
+  const q = p.named
+    ? (stillViaDomain ? `Remove ${p.email}'s named access and forget their name and photo? Their company-domain rule still lets them sign in.` : `Remove ${p.email} from every report on this site?`)
+    : `Forget ${p.email}'s name and photo? Their company-domain rule still lets them sign in.`;
+  if (!confirm(q)) return;
+  await savePeople((next) => {
+    next.root.emails = next.root.emails.filter((e) => e !== p.email);
+    for (const ent of Object.values(next.clients)) ent.emails = ent.emails.filter((e) => e !== p.email);
+  }, async () => { // after the access doc is saved: forget the stored name/photo (reported, never masked)
+    try { await adminApi("profile.delete", { email: p.email }); if (isPlainObj(clients.profiles)) delete clients.profiles[p.email]; return ""; }
+    catch (err) { return "Access removed, but the name/photo could not be forgotten: " + err.message; }
+  });
 }
 async function addPerson(e) {
   e.preventDefault();
@@ -5533,10 +5550,11 @@ async function addPerson(e) {
   if (!clients.access) { err.textContent = "Sign-in settings unavailable"; return; }
   let email; try { email = checkAccessValue("emails", inp.value); } catch (ex) { err.textContent = ex.message; return; }
   const scope = $("cl-people-scope").value;
-  const next = accessPayload(clients.access);
-  if (!scope) next.root.emails = [...new Set([...next.root.emails, email])].sort();
-  else { next.clients[scope] = next.clients[scope] || { domains: [], emails: [] }; next.clients[scope].emails = [...new Set([...next.clients[scope].emails, email])].sort(); }
-  if (await savePeople(next)) inp.value = "";
+  const ok = await savePeople((next) => {
+    if (!scope) next.root.emails = [...new Set([...next.root.emails, email])].sort();
+    else { next.clients[scope] = next.clients[scope] || { domains: [], emails: [] }; next.clients[scope].emails = [...new Set([...next.clients[scope].emails, email])].sort(); }
+  });
+  if (ok) inp.value = "";
 }
 async function saveAccessSetup() {
   if (!clients.access) return;

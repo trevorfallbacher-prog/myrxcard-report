@@ -36,6 +36,27 @@ Setup that exists:
   flow; the one created earlier was deleted so it could not intercept
   `/login/microsoft`.
 
+Identity rule: the worker takes the person's identity from the token's UPN
+(`preferred_username`), whose domain the home tenant has proven to Microsoft.
+The free-text `email` claim (any tenant admin can type any address into the
+mail attribute) is used only when Entra marks its domain verified
+(`xms_edov: true`). Recommended: Entra → the app → **Token configuration** →
+Add optional claim → ID → `xms_edov`, so people whose UPN is
+`x@company.onmicrosoft.com` but whose mail is `x@company.com` are recognised
+by the mail address. Guests (`#EXT#` UPNs) are refused.
+
+Profiles: after a sign-in the allow-list admits, the worker stores the
+person's display name (token) and 48 px photo (Microsoft Graph, ≤ 20 KB, only
+jpeg/png/gif/webp) under KV `<site>:profiles` (≤ 500 people, oldest sign-ins
+evicted). Refused strangers leave nothing behind. `/_auth/whoami` returns
+name + photo for the account chip; `access.get` returns all profiles for the
+People panel; `profile.delete {email}` forgets one. A KV read failure never
+overwrites the profiles document (writes are skipped, admin reads answer 503).
+
+If the token exchange answers `invalid_client`/401 (the client secret expired
+or was rotated without updating MS_CLIENT_SECRET) the login page says
+"Microsoft sign-in needs attention" (`x-auth-reason: ms-secret`).
+
 Rotating the secret: Entra → the app → Certificates & secrets → new secret →
 `printf '%s' '<value>' | npx wrangler secret put MS_CLIENT_SECRET` (and update
 line 3 of `.entra`), then delete the old secret.
