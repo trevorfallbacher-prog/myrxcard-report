@@ -1,4 +1,58 @@
-# "Sign in with company email" — operator setup
+# Sign-in for the report sites — operator setup
+
+## What is live (2026-09-14): "Sign in with Microsoft", first-party
+
+The report gate on reports.myrxcard.com shows a white **Sign in with
+Microsoft** button under the password box (same look as the pricing search
+gate). It links to `/login/microsoft?to=<path>` on the report hostname; the
+sync worker runs the Entra authorization-code flow itself and nobody sees a
+Cloudflare page:
+
+1. `GET /login/microsoft` → 302 to
+   `https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize`
+   (state + nonce + `to` in a 10-minute `__Host-report_oauth` cookie).
+2. Microsoft sends the user back to `GET /_auth/callback?code&state`; the
+   worker exchanges the code (confidential client, MS_CLIENT_SECRET), verifies
+   the id_token against Microsoft's JWKS (RS256/kid; aud = MS_CLIENT_ID;
+   iss = `https://login.microsoftonline.com/<tid>/v2.0`; exp; nonce; guest
+   `#EXT#` accounts refused), maps the email through `myrx:access` (same
+   root/client domains + people as before) and sets the 12 h session cookie.
+3. The page calls `/_auth/whoami` (now `{configured, methods:["microsoft"],…}`)
+   and `/_auth/key` exactly as before.
+
+Setup that exists:
+- Entra app registration **Avalon report sign-in** in the Avalon Healthcare
+  tenant (`e73d5930-…`): client id `79a9200c-a084-4fee-ac29-4cbdf3617346`,
+  **Multiple Entra ID tenants**, Web redirect URIs
+  `https://reports.myrxcard.com/_auth/callback` (add
+  `https://reports.avalonsaves.com/_auth/callback` when that site moves),
+  delegated Graph permissions openid / email / profile / offline_access with
+  admin consent. Secret expires 24 months after creation.
+- Worker secrets `MS_CLIENT_ID`, `MS_CLIENT_SECRET` (optional var `MS_TENANT`
+  to pin one directory; default `organizations` = any work account). Local
+  copy: `tools/sync-worker/.entra` (tenant / client id / secret, gitignored).
+- Worker Routes `reports.myrxcard.com/login*` and `/_auth/*` (zone on
+  Cloudflare, `reports` proxied). No Access application is needed for this
+  flow; the one created earlier was deleted so it could not intercept
+  `/login/microsoft`.
+
+Rotating the secret: Entra → the app → Certificates & secrets → new secret →
+`printf '%s' '<value>' | npx wrangler secret put MS_CLIENT_SECRET` (and update
+line 3 of `.entra`), then delete the old secret.
+
+Caveat: the app has no verified publisher, so the first person from another
+company sees Microsoft's "Need admin approval" prompt until their IT admin
+consents once. Verifying the publisher (Microsoft Partner Network ID) removes
+that step.
+
+Everything below describes the OPTIONAL Cloudflare Access path ("Sign in with
+company email": one-time email codes / Google through Cloudflare's hosted
+login page). It stays in the worker but is switched off for MyRxCard
+(`myrx:access` has no team/AUD, so the gate does not show that button).
+
+---
+
+# "Sign in with company email" — Cloudflare Access (optional path)
 
 Cloudflare Access (one-time email code now, Google / Microsoft SSO later)
 lets a client open their report on reports.myrxcard.com or
