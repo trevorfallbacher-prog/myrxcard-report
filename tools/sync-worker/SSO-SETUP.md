@@ -102,6 +102,24 @@ Zero Trust dashboard (one.dash.cloudflare.com):
   Google / Microsoft (or any SAML/OIDC IdP) can be added here later with no
   worker change: the worker only ever sees the verified email.
 
+  Status 2026-09-14: One-time PIN, Google and **Microsoft** exist. Microsoft is
+  a generic OpenID Connect login method (IdP id
+  `effcfd22-755b-45ca-bf01-44af00b9c49e`) pointed at the multi-tenant
+  `login.microsoftonline.com/organizations/...` endpoints — Cloudflare's native
+  Entra option is pinned to ONE directory, and clients must sign in with their
+  own companies' Microsoft accounts. Backed by the Entra app registration
+  "Avalon report sign-in" in the Avalon Healthcare tenant (client id
+  `79a9200c-a084-4fee-ac29-4cbdf3617346`, multi-tenant, redirect
+  `https://holy-bonus-7269.cloudflareaccess.com/cdn-cgi/access/callback`,
+  delegated Graph permissions openid/email/profile/offline_access with admin
+  consent). The client secret expires 24 months after creation: make a new one
+  in Entra, update the IdP's client_secret (dashboard or API), then delete
+  the old. Local copy of tenant/client/secret: `tools/sync-worker/.entra`
+  (gitignored). Caveat: the app has no verified publisher, so the first user
+  from another company sees "Need admin approval" until that company's IT
+  admin consents once (verifying the publisher via a Microsoft Partner
+  Network ID removes this).
+
 ## 5. Access applications (one per site)
 
 Status: `MyRxCard reports sign-in` exists (app `c67c1ba3-dc4c-4648-b8e1-a0c7320f9c76`,
