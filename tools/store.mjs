@@ -70,10 +70,25 @@ export function publish(message, { encrypted } = {}) {
   try {
     const changed = git("status", "--porcelain", file);
     if (!changed) return { ok: true, msg: "no change to publish" };
+    // Resync with origin first (2026-09-21). Cloud sessions push code commits to main; if this clone falls behind, every
+    // push is rejected and the site silently stops updating. The only local commits are machine-generated data commits
+    // whose content is already inside the store file we are about to publish, so: keep the new store bytes, hard-reset
+    // the branch onto origin/main, put the store back, then commit on top of the current remote head.
+    let synced = "";
+    try {
+      git("fetch", "origin");
+      const behind = git("rev-list", "--count", "HEAD..origin/main");
+      if (behind !== "0") {
+        const bytes = readFileSync(join(REPO_ROOT, file));
+        git("reset", "--hard", "origin/main");
+        writeFileSync(join(REPO_ROOT, file), bytes);
+        synced = ` (resynced onto origin/main, ${behind} commits behind)`;
+      }
+    } catch (e) { synced = ` (resync skipped: ${(e.stderr || e.message || "").toString().trim().split("\n")[0]})`; }
     git("add", file);
     git("commit", "-m", message);
     git("push");
-    return { ok: true, msg: `pushed ${file} to origin` };
+    return { ok: true, msg: `pushed ${file} to origin${synced}` };
   } catch (e) {
     const out = (e.stdout || "") + (e.stderr || "") + e.message;
     return { ok: false, msg: out.trim() };
